@@ -1,0 +1,72 @@
+# Default LLM provider to use if not specified by user session
+# Options: "ollama", "gemini"
+default_provider: "ollama"
+
+# Default model for Ollama (user can override with /set_ollama_model)
+# Ensure this model exists in your Ollama setup
+default_ollama_model: "qwq"
+
+# Default model for Gemini (used for regular chat when provider is gemini)
+# Using gemini-1.5-pro-latest as a stable, generally available model.
+# Adjust if you have access to specific experimental models.
+default_gemini_model: "gemini-1.5-pro-latest"
+
+# List of Gemini models to query with /ask_all_gemini
+# Ensure these models are available for your API key
+gemini_ask_all_models:
+  - "gemini-1.5-pro-latest"
+  - "gemini-1.5-flash-latest"
+  # Add other models like "gemini-1.0-pro" if needed
+
+# Path to store session data (relative to project root)
+session_file_path: "data/sessions.json"
+
+# Default timeout for LLM API requests in seconds
+REQUEST_TIMEOUT_SECONDS: 180
+
+# Add other configurations as needed
+# openrouter_api_key is now managed via .env file
+openrouter_allowed_models:
+  - "llama-2-70b"
+  - "mistral-7b"
+  - "stability-ai/stablelm-tuned-alpha-7b"
+  # Add more free models here
+default_openrouter_model: "llama-2-70b"
+
+# google_api_key is legacy and managed via .env (GEMINI_API_KEY_*)
+# e.g., allowed chat IDs, admin user IDs, etc.
+# allowed_chat_ids:
+#   - 123456789
+#   - -987654321
+
+# --- Custom OpenAI-Compatible Providers ---
+# Define additional providers that use an OpenAI-compatible API structure.
+# The API key for each provider must be set in the .env file following the
+# convention: PROVIDERNAME_API_KEY (e.g., GROQ_API_KEY).
+custom_openai_providers:
+  - name: "groq" # Unique identifier for the provider
+    base_url: "https://api.groq.com/openai/v1" # API endpoint base URL
+    default_model: "llama3-8b-8192" # Default model for this provider
+    allowed_models: # Optional: List of models users can select with /set_model
+      - "llama3-8b-8192"
+      - "mixtral-8x7b-32768"
+      - "gemma-7b-it"
+  - name: "requesty" # Unique identifier
+    base_url: "https://router.requesty.ai/v1" # API endpoint base URL
+    default_model: "openai/gpt-4o" # Default model for this provider
+    allowed_models: # Optional: List of models users can select
+      - "openai/gpt-4o"
+      - "openai/gpt-3.5-turbo"
+      # Add other models supported by Requesty if known/desired
+  - name: "nvidia"
+    base_url: "https://integrate.api.nvidia.com/v1" # API endpoint base URL
+    default_model: "nvidia/llama-3.1-nemotron-ultra-253b-v1" # Default model for this provider
+    # allowed_models: # Optional: List of models users can select
+    #   - "nvidia/llama-3.1-nemotron-ultra-253b-v1"
+    #   - "qwen/qwq-32b"
+      # Add other models supported by Requesty if known/desired
+  # - name: "another_provider"
+  #   base_url: "https://api.anotherprovider.com/v1"
+  #   default_model: "some-model-v2"
+  #   allowed_models:
+  #     - "some-model-v2"

@@ -1,0 +1,9 @@
+python-telegram-bot[ext]>=20.0
+python-dotenv
+PyYAML
+ollama
+google-generativeai
+httpx
+openai>=1.0.0 # Add OpenAI library for compatible APIs
+aiofiles
+tiktoken
