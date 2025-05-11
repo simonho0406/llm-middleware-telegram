@@ -1,8 +1,10 @@
 import json
 import os
 import logging
+import traceback
 import asyncio
-from typing import Dict, Any, Optional, List # Import List
+from datetime import datetime
+from typing import Dict, Any, Optional, List
 import config
 
 logger = logging.getLogger(__name__)
@@ -26,42 +28,76 @@ _DEFAULT_THREAD_ID = "default"
 def _load_sessions_from_file() -> None:
     """Loads all sessions from the JSON file into the memory cache."""
     global _sessions
-    if not os.path.exists(config.SESSION_FILE_PATH):
-        logger.info(f"Session file '{config.SESSION_FILE_PATH}' not found. Starting with empty sessions.")
+    file_path = config.SESSION_FILE_PATH
+    
+    if not os.path.exists(file_path):
+        logger.info(f"Session file '{file_path}' not found. Starting with empty sessions.")
         _sessions = {}
         return
-    try:
-        with open(config.SESSION_FILE_PATH, 'r') as f:
-            content = f.read()
-            if not content.strip(): # Handle empty file
-                 _sessions = {}
-                 logger.info(f"Session file '{config.SESSION_FILE_PATH}' is empty.")
-            else:
-                 loaded_data = json.loads(content)
-                 # Ensure data is dict and keys are integers
-                 _sessions = {int(k): v for k, v in loaded_data.items()}
-                 logger.info(f"Loaded {_sessions.__len__()} sessions from '{config.SESSION_FILE_PATH}'.")
-    except json.JSONDecodeError as e:
-        logger.error(f"Error decoding JSON from session file '{config.SESSION_FILE_PATH}': {e}. Starting with empty sessions.")
-        _sessions = {} # Avoid corrupting data
-    except Exception as e:
-        logger.error(f"Failed to load sessions from '{config.SESSION_FILE_PATH}': {e}. Starting with empty sessions.")
-        _sessions = {}
 
+    logger.debug(f"Attempting to load sessions from {file_path}")
+    file_size = os.path.getsize(file_path)
+    modified_time = datetime.fromtimestamp(os.path.getmtime(file_path)).isoformat()
+    logger.debug(f"Session file metadata - Size: {file_size} bytes, Modified: {modified_time}")
+
+    try:
+        with open(file_path, 'r') as f:
+            content = f.read()
+            if not content.strip():
+                logger.warning("Session file is empty")
+                _sessions = {}
+                return
+
+            loaded_data = json.loads(content)
+            _sessions = {int(k): v for k, v in loaded_data.items()}
+            
+            # Log structural integrity checks
+            logger.info(f"Loaded {len(_sessions)} chats from session file")
+            for chat_id in list(_sessions.keys())[:3]:  # Sample first 3 chats
+                chat_data = _sessions[chat_id]
+                logger.debug(f"Chat {chat_id} structure: current_thread_id={chat_data.get('current_thread_id')}, "
+                            f"threads={len(chat_data.get('threads', {}))} threads")
+                
+                # Verify current_thread_id exists in threads
+                current_id = chat_data.get('current_thread_id')
+                if current_id and current_id not in chat_data.get('threads', {}):
+                    logger.error(f"Invalid current_thread_id '{current_id}' in chat {chat_id} - not found in threads")
+
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode failed: {e}\n{traceback.format_exc()}")
+        _sessions = {}
+    except Exception as e:
+        logger.error(f"Critical load failure: {e}\n{traceback.format_exc()}")
+        _sessions = {}
 import aiofiles
 
 async def _save_sessions_to_file() -> None:
-    """Saves the current in-memory sessions to the JSON file."""
+    """Saves the current in-memory sessions to the JSON file atomically."""
+    temp_path = f"{config.SESSION_FILE_PATH}.tmp"
     try:
-        # Copy sessions under lock to avoid race conditions, but do file I/O outside lock
+        # Copy sessions under lock to avoid race conditions
         async with _lock:
             sessions_to_save = {str(k): v for k, v in _sessions.items()}
-        async with aiofiles.open(config.SESSION_FILE_PATH, 'w') as f:
-            await f.write(json.dumps(sessions_to_save, indent=4))
-            await f.flush()  # Ensure data is flushed to disk
-        logger.info(f"Saved sessions to '{config.SESSION_FILE_PATH}'.")
+            total_chats = len(sessions_to_save)
+            total_threads = sum(len(chat.get('threads', {})) for chat in sessions_to_save.values())
+
+        # Write to temporary file first
+        async with aiofiles.open(temp_path, 'w') as f:
+            content = json.dumps(sessions_to_save, indent=4)
+            await f.write(content)
+            await f.flush()
+            
+        # Atomically replace the old file
+        await asyncio.to_thread(os.replace, temp_path, config.SESSION_FILE_PATH)
+        logger.info(
+            f"Saved {total_chats} chats with {total_threads} total threads to '{config.SESSION_FILE_PATH}'"
+            f" ({len(content)} bytes)"
+        )
     except Exception as e:
-        logger.error(f"Failed to save sessions to '{config.SESSION_FILE_PATH}': {e}")
+        logger.error(f"Session save failed: {e}\n{traceback.format_exc()}")
+        # Clean up temporary file if it exists
+        if await asyncio.to_thread(os.path.exists, temp_path):
+            await asyncio.to_thread(os.remove, temp_path)
 
 async def get_session(chat_id: int) -> Dict[str, Any]:
     """

@@ -152,6 +152,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     try:
         logger.info(f"{log_prefix}Starting LLM generation...")
         context_history = await file_storage.get_thread_key(chat_id, 'history', [])
+        # Log history state before generation
+        logger.info(f"{log_prefix}Loading history for thread {current_thread_id}")
+        context_history = await file_storage.get_thread_key(chat_id, 'history', [])
+        logger.debug(f"{log_prefix}Loaded history with {len(context_history)} entries. Sample: {context_history[-2:] if len(context_history) >=2 else context_history}")
+        
         async for chunk in service.generate_response(model=model_to_use, prompt=message_text, context_history=context_history):
             if chunk.startswith("[Error:") or chunk.startswith("Error:"): # More flexible error check
                 logger.error(f"{log_prefix}LLM service reported an error in a chunk: {chunk}")
@@ -368,7 +373,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 {'role': 'assistant', 'content': raw_full_llm_response.strip()}
             ])
             await file_storage.set_thread_key(chat_id, 'history', current_history)
-            logger.debug(f"{log_prefix}History updated successfully.")
+            logger.info(f"{log_prefix}History updated to {len(current_history)} entries. Newest: {current_history[-1]['role'] if current_history else 'none'}")
         except Exception as e_hist:
             logger.error(f"{log_prefix}Failed to update history: {e_hist}")
 
