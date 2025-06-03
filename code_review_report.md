@@ -99,41 +99,43 @@ The codebase is generally well-structured, utilizing Python's `asyncio` for asyn
 
 * **Issue:** The current implementation reads and writes the *entire* `sessions.json` file on almost every update (setting model, provider, history, creating/deleting threads). This is a major scalability bottleneck and performance risk, especially as conversation history grows or user count increases.
 * **Risk:** High potential for slow response times, high I/O load, and potential data corruption if the bot crashes during a write operation. Memory usage could also become an issue with many users.
-* **Recommendation:** ✅ Implemented
-  * **Replaced JSON file storage** with SQLite using `aiosqlite` for better concurrency and reliability
-  * **Optimized writes** using atomic operations and batched updates
-  * **Enhanced locking** with database transaction isolation
+* **Recommendation:** ❌ Not Implemented
+  * The code still uses a single JSON file (`sessions.json`) for all chat session and thread data
+  * No SQLite or database backend has been implemented
+  * No atomic operations or database transaction isolation
 
 ### 2. Context Window Management (`bot/handlers/chat.py`)
 
 * **Issue:** Conversation history (`context_history`) is truncated based on a fixed number of messages (`[-19:]`) rather than token count.
 * **Risk:** Easily exceeds the actual token limit of the selected LLM, leading to API errors or unexpected behavior.
-* **Recommendation:** ✅ Implemented
-  * **Token-based truncation** using `tiktoken` with provider-specific adapters
-  * Comprehensive testing completed for all supported LLM providers
+* **Recommendation:** ❌ Not Implemented
+  * No token-based truncation using `tiktoken` or any token counting library
+  * No dynamic handling of different model token limits
 
 ### 3. Redundant Command Handlers (`ollama_commands.py`, etc.)
 
 * **Issue:** Provider-specific command handlers duplicate functionality of generic commands in `misc_commands.py`.
 * **Risk:** Increased complexity, maintenance overhead, and potential inconsistencies.
-* **Recommendation:** ✅ Implemented
-  * **Removed provider-specific handlers** and consolidated all commands in `misc_commands.py`
-  * Added dynamic command registration based on active providers
+* **Recommendation:** ❌ Not Implemented
+  * Provider-specific command handlers are still present and imported
+  * The code still has redundant functionality between provider-specific handlers and generic handlers
 
 ### 4. Configuration (`config.py`, `config.yaml`)
 
 * **Issue:** Missing/invalid `config.yaml` results in an empty config. `ALLOWED_CHAT_IDS` defaults to `None` (allow all).
 * **Risk:** Bot might run with unexpected defaults. Default allow-all chats might be insecure.
-* **Recommendation:** ✅ Implemented
-  * Added **schema validation** for config.yaml using Pydantic
-  * Implemented strict `ALLOWED_CHAT_IDS` handling with audit logging
+* **Recommendation:** ✅ Partially Implemented
+  * Schema validation has been implemented for config.yaml
+  * However, the HTTP-Referer for OpenRouter is still hardcoded in openrouter_service.py
+  * No environment variable for HTTP-Referer has been implemented
 
 ### 5. Error Handling & Logging
 
 * **Issue:** Complex error handling for message edits. Logging is good but could be more structured.
-* **Recommendation:** ✅ Implemented
-  * Implemented structured logging with **thread IDs** and **session context**
-  * Simplified error handling using decorators
+* **Risk:** Difficult to trace issues in production; complex error handling can be prone to bugs.
+* **Recommendation:** ❌ Not Fully Implemented
+  * While logging is present, it doesn't consistently include chat_id, user_id, and thread_id
+  * The message sending/editing logic is still very complex with nested try-except blocks
 
 ### 6. Minor Issues
 
