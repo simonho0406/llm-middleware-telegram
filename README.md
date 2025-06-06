@@ -94,7 +94,7 @@ Interact with your bot in Telegram:
 *   **Cause:** JSON file storage becomes inefficient with large conversation histories
 *   **Impact:** Slower response times as session data grows
 *   **Mitigation:**
-    *   Atomic saves to JSON are implemented, but a database backend is recommended for true scalability
+    *   Uses sessions.json with atomic saves. Migration to a database backend (e.g., SQLite) is the top priority for true scalability and performance.
 
 ### 2. Redundant Handlers
 *   **Cause:** Multiple command handlers performing similar validation checks
@@ -138,12 +138,17 @@ Interact with your bot in Telegram:
     *   Avoid unnecessary edits.
     *   Respect Telegram rate limits.
 
-### 7. LLM Context Management
-*   **Cause:** Uses a global token limit for history truncation
+### 7. Context Window Management
+*   **Cause:** Global token-based history truncation is implemented using default_max_context_tokens
 *   **Impact:** May not account for model-specific context window sizes
 *   **Mitigation:**
-    *   Uses a globally configurable token limit (`default_max_context_tokens`)
     *   Future enhancement: model-specific context window management
+
+### 8. Gemini Context Recall Issues
+*   **Cause:** When using the Gemini provider, the LLM may occasionally not recall earlier parts of the current conversation thread, particularly after a provider switch or if unrelated API errors occurred previously in the thread.
+*   **Impact:** Inconsistent conversation history for Gemini
+*   **Mitigation:**
+    *   This is under active investigation
 
 ## Additional Reminders
 
@@ -170,11 +175,15 @@ Interact with your bot in Telegram:
 
 ## To-Do List
 
-1.  **Input Validation:** Add schema validation for custom provider configurations in config.yaml
-2.  **Handler Refactoring:** Consolidate common command validation logic into base classes
-3.  **Session Encryption:** Implement secure storage for sensitive session data
-4.  **Documentation Updates:** Expand configuration examples for custom providers and troubleshooting guides.
-5.  **Model-Specific Context:** Implement per-model context window size management
+1.  **Migrate session storage to a database (e.g., SQLite):** Top priority for true scalability and performance
+2.  **Diagnose and fix Gemini context recall issues:** Under active investigation
+3.  **Implement Pydantic validation for config.yaml:** Ensure configuration integrity
+4.  **Enhance error handling and user feedback for LLM API responses:** Provide clearer error messages to users
+5.  **Input Validation:** Add schema validation for custom provider configurations in config.yaml
+6.  **Handler Refactoring:** Consolidate common command validation logic into base classes
+7.  **Session Encryption:** Implement secure storage for sensitive session data
+8.  **Documentation Updates:** Expand configuration examples for custom providers and troubleshooting guides
+9.  **Model-Specific Context Management (future enhancement):** Implement per-model context window size management
 
 ## Contributing
 

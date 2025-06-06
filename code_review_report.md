@@ -138,6 +138,25 @@ The codebase is generally well-structured, utilizing Python's `asyncio` for asyn
 * **Hardcoded Referer:** Moved to configurable environment variables
 * **Markdown Version:** Standardized on Markdown v2 with proper escaping
 
+### Current Review (June 6, 2025)
+
+**Progress:**
+- Successful consolidation of model handlers
+- Implementation of global token-based history truncation
+
+**Priorities:**
+- Session Storage: "Partially Implemented - Core JSON Bottleneck Remains"
+- Gemini Context Amnesia: "Under investigation (high priority)"
+
+**Other Updates:**
+- Error Handling: "Ongoing improvement (medium priority)"
+- Configuration: "Pydantic validation pending (medium priority)"
+- Context Management: "Future enhancement (medium-low priority)"
+- ask_selected_handler: "Low-priority future enhancement"
+
+**Conclusion:**
+The project has made significant progress in key areas, with model handler consolidation and token management now fully operational. Current focus remains on resolving the session storage bottleneck and investigating the Gemini context amnesia issue. Other enhancements are scheduled according to their priority levels, with configuration validation and error handling improvements underway.
+
 ## Conclusion
 
 **Documentation Updates:**
