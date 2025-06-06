@@ -99,43 +99,38 @@ The codebase is generally well-structured, utilizing Python's `asyncio` for asyn
 
 * **Issue:** The current implementation reads and writes the *entire* `sessions.json` file on almost every update (setting model, provider, history, creating/deleting threads). This is a major scalability bottleneck and performance risk, especially as conversation history grows or user count increases.
 * **Risk:** High potential for slow response times, high I/O load, and potential data corruption if the bot crashes during a write operation. Memory usage could also become an issue with many users.
-* **Recommendation:** ❌ Not Implemented
-  * The code still uses a single JSON file (`sessions.json`) for all chat session and thread data
-  * No SQLite or database backend has been implemented
-  * No atomic operations or database transaction isolation
+* **Recommendation:** ⚠️ Partially Implemented (Atomic JSON saves in place, but not SQLite)
+  * Uses sessions.json with atomic saves via a temporary file, but SQLite is the recommended future step for scalability
 
 ### 2. Context Window Management (`bot/handlers/chat.py`)
 
 * **Issue:** Conversation history (`context_history`) is truncated based on a fixed number of messages (`[-19:]`) rather than token count.
 * **Risk:** Easily exceeds the actual token limit of the selected LLM, leading to API errors or unexpected behavior.
-* **Recommendation:** ❌ Not Implemented
-  * No token-based truncation using `tiktoken` or any token counting library
-  * No dynamic handling of different model token limits
+* **Recommendation:** ✅ Implemented
+  * Token-based truncation implemented using tiktoken and a globally configurable token limit (default_max_context_tokens). Further refinement for model-specific limits could be future work.
 
 ### 3. Redundant Command Handlers (`ollama_commands.py`, etc.)
 
-* **Issue:** Provider-specific command handlers duplicate functionality of generic commands in `misc_commands.py`.
-* **Risk:** Increased complexity, maintenance overhead, and potential inconsistencies.
-* **Recommendation:** ❌ Not Implemented
-  * Provider-specific command handlers are still present and imported
-  * The code still has redundant functionality between provider-specific handlers and generic handlers
+*   **Issue:** Provider-specific command handlers duplicate functionality of generic commands in `misc_commands.py`.
+*   **Risk:** Increased complexity, maintenance overhead, and potential inconsistencies.
+*   **Recommendation:** ✅ Implemented
+    *   Provider-specific list/set model commands have been removed. Model management is now handled by generic commands in misc_commands.py
 
 ### 4. Configuration (`config.py`, `config.yaml`)
 
-* **Issue:** Missing/invalid `config.yaml` results in an empty config. `ALLOWED_CHAT_IDS` defaults to `None` (allow all).
-* **Risk:** Bot might run with unexpected defaults. Default allow-all chats might be insecure.
-* **Recommendation:** ✅ Partially Implemented
-  * Schema validation has been implemented for config.yaml
-  * However, the HTTP-Referer for OpenRouter is still hardcoded in openrouter_service.py
-  * No environment variable for HTTP-Referer has been implemented
+*   **Issue:** Missing/invalid `config.yaml` results in an empty config. `ALLOWED_CHAT_IDS` defaults to `None` (allow all).
+*   **Risk:** Bot might run with unexpected defaults. Default allow-all chats might be insecure.
+*   **Recommendation:** ⚠️ Partially Implemented
+    *   Schema validation using Pydantic has not been implemented
+    *   The HTTP-Referer for OpenRouter is now configurable via config.yaml
+    *   default_max_context_tokens configuration has been added
 
 ### 5. Error Handling & Logging
 
 * **Issue:** Complex error handling for message edits. Logging is good but could be more structured.
 * **Risk:** Difficult to trace issues in production; complex error handling can be prone to bugs.
-* **Recommendation:** ❌ Not Fully Implemented
-  * While logging is present, it doesn't consistently include chat_id, user_id, and thread_id
-  * The message sending/editing logic is still very complex with nested try-except blocks
+* **Recommendation:** ⚠️ Partially Implemented
+  * Basic logging is present, but full structured logging with context (thread/session IDs in every relevant message) is not yet implemented
 
 ### 6. Minor Issues
 

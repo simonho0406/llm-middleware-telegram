@@ -138,19 +138,13 @@ def main() -> None:
 
     # --- Register Handlers ---
     # Import handlers here (avoids potential circular imports if handlers import config/providers)
-    from bot.handlers.ollama_commands import ollama_handlers
     from bot.handlers.misc_commands import misc_handlers # Contains generic /provider, /model, etc.
-    from bot.handlers.gemini_commands import gemini_handlers
-    from bot.handlers.openrouter_commands import openrouter_handlers
     from bot.handlers.ask_selected_handler import ask_selected_handlers
     from bot.handlers.chat import chat_handler
 
     # Register all handlers
-    # Note: misc_handlers now includes the ConversationHandler for /set_model
+    # Note: misc_handlers includes the ConversationHandler for /set_model
     app.add_handlers(misc_handlers) # Add misc first as it contains /start, /help, /provider, /model...
-    app.add_handlers(ollama_handlers) # Keep provider-specific for now
-    app.add_handlers(gemini_handlers)
-    app.add_handlers(openrouter_handlers)
     app.add_handlers(ask_selected_handlers)
     logger.info("Registered command and conversation handlers.")
 

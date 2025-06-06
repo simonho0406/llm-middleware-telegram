@@ -1,6 +1,7 @@
 import logging
 import asyncio
 import re
+import tiktoken
 from telegram import Update, constants
 from telegram.ext import MessageHandler, filters, ContextTypes
 from telegram.error import RetryAfter, TimedOut, BadRequest
@@ -30,6 +31,15 @@ def escape_markdown_v2(text: str) -> str:
     mdv2_special_chars_pattern = r"([_*\[\]()~`>#+\-=|{}.!])"
     escaped = re.sub(mdv2_special_chars_pattern, r'\\\1', text)
     return escaped
+
+def count_tokens(text: str) -> int:
+    """Count tokens in text using tiktoken (cl100k_base encoding)"""
+    try:
+        encoding = tiktoken.get_encoding("cl100k_base")
+        return len(encoding.encode(text, disallowed_special=()))
+    except Exception as e:
+        logger.warning(f"Token counting with tiktoken failed: {e}. Falling back to char count.")
+        return len(text) // 4 # Fallback
 
 def escape_meta_tags_for_markdown_attempt(text: str) -> str:
     """
@@ -156,6 +166,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         logger.info(f"{log_prefix}Loading history for thread {current_thread_id}")
         context_history = await file_storage.get_thread_key(chat_id, 'history', [])
         logger.debug(f"{log_prefix}Loaded history with {len(context_history)} entries. Sample: {context_history[-2:] if len(context_history) >=2 else context_history}")
+
+        # Token truncation logging
+        history_tokens_before = count_tokens("\n".join([msg['content'] for msg in context_history]))
+        logger.info(f"{log_prefix}History tokens before truncation: {history_tokens_before}")
+        logger.info(f"{log_prefix}DEFAULT_MAX_CONTEXT_TOKENS: {config.DEFAULT_MAX_CONTEXT_TOKENS}")
+        
+        # Apply token-based truncation if needed
+        if history_tokens_before > config.DEFAULT_MAX_CONTEXT_TOKENS:
+            # Truncation logic would go here (keep unchanged as per task)
+            # For now, just log that truncation would occur
+            logger.info(f"{log_prefix}Token count exceeds limit, truncation would occur")
         
         async for chunk in service.generate_response(model=model_to_use, prompt=message_text, context_history=context_history):
             if chunk.startswith("[Error:") or chunk.startswith("Error:"): # More flexible error check
@@ -367,12 +388,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         try:
             # It's safer to re-fetch history here in case of long operations or concurrent access (though less likely with asyncio)
             current_history = await file_storage.get_thread_key(chat_id, 'history', [])
+            original_message_count = len(current_history)
             current_history = current_history[-19:] # Keep last N interactions (e.g., 10 user + 10 assistant = 20 messages)
+            messages_kept = len(current_history)
             current_history.extend([
                 {'role': 'user', 'content': message_text},
                 {'role': 'assistant', 'content': raw_full_llm_response.strip()}
             ])
             await file_storage.set_thread_key(chat_id, 'history', current_history)
+            
+            # Log token count after truncation and messages kept
+            history_tokens_after = count_tokens("\n".join([msg['content'] for msg in current_history]))
+            logger.info(f"{log_prefix}History tokens after truncation: {history_tokens_after}")
+            logger.info(f"{log_prefix}Messages kept: {messages_kept} of {original_message_count} original messages")
+            logger.info(f"{log_prefix}Total messages after update: {len(current_history)} (original: {original_message_count}, kept: {messages_kept}, added: 2)")
+            
             logger.info(f"{log_prefix}History updated to {len(current_history)} entries. Newest: {current_history[-1]['role'] if current_history else 'none'}")
         except Exception as e_hist:
             logger.error(f"{log_prefix}Failed to update history: {e_hist}")

@@ -41,7 +41,7 @@ async def get_models_for_provider(provider: str) -> List[Dict[str, Any]]:
         # Fetch models dynamically from Gemini service
         models = await gemini_service.list_gemini_models()
     elif provider == "openrouter":
-        models = await openrouter_service.get_free_models() # Fetch free models
+        models = await openrouter_service.list_models() # Fetch free models
     return models
 
 def build_provider_keyboard() -> InlineKeyboardMarkup:

@@ -21,6 +21,7 @@ from telegram.ext import (
     filters
 )
 from telegram.helpers import escape_markdown
+from telegram.constants import ParseMode
 
 # --- Project Imports ---
 import config # Assuming your config file
@@ -29,9 +30,6 @@ from bot.providers import get_provider_details, get_available_provider_names, ge
 from storage import file_storage # Assuming your storage module
 
 # Import provider-specific list commands
-from bot.handlers.gemini_commands import list_gemini_models_command
-from bot.handlers.ollama_commands import list_ollama_models_command
-from bot.handlers.openrouter_commands import list_openrouter_models_command
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +50,7 @@ MODELS_PER_PAGE = 10
 # --- Command Handlers ---
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Sends structured help message with command categories"""
-    help_text = """*Available Commands*
-    └ /rename_thread <name> - Rename the current thread
-
-*Core Functionality*:
+    help_text = """*Core Functionality*:
 ├ /start - Initialize the bot
 ├ /help - Show this menu
 ├ /provider - Show current provider & switch AI service
@@ -66,17 +61,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 ├ /list_models - List available models for active provider
 └ /set_model `<model_name>` - Set model for active provider (or select from /list_models)
 
-*Provider-Specific (Legacy/Advanced - May be removed)*:
-├ /list_ollama_models
-├ /set_ollama_model `<name>`
-├ /list_gemini_models
-├ /set_gemini_model `<name>`
-├ /ask_all_gemini `<prompt>`
-├ /list_openrouter_models
-└ /set_openrouter_model `<name>`
-
-*Other*:
-└ /threads - Manage conversation history (Not Implemented)"""
+*Thread Management*:
+├ /rename_thread <name> - Rename the current thread
+└ /threads - List and manage conversation threads"""
     # Using escape_markdown V1 as V2 is stricter and might break with complex text
     await update.message.reply_text(escape_markdown(help_text), parse_mode='Markdown')
 
@@ -350,37 +337,39 @@ async def list_models_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         if not service:
             error_message = f"Service for provider '{escape_markdown(provider_name)}' not available."
-        elif not hasattr(service, 'list_models') or not callable(service.list_models):
-            # Check if allowed_models exist in config as a fallback
-            if provider_config and provider_config.get('allowed_models'):
-                 models_result = provider_config['allowed_models']
-                 logger.info(f"Provider '{provider_name}' service has no list_models method, using configured allowed_models.")
-            else:
-                 error_message = f"Model listing is not supported for provider '{escape_markdown(provider_name)}'."
         else:
-            try:
-                # Attempt to call the service's list_models function
-                # Cache results in context.chat_data to avoid refetching on pagination
-                cache_key = f"models_{provider_name}"
-                if cache_key not in context.chat_data:
-                    logger.debug(f"Fetching and caching models for provider '{provider_name}'")
-                    fetched_models = await service.list_models()
-                    # Ensure fetched_models is a list, even if None is returned
-                    context.chat_data[cache_key] = fetched_models if isinstance(fetched_models, list) else []
-                    logger.debug(f"Cached {len(context.chat_data[cache_key])} models for '{provider_name}'")
+            list_models_func = getattr(service, 'list_models', None)
+            if list_models_func is None or not callable(list_models_func):
+                # Check if allowed_models exist in config as a fallback
+                if provider_config and provider_config.get('allowed_models'):
+                    models_result = provider_config['allowed_models']
+                    logger.info(f"Provider '{provider_name}' service has no list_models method, using configured allowed_models.")
+                else:
+                    error_message = f"Model listing is not supported for provider '{escape_markdown(provider_name)}'."
+            else:
+                try:
+                    # Attempt to call the service's list_models function
+                    # Cache results in context.chat_data to avoid refetching on pagination
+                    cache_key = f"models_{provider_name}"
+                    if cache_key not in context.chat_data:
+                        logger.debug(f"Fetching and caching models for provider '{provider_name}'")
+                        fetched_models = await list_models_func()
+                        # Ensure fetched_models is a list, even if None is returned
+                        context.chat_data[cache_key] = fetched_models if isinstance(fetched_models, list) else []
+                        logger.debug(f"Cached {len(context.chat_data[cache_key])} models for '{provider_name}'")
 
-                models_result = context.chat_data[cache_key]
+                    models_result = context.chat_data[cache_key]
 
-                # Check again if allowed_models should be used (e.g., if API failed or returned empty)
-                if not models_result and provider_config and provider_config.get('allowed_models'):
-                     models_result = provider_config['allowed_models']
-                     # Update cache if we fell back to allowed_models
-                     context.chat_data[cache_key] = models_result
-                     logger.info(f"Using configured allowed_models for '{provider_name}' as API returned empty or failed.")
+                    # Check again if allowed_models should be used (e.g., if API failed or returned empty)
+                    if not models_result and provider_config and provider_config.get('allowed_models'):
+                         models_result = provider_config['allowed_models']
+                         # Update cache if we fell back to allowed_models
+                         context.chat_data[cache_key] = models_result
+                         logger.info(f"Using configured allowed_models for '{provider_name}' as API returned empty or failed.")
 
-            except Exception as e:
-                logger.error(f"Error calling list_models for provider '{provider_name}': {e}", exc_info=True)
-                error_message = f"An error occurred while fetching models for {escape_markdown(provider_name)}."
+                except Exception as e:
+                    logger.error(f"Error calling list_models for provider '{provider_name}': {e}", exc_info=True)
+                    error_message = f"An error occurred while fetching models for {escape_markdown(provider_name)}."
 
         # --- Process results and send message ---
         # Determine the reply function based on whether it's a command or callback query edit
@@ -555,10 +544,27 @@ async def set_model_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.edit_message_text(f"Error: Provider '{escape_markdown(provider_name)}' not found.")
         return
 
-    # Validate if model is allowed (especially important for non-Ollama)
-    allowed_models = provider_config.get('allowed_models', [])
-    # For Ollama, we assume any model returned by its API is valid. For others, check config.
-    is_allowed = (provider_name == 'ollama' or not allowed_models or model_name in allowed_models or model_name == provider_config['default_model'])
+    # Validate model - Step 1: Check service cache, Step 2: Check allowed_models, Step 3: Fallback logic
+    is_allowed = False
+    cache_key = f"models_{provider_name}"
+    cached_models = context.chat_data.get(cache_key, [])
+    
+    # First try service.list_models() cache if available
+    if cached_models:
+        if isinstance(cached_models[0], str):
+            is_allowed = model_name in cached_models
+        else:  # list of dicts
+            is_allowed = any(model.get('id') == model_name for model in cached_models)
+    
+    # Then try provider_config allowed_models
+    if not is_allowed:
+        allowed_models_list = provider_config.get('allowed_models', [])
+        is_allowed = model_name in allowed_models_list
+    
+    # Finally apply fallback logic
+    if not is_allowed:
+        is_allowed = (provider_name == 'ollama' or not allowed_models_list or
+                     model_name == provider_config['default_model'])
 
     if not is_allowed:
          logger.warning(f"Attempt to set disallowed model '{model_name}' for provider '{provider_name}' in chat {chat_id}")
@@ -574,8 +580,12 @@ async def set_model_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     # Just confirm the selection with plain text, remove the keyboard.
     # This avoids potential errors from re-rendering the list or using Markdown.
     try:
+        # Escape provider and model names for MarkdownV2
+        escaped_provider = escape_markdown(provider_name, version=2)
+        escaped_model_name = escape_markdown(model_name, version=2)
         await query.edit_message_text(
-            f"Model for {provider_name} set to: {model_name}",
+            f"Model for *{escaped_provider}* set to: `{escaped_model_name}`",
+            parse_mode=ParseMode.MARKDOWN_V2,
             reply_markup=None # Remove buttons after selection
         )
     except Exception as e:
@@ -606,9 +616,27 @@ async def set_model_typed(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.message.reply_text(f"Error: Provider '{escape_markdown(provider_name)}' not found.")
         return ConversationHandler.END
 
-    # Validate model
-    allowed_models = provider_config.get('allowed_models', [])
-    is_allowed = (provider_name == 'ollama' or not allowed_models or model_name in allowed_models or model_name == provider_config['default_model'])
+    # Validate model - Step 1: Check service cache, Step 2: Check allowed_models, Step 3: Fallback logic
+    is_allowed = False
+    cache_key = f"models_{provider_name}"
+    cached_models = context.chat_data.get(cache_key, [])
+    
+    # First try service.list_models() cache if available
+    if cached_models:
+        if isinstance(cached_models[0], str):
+            is_allowed = model_name in cached_models
+        else:  # list of dicts
+            is_allowed = any(model.get('id') == model_name for model in cached_models)
+    
+    # Then try provider_config allowed_models
+    if not is_allowed:
+        allowed_models_list = provider_config.get('allowed_models', [])
+        is_allowed = model_name in allowed_models_list
+    
+    # Finally apply fallback logic
+    if not is_allowed:
+        is_allowed = (provider_name == 'ollama' or not allowed_models_list or
+                     model_name == provider_config['default_model'])
 
     # For Ollama, we might want to dynamically check if the model exists via API?
     # This adds complexity and delay. For now, let's trust the user input for Ollama

@@ -87,11 +87,13 @@ DEFAULT_OPENROUTER_MODEL = yaml_config.get("default_openrouter_model", "mistrala
 # --- Load Model Lists ---
 GEMINI_ASK_ALL_MODELS = yaml_config.get("gemini_ask_all_models", []) # Load the list for ask_all
 OPENROUTER_ALLOWED_MODELS = yaml_config.get("openrouter_allowed_models", []) # Load allowed OpenRouter models
+OPENROUTER_HTTP_REFERER = yaml_config.get("openrouter_http_referer", "YOUR_APP_URL_OR_NAME")
 
 # --- Load Other Settings ---
 SESSION_FILE_PATH = yaml_config.get("session_file_path", "data/sessions.json")
 ALLOWED_CHAT_IDS = yaml_config.get("allowed_chat_ids", None) # None means allow all
 REQUEST_TIMEOUT_SECONDS = yaml_config.get("REQUEST_TIMEOUT_SECONDS", 180) # Default to 180 seconds if not set
+DEFAULT_MAX_CONTEXT_TOKENS = yaml_config.get("default_max_context_tokens", 3800) # Default token limit
 
 # --- Load Custom OpenAI-Compatible Providers ---
 CUSTOM_PROVIDERS_CONFIG = []
@@ -138,6 +140,7 @@ logger.info(f"  DEFAULT_GEMINI_MODEL: {DEFAULT_GEMINI_MODEL}")
 logger.info(f"  DEFAULT_OPENROUTER_MODEL: {DEFAULT_OPENROUTER_MODEL}") # Log OpenRouter default
 logger.info(f"  GEMINI_ASK_ALL_MODELS: {GEMINI_ASK_ALL_MODELS}")
 logger.info(f"  OPENROUTER_ALLOWED_MODELS: {OPENROUTER_ALLOWED_MODELS}") # Log allowed OpenRouter models
+logger.info(f"  OPENROUTER_HTTP_REFERER: {OPENROUTER_HTTP_REFERER}")
 logger.info(f"  OLLAMA_HOST: {OLLAMA_HOST}")
 logger.info(f"  SESSION_FILE_PATH: {SESSION_FILE_PATH}")
 logger.info(f"  ALLOWED_CHAT_IDS: {ALLOWED_CHAT_IDS}")

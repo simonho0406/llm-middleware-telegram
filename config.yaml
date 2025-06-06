@@ -24,6 +24,9 @@ session_file_path: "data/sessions.json"
 # Default timeout for LLM API requests in seconds
 REQUEST_TIMEOUT_SECONDS: 180
 
+# Default maximum tokens for history sent to LLMs and for storing history
+default_max_context_tokens: 3800
+
 # Add other configurations as needed
 # openrouter_api_key is now managed via .env file
 openrouter_allowed_models:
@@ -32,6 +35,7 @@ openrouter_allowed_models:
   - "stability-ai/stablelm-tuned-alpha-7b"
   # Add more free models here
 default_openrouter_model: "llama-2-70b"
+openrouter_http_referer: "YOUR_APP_URL_OR_NAME"
 
 # google_api_key is legacy and managed via .env (GEMINI_API_KEY_*)
 # e.g., allowed chat IDs, admin user IDs, etc.

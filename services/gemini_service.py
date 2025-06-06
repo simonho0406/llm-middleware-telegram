@@ -247,7 +247,7 @@ async def check_connection() -> bool:
         logger.error("Gemini connection check failed for all provided keys.")
     return success
 
-async def list_gemini_models() -> List[Dict[str, Any]]:
+async def list_models() -> List[Dict[str, Any]]:
     """Lists available Gemini models suitable for generateContent."""
     if not _gemini_keys:
         logger.warning("Cannot list Gemini models: No API keys configured.")

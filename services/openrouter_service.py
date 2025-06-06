@@ -20,7 +20,7 @@ async def generate_response(
         return
 
     headers = {
-        "HTTP-Referer": "https://yourdomain.com",  # Replace with your actual site URL or app name
+        "HTTP-Referer": config.OPENROUTER_HTTP_REFERER,  # Use configured HTTP Referer
         "Authorization": f"Bearer {config.OPENROUTER_API_KEY}",
         "Content-Type": "application/json"
     }
@@ -119,7 +119,7 @@ async def check_connection() -> bool:
         logger.exception("Unexpected error during OpenRouter connection check")
         return False
 
-async def get_free_models() -> List[Dict[str, Any]]:
+async def list_models() -> List[Dict[str, Any]]:
     """Fetches the list of models from OpenRouter and filters for free ones."""
     if not config.OPENROUTER_API_KEY or config.OPENROUTER_API_KEY == "YOUR_OPENROUTER_API_KEY":
         logger.warning("OpenRouter API Key not configured, cannot fetch models.")
@@ -163,7 +163,7 @@ async def _generate_single_model_non_streaming(model_id: str, prompt: str, conte
         return "[Error: OpenRouter API Key not configured]"
 
     headers = {
-        "HTTP-Referer": "https://yourdomain.com", # Replace if needed
+        "HTTP-Referer": config.OPENROUTER_HTTP_REFERER, # Use configured HTTP Referer
         "Authorization": f"Bearer {config.OPENROUTER_API_KEY}",
         "Content-Type": "application/json"
     }
@@ -221,7 +221,7 @@ async def generate_concurrent_free_responses(prompt: str, context_history: Optio
     Returns:
         A dictionary mapping model IDs to their responses (or error messages).
     """
-    free_models = await get_free_models()
+    free_models = await list_models()
     if not free_models:
         logger.warning("No free OpenRouter models found or could not fetch list.")
         return {"error": "[Error: Could not fetch or find any free OpenRouter models]"}

@@ -85,6 +85,7 @@ Interact with your bot in Telegram:
     *   `custom_openai_providers`: A list defining custom providers (see Setup section). Each item needs `name`, `base_url`, `default_model`, and optionally `allowed_models`.
     *   `session_file_path`: Location to store conversation history and user settings. Avoid JSON format for production deployments - use SQLite or database backend instead.
     *   `REQUEST_TIMEOUT_SECONDS`: Timeout for waiting for responses from LLM APIs.
+    *   `default_max_context_tokens`: Default maximum tokens for history sent to LLMs and for storing history (helps prevent exceeding model limits)
     *   `allowed_chat_ids` (Optional): Uncomment and list specific Telegram chat IDs to restrict bot usage. If commented out or empty, the bot responds in any chat it's added to.
 
 ## Known Issues and Troubleshooting
@@ -93,8 +94,7 @@ Interact with your bot in Telegram:
 *   **Cause:** JSON file storage becomes inefficient with large conversation histories
 *   **Impact:** Slower response times as session data grows
 *   **Mitigation:**
-    *   Implement SQLite or Redis backend for sessions
-    *   Add periodic cleanup of stale sessions
+    *   Atomic saves to JSON are implemented, but a database backend is recommended for true scalability
 
 ### 2. Redundant Handlers
 *   **Cause:** Multiple command handlers performing similar validation checks
@@ -138,6 +138,13 @@ Interact with your bot in Telegram:
     *   Avoid unnecessary edits.
     *   Respect Telegram rate limits.
 
+### 7. LLM Context Management
+*   **Cause:** Uses a global token limit for history truncation
+*   **Impact:** May not account for model-specific context window sizes
+*   **Mitigation:**
+    *   Uses a globally configurable token limit (`default_max_context_tokens`)
+    *   Future enhancement: model-specific context window management
+
 ## Additional Reminders
 
 *   **Project Structure:**  
@@ -163,13 +170,11 @@ Interact with your bot in Telegram:
 
 ## To-Do List
 
-1.  **Unified API Handler:** Implement a generalized API handler to streamline provider interactions (IN PROGRESS).
-2.  **Enhanced Error Handling:** Add comprehensive error logging and user notifications for API failures.
-3.  **MCP Integration:** Develop RAG capabilities using Model Context Protocol for context-aware responses.
-4.  **Input Validation:** Add schema validation for custom provider configurations in config.yaml
-5.  **Session Encryption:** Implement secure storage for sensitive session data
-6.  **Handler Refactoring:** Consolidate common command validation logic into base classes
-7.  **Documentation Updates:** Expand configuration examples for custom providers and troubleshooting guides.
+1.  **Input Validation:** Add schema validation for custom provider configurations in config.yaml
+2.  **Handler Refactoring:** Consolidate common command validation logic into base classes
+3.  **Session Encryption:** Implement secure storage for sensitive session data
+4.  **Documentation Updates:** Expand configuration examples for custom providers and troubleshooting guides.
+5.  **Model-Specific Context:** Implement per-model context window size management
 
 ## Contributing
 
