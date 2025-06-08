@@ -247,16 +247,30 @@ async def list_threads_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
         keyboard = []
         for thread_id in threads:
-            row = []
-            label = f"✅ {escape_markdown(thread_id)}" if thread_id == current_thread else escape_markdown(thread_id)
-            logger.debug(f"[LIST_THREADS] User {user_id}, Chat {chat_id}: Preparing thread entry for thread_id={thread_id}, current={thread_id == current_thread}")
+            # Fetch thread data to get custom name
+            thread_data = await file_storage.get_thread_data(chat_id, thread_id)
+            custom_name = thread_data.get('name') if thread_data else None
+            if custom_name and custom_name.strip():
+                display_text = f"{custom_name.strip()} ({thread_id})"
+            else:
+                display_text = thread_id
+
+            escaped_display_text = escape_markdown(display_text, version=2)
+
+            if thread_id == current_thread:
+                label = f"✅ {escaped_display_text}"
+            else:
+                label = escaped_display_text
+
+            action_row = []
             if thread_id != current_thread:
-                row.append(InlineKeyboardButton("Switch", callback_data=f"switch_thread:{thread_id}"))
+                action_row.append(InlineKeyboardButton("Switch", callback_data=f"switch_thread:{thread_id}"))
                 logger.debug(f"[LIST_THREADS] User {user_id}, Chat {chat_id}: Added Switch button for thread_id={thread_id}")
             if thread_id != "default":
-                row.append(InlineKeyboardButton("Delete", callback_data=f"delete_thread:{thread_id}"))
+                action_row.append(InlineKeyboardButton("Delete", callback_data=f"delete_thread:{thread_id}"))
                 logger.debug(f"[LIST_THREADS] User {user_id}, Chat {chat_id}: Added Delete button for thread_id={thread_id}")
-            keyboard.append([InlineKeyboardButton(label, callback_data="noop")] + row)
+
+            keyboard.append([InlineKeyboardButton(label, callback_data="noop")] + action_row)
 
         reply_markup = InlineKeyboardMarkup(keyboard)
         msg = "Your conversation threads:"
@@ -776,21 +790,34 @@ async def rename_thread_command(update: Update, context: ContextTypes.DEFAULT_TY
     """Handle /rename_thread <new_name> command"""
     chat_id = update.effective_chat.id
     args = context.args
+
+    # Helper to safely send messages
+    async def safe_reply(text):
+        if update.message:
+            await update.message.reply_text(text)
+        elif update.effective_chat:
+            await update.effective_chat.send_message(text)
+        else:
+            logger.warning(f"Could not send message: {text}")
+
     if not args:
-        await update.message.reply_text("Usage: /rename_thread <new_name>")
+        await safe_reply("Usage: /rename_thread <new_name>")
         return
+
     new_name = " ".join(args).strip()
     if len(new_name) < 3 or len(new_name) > 30:
-        await update.message.reply_text("Name must be 3-30 characters long")
+        await safe_reply("Name must be 3-30 characters long")
         return
+
     if not new_name.isalnum():
-        await update.message.reply_text("Name can only contain letters/numbers")
+        await safe_reply("Name can only contain letters/numbers")
         return
+
     try:
         await file_storage.rename_thread(chat_id, new_name)
-        await update.message.reply_text(f"Thread renamed to: {new_name}")
+        await safe_reply(f"Thread renamed to: {new_name}")
     except Exception as e:
-        await update.message.reply_text(f"Error: {str(e)}")
+        await safe_reply(f"Error: {str(e)}")
 
 misc_handlers = [
     CommandHandler("help", help_command),

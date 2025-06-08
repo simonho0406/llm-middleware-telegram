@@ -72,6 +72,7 @@ Interact with your bot in Telegram:
 *   **/model:** Shows the currently selected model for the active provider.
 *   **/list_models:** Lists available/allowed models for the *currently active* provider. (For Ollama, this fetches dynamically; for others, it uses `allowed_models` from `config.yaml`).
 *   **/set_model `<model_name>`:** Sets the model for the *currently active* provider. You can type the name or select from the buttons shown by `/list_models`.
+*   **/rename_thread:** Rename the current thread (sets and displays a custom name)
 *   **Any other text:** Sent as a prompt to the currently selected LLM provider and model.
 
 ## Configuration Details
