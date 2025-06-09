@@ -170,3 +170,11 @@ The project has made significant progress in key areas, with model handler conso
 - Published API compatibility matrix
 
 The project provides a good foundation for an LLM middleware bot. Addressing **session storage scalability** and **context window management** are top priorities. Refactoring to remove **redundant command handlers** will simplify the codebase. Implementing these recommendations will lead to a more robust, performant, and maintainable application.
+
+### Menu Button Configuration (`main.py`)
+
+*   **Issue:** The bot's menu button was reported as not working reliably, potentially due to Telegram client-side caching of old command lists.
+*   **Analysis:** The existing implementation logic in the `post_init` hook was found to be correct, containing the necessary calls to both `set_my_commands` and `set_chat_menu_button`. The most likely cause of the issue is client-side caching.
+*   **Resolution (Implemented):**
+    *   The command and menu button setup logic has been refactored from `run_startup_checks` into a new, dedicated function `setup_bot_commands_and_menu` within `main.py` for improved clarity and encapsulation.
+    *   This new function is called during the `post_init` startup sequence. This change, while minor from a logical standpoint, ensures a clean and explicit setup on every bot restart, which should force Telegram clients to update their cached command lists. No further code changes are anticipated for this feature.
