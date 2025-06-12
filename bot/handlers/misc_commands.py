@@ -28,6 +28,7 @@ import config # Assuming your config file
 # Use the new provider helpers
 from bot.providers import get_provider_details, get_available_provider_names, get_config_for_provider, get_service_for_provider
 from storage import file_storage # Assuming your storage module
+from bot.handlers.chat import _generate_and_send_response
 
 # Import provider-specific list commands
 
@@ -53,6 +54,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     help_text = """*Core Functionality*:
 ├ /start - Initialize the bot
 ├ /help - Show this menu
+├ /reroll - Regenerate the last AI response
 ├ /provider - Show current provider & switch AI service
 └ /new - Start a new conversation thread
 
@@ -819,8 +821,41 @@ async def rename_thread_command(update: Update, context: ContextTypes.DEFAULT_TY
     except Exception as e:
         await safe_reply(f"Error: {str(e)}")
 
+async def reroll_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Regenerates the last AI response by reusing the last prompt."""
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+    log_prefix = f"(Chat {chat_id}) "
+    logger.info(f"{log_prefix}User {user_id} triggered /reroll.")
+
+    try:
+        current_thread_id = await file_storage.get_current_thread_id(chat_id)
+        last_user_prompt = await file_storage.get_thread_key(chat_id, 'last_user_prompt')
+
+        if not last_user_prompt:
+            logger.warning(f"{log_prefix}No last_user_prompt found to reroll.")
+            await update.message.reply_text("There is no previous prompt to reroll.", parse_mode=None)
+            return
+
+        logger.info(f"{log_prefix}Rerolling prompt: '{last_user_prompt[:100]}...'")
+        
+        # Call the shared response generation function with the reroll flag
+        await _generate_and_send_response(
+            update=update,
+            context=context,
+            chat_id=chat_id,
+            user_id=user_id,
+            prompt=last_user_prompt,
+            current_thread_id=current_thread_id,
+            is_reroll=True
+        )
+
+    except Exception as e:
+        logger.error(f"{log_prefix}Error during /reroll command: {e}", exc_info=True)
+        await update.message.reply_text("An error occurred while trying to reroll.", parse_mode=None)
 misc_handlers = [
     CommandHandler("help", help_command),
+    CommandHandler("reroll", reroll_command),
     # CommandHandler("refresh_menu", refresh_menu_command),
     CommandHandler("new", new_command),
     CommandHandler("provider", provider_command),

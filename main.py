@@ -1,6 +1,6 @@
 import logging
 import asyncio
-from telegram import Update, BotCommand, MenuButtonCommands, BotCommandScopeChat
+from telegram import Update, BotCommand, MenuButtonCommands
 from telegram.ext import CommandHandler, Application, ContextTypes
 
 # Import the function to create the application
@@ -45,13 +45,6 @@ async def setup_bot_commands_and_menu(application: Application) -> None:
         
         logger.info("Successfully set bot command list and menu button for the default scope.")
 
-        # --- TEMPORARY FIX: Explicitly set commands for the affected chat ---
-        TARGET_CHAT_ID = 0
-        chat_scope = BotCommandScopeChat(chat_id=TARGET_CHAT_ID)
-        await application.bot.set_my_commands(commands, scope=chat_scope)
-        await application.bot.set_chat_menu_button(chat_id=TARGET_CHAT_ID, menu_button=MenuButtonCommands())
-        logger.info(f"Temporarily force-set commands and menu button for specific chat_id: {TARGET_CHAT_ID}.")
-        # --- END OF TEMPORARY FIX ---
 
     except Exception as e:
         logger.error(f"Failed to set bot commands or menu button: {e}")

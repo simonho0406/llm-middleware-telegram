@@ -11,6 +11,7 @@ This Telegram bot connects to various Large Language Model (LLM) backends like O
 *   **Streaming Responses:** Edits messages in place to show responses as they are generated.
 *   **Configuration:** Flexible configuration via `.env` for secrets and `config.yaml` for settings.
 *   **Dockerized:** Easy deployment using Docker and Docker Compose.
+*   **Reroll Responses:** Regenerate the last AI response using the `/reroll` command.
 
 ## Prerequisites
 
@@ -73,6 +74,7 @@ Interact with your bot in Telegram:
 *   **/list_models:** Lists available/allowed models for the *currently active* provider. (For Ollama, this fetches dynamically; for others, it uses `allowed_models` from `config.yaml`).
 *   **/set_model `<model_name>`:** Sets the model for the *currently active* provider. You can type the name or select from the buttons shown by `/list_models`.
 *   **/rename_thread:** Rename the current thread (sets and displays a custom name)
+*   **/reroll:** Regenerates the last response from the AI for your previous prompt.
 *   **Any other text:** Sent as a prompt to the currently selected LLM provider and model.
 
 ## Configuration Details
@@ -176,15 +178,18 @@ Interact with your bot in Telegram:
 
 ## To-Do List
 
-1.  **Migrate session storage to a database (e.g., SQLite):** Top priority for true scalability and performance
-2.  **Diagnose and fix Gemini context recall issues:** Under active investigation
-3.  **Implement Pydantic validation for config.yaml:** Ensure configuration integrity
-4.  **Enhance error handling and user feedback for LLM API responses:** Provide clearer error messages to users
-5.  **Input Validation:** Add schema validation for custom provider configurations in config.yaml
-6.  **Handler Refactoring:** Consolidate common command validation logic into base classes
-7.  **Session Encryption:** Implement secure storage for sensitive session data
-8.  **Documentation Updates:** Expand configuration examples for custom providers and troubleshooting guides
-9.  **Model-Specific Context Management (future enhancement):** Implement per-model context window size management
+### High Priority
+1.  **Implement Web Search:** Integrate a web search tool (e.g., via an API like Tavily, Serper, or Brave Search) that the LLM can use to answer questions about recent events or access live information, overcoming knowledge cutoffs.
+
+### Medium Priority
+3.  **Refine Multi-Model Queries:** Improve the `/ask_selected` command for better usability and prepare the groundwork for a potential "Discussion Mode" where multiple models can interact.
+4.  **Migrate Session Storage to a Database:** Complete the migration from `sessions.json` to a scalable database like SQLite to improve performance and reliability.
+5.  **Diagnose and Fix Gemini Context Issues:** Continue investigating and resolve any remaining context recall problems with the Gemini provider.
+
+### Low Priority (Code Health & Future Enhancements)
+6.  **Consolidate Configuration:** Refactor configuration logic to centralize settings currently scattered across different modules into a more unified and manageable structure.
+7.  **Implement Pydantic Validation:** Add schema validation for `config.yaml` to ensure configuration integrity.
+8.  **Implement Model-Specific Context Management:** Adapt history truncation to respect the unique context window sizes of different models.
 
 ## Contributing
 
