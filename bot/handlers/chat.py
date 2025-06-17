@@ -2,10 +2,11 @@ import logging
 import asyncio
 import re
 import tiktoken
-from telegram import Update, constants
+from telegram import Update, constants, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import MessageHandler, filters, ContextTypes
 from telegram.error import RetryAfter, TimedOut, BadRequest
 import config
+from bot import providers  # Corrected import
 from services import ollama_service, gemini_service, openrouter_service
 from services.openai_compatible_service import OpenAICompatibleService
 from config import CUSTOM_PROVIDERS_CONFIG
@@ -18,7 +19,6 @@ def escape_markdown_v2(text: str) -> str:
     """Escapes text for Telegram's MarkdownV2 parse mode."""
     if not text:
         return ""
-    # Escape all characters that are special in MarkdownV2
     escape_chars = r'\_*[]()~`>#+-=|{}.!'
     return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', text)
 
@@ -33,110 +33,123 @@ def count_tokens(text: str) -> int:
 def escape_meta_tags_for_markdown_attempt(text: str) -> str:
     if not text:
         return ""
-    # This function seems to be a no-op, but we keep it for structural integrity
-    # It was intended to remove <reflect> tags, but the regex is empty.
     text = re.sub(r"<reflect>.*?</reflect>", "", text, flags=re.DOTALL | re.IGNORECASE)
     return text.strip()
 
 TELEGRAM_MAX_LEN = 4096
 
-async def _generate_and_send_response(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int, prompt: str, current_thread_id: str, is_reroll: bool = False) -> None:
+async def _truncate_history_by_tokens(history: list, prompt: str, max_tokens: int, output_buffer: int) -> list:
     """
-    The single, correct function to generate and send an AI response.
-    Handles service selection, history management, and robust message sending with Markdown escaping.
+    Truncates conversation history to not exceed a specified token limit,
+    reserving space for the prompt and an output buffer.
+    """
+    prompt_tokens = count_tokens(prompt)
+    max_history_tokens = max_tokens - prompt_tokens - output_buffer
+    
+    truncated_history = []
+    current_token_count = 0
+
+    for message in reversed(history):
+        message_content = message.get("content", "")
+        message_tokens = count_tokens(message_content)
+
+        if current_token_count + message_tokens <= max_history_tokens:
+            truncated_history.insert(0, message)
+            current_token_count += message_tokens
+        else:
+            break
+    
+    if len(truncated_history) < len(history):
+        logger.info(f"History truncated from {len(history)} to {len(truncated_history)} messages to fit token limit.")
+        
+    return truncated_history
+
+async def _generate_and_send_response(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int, prompt: str, current_thread_id: str, is_reroll: bool = False, force_truncate: bool = False) -> None:
+    """
+    Generates and sends an AI response, now with interactive context management.
     """
     log_prefix = f"(Chat {chat_id}) "
     
-    # 1. Determine Service and Model
+    context_history = await file_storage.get_thread_key(chat_id, 'history', [])
+    if is_reroll and context_history and context_history[-1].get('role') == 'assistant':
+        logger.info(f"{log_prefix}Reroll detected. Removing last assistant message from history.")
+        context_history.pop()
+
+    if not force_truncate:
+        total_tokens = count_tokens(prompt) + sum(count_tokens(msg.get("content", "")) for msg in context_history)
+        if total_tokens > config.DEFAULT_MAX_CONTEXT_TOKENS:
+            logger.warning(f"{log_prefix}Context limit exceeded ({total_tokens} > {config.DEFAULT_MAX_CONTEXT_TOKENS}). Prompting user to shrink.")
+            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Shrink and Retry", callback_data="shrink_and_retry")]])
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="This conversation is getting long and might exceed the AI's memory. Shall I proceed with a shortened history?",
+                reply_markup=keyboard,
+                parse_mode=None
+            )
+            return
+        
     session_provider = await file_storage.get_thread_key(chat_id, 'provider', config.DEFAULT_PROVIDER)
+    provider_details = providers.get_provider_details()  # Corrected function call
     
-    # This logic for initializing custom providers seems inefficient to run on every message.
-    # However, we will not refactor it now to maintain stability.
-    custom_service_instances = {}
-    for provider_conf in CUSTOM_PROVIDERS_CONFIG:
-        try:
-            service_instance = OpenAICompatibleService(provider_conf)
-            if service_instance.client:
-                custom_service_instances[provider_conf['name']] = service_instance
-        except Exception as e:
-            logger.error(f"{log_prefix}Failed to initialize custom provider {provider_conf.get('name', 'UNKNOWN')}: {e}")
-
-    provider_details = {
-        'ollama': (ollama_service, 'ollama_model', config.DEFAULT_OLLAMA_MODEL),
-        'gemini': (gemini_service, 'gemini_model', config.DEFAULT_GEMINI_MODEL),
-        'openrouter': (openrouter_service, 'openrouter_model', config.DEFAULT_OPENROUTER_MODEL),
-        **{name: (instance, f'{name}_model', instance.get_default_model()) for name, instance in custom_service_instances.items()}
-    }
-
     if session_provider not in provider_details:
         logger.error(f"{log_prefix}Invalid provider '{session_provider}', falling back to default.")
         session_provider = config.DEFAULT_PROVIDER
         await file_storage.set_thread_key(chat_id, 'provider', session_provider)
     
-    service, model_key, default_model = provider_details[session_provider]
+    provider_config = provider_details[session_provider]
+    service = provider_config['service']
+    model_key = provider_config['model_session_key']
+    default_model = provider_config['default_model']
+    
     model_to_use = await file_storage.get_thread_key(chat_id, model_key, default_model)
     provider_name_display = session_provider.capitalize()
     logger.info(f"{log_prefix}Using service: {service.__class__.__name__ if hasattr(service, '__class__') else service.__name__}, Model: {model_to_use}")
 
-    # 2. Send Placeholder Message
     placeholder_message = None
     try:
         placeholder_text = f"Thinking with {provider_name_display} ({model_to_use})..."
-        if is_reroll:
-            placeholder_text = f"Rerolling with {provider_name_display} ({model_to_use})..."
+        if is_reroll: placeholder_text = f"Rerolling with {provider_name_display} ({model_to_use})..."
         
         escaped_placeholder_text = escape_markdown_v2(placeholder_text)
         
-        reply_to_msg_id = update.message.message_id if update.message else None
-        if not reply_to_msg_id and update.callback_query:
-            reply_to_msg_id = update.callback_query.message.message_id
+        reply_to_msg_id = update.message.message_id if update.message else (update.callback_query.message.message_id if update.callback_query else None)
 
-        placeholder_message = await context.bot.send_message(
-            chat_id=chat_id,
-            text=escaped_placeholder_text,
-            parse_mode=constants.ParseMode.MARKDOWN_V2,
-            reply_to_message_id=reply_to_msg_id
-        )
+        placeholder_message = await context.bot.send_message(chat_id=chat_id, text=escaped_placeholder_text, parse_mode=constants.ParseMode.MARKDOWN_V2, reply_to_message_id=reply_to_msg_id)
     except Exception as e:
         logger.error(f"{log_prefix}Failed to send placeholder message: {e}")
 
-    # 3. Generate Full LLM Response
     raw_full_llm_response = ""
     llm_error_reported_by_model = False
+    truncated_history = []
     try:
         logger.info(f"{log_prefix}Starting LLM generation for thread {current_thread_id}...")
-        context_history = await file_storage.get_thread_key(chat_id, 'history', [])
-
-        if is_reroll and context_history and context_history[-1].get('role') == 'assistant':
-            logger.info(f"{log_prefix}Reroll detected. Removing last assistant message from history.")
-            context_history.pop()
         
-        async for chunk in service.generate_response(model=model_to_use, prompt=prompt, context_history=context_history):
+        truncated_history = await _truncate_history_by_tokens(
+            history=context_history,
+            prompt=prompt,
+            max_tokens=config.DEFAULT_MAX_CONTEXT_TOKENS,
+            output_buffer=config.CONTEXT_TOKEN_OUTPUT_BUFFER
+        )
+        
+        async for chunk in service.generate_response(model=model_to_use, prompt=prompt, context_history=truncated_history):
             if chunk.startswith("[Error:") or chunk.startswith("Error:"):
-                logger.error(f"{log_prefix}LLM service reported an error: {chunk}")
                 raw_full_llm_response = chunk
                 llm_error_reported_by_model = True
                 break
             raw_full_llm_response += chunk
         
-        if not llm_error_reported_by_model:
-            logger.info(f"{log_prefix}LLM generation complete. Length: {len(raw_full_llm_response)}")
-        else:
-            logger.warning(f"{log_prefix}LLM generation interrupted by model-reported error.")
+        if not llm_error_reported_by_model: logger.info(f"{log_prefix}LLM generation complete. Length: {len(raw_full_llm_response)}")
 
     except Exception as e:
         logger.exception(f"{log_prefix}Critical error during LLM stream: {e}")
         raw_full_llm_response = "[Error: An unexpected error occurred while communicating with the AI.]"
         llm_error_reported_by_model = True
 
-    # 4. Final Message Sending Logic
     final_content_to_send = raw_full_llm_response.strip()
     message_sent_or_edited_successfully = False
     
-    reply_to_msg_id = update.message.message_id if update.message else None
-    if not reply_to_msg_id and update.callback_query:
-        reply_to_msg_id = update.callback_query.message.message_id
-        
+    reply_to_msg_id = update.message.message_id if update.message else (update.callback_query.message.message_id if update.callback_query else None)
+
     try:
         if not final_content_to_send:
             final_content_to_send = "[Error: Received empty response from AI]"
@@ -144,10 +157,7 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
         final_content_to_send = escape_meta_tags_for_markdown_attempt(final_content_to_send)
         
         if len(final_content_to_send) <= TELEGRAM_MAX_LEN and placeholder_message:
-            await placeholder_message.edit_text(
-                text=escape_markdown_v2(final_content_to_send),
-                parse_mode=constants.ParseMode.MARKDOWN_V2
-            )
+            await placeholder_message.edit_text(text=escape_markdown_v2(final_content_to_send), parse_mode=constants.ParseMode.MARKDOWN_V2)
             message_sent_or_edited_successfully = True
         else:
             if placeholder_message:
@@ -155,48 +165,39 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
             
             message_parts = split_message_markdown_aware(final_content_to_send, TELEGRAM_MAX_LEN)
             for idx, part in enumerate(message_parts):
-                # Only reply to the original message on the first part
                 current_reply_id = reply_to_msg_id if idx == 0 else None
-                await context.bot.send_message(
-                    chat_id=chat_id,
-                    text=escape_markdown_v2(part),
-                    parse_mode=constants.ParseMode.MARKDOWN_V2,
-                    reply_to_message_id=current_reply_id
-                )
+                await context.bot.send_message(chat_id=chat_id, text=escape_markdown_v2(part), parse_mode=constants.ParseMode.MARKDOWN_V2, reply_to_message_id=current_reply_id)
             message_sent_or_edited_successfully = True
             
     except BadRequest as e:
         logger.error(f"{log_prefix}BadRequest sending/editing message, will try sending as plain text. Error: {e}")
         try:
-            if placeholder_message:
-                await placeholder_message.delete()
-            # Fallback to sending as plain text
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=final_content_to_send, # Send raw content
-                parse_mode=None, # Explicitly disable parsing
-                reply_to_message_id=reply_to_msg_id
-            )
+            if placeholder_message: await placeholder_message.delete()
+            await context.bot.send_message(chat_id=chat_id, text=final_content_to_send, parse_mode=None, reply_to_message_id=reply_to_msg_id)
             message_sent_or_edited_successfully = True
         except Exception as fallback_e:
             logger.error(f"{log_prefix}Plain text fallback sending failed: {fallback_e}")
     except Exception as e:
         logger.exception(f"{log_prefix}Unexpected error during message sending: {e}")
 
-    # 5. Update History
     if not llm_error_reported_by_model and final_content_to_send and message_sent_or_edited_successfully:
         logger.debug(f"{log_prefix}Updating conversation history.")
         try:
-            current_history = await file_storage.get_thread_key(chat_id, 'history', [])
-            if is_reroll and current_history and current_history[-1].get('role') == 'assistant':
-                current_history.pop()
-
-            current_history.extend([
+            history_to_save = truncated_history
+            history_to_save.extend([
                 {'role': 'user', 'content': prompt},
                 {'role': 'assistant', 'content': final_content_to_send}
             ])
-            await file_storage.set_thread_key(chat_id, 'history', current_history)
-            logger.info(f"{log_prefix}History updated to {len(current_history)} entries.")
+            
+            final_truncated_history = await _truncate_history_by_tokens(
+                history=history_to_save,
+                prompt="",
+                max_tokens=config.DEFAULT_MAX_CONTEXT_TOKENS,
+                output_buffer=0
+            )
+
+            await file_storage.set_thread_key(chat_id, 'history', final_truncated_history)
+            logger.info(f"{log_prefix}History updated to {len(final_truncated_history)} entries.")
         except Exception as e_hist:
             logger.error(f"{log_prefix}Failed to update history: {e_hist}")
 
@@ -228,11 +229,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             user_id=user_id,
             prompt=message_text,
             current_thread_id=current_thread_id,
-            is_reroll=False
+            is_reroll=False,
+            force_truncate=False
         )
     except Exception as e:
         logger.error(f"{log_prefix}Error in handle_message: {e}", exc_info=True)
         await update.message.reply_text("Sorry, a critical error occurred while handling your message.", parse_mode=None)
 
-# Handler export
 chat_handler = MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)

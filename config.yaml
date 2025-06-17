@@ -25,7 +25,9 @@ session_file_path: "data/sessions.json"
 REQUEST_TIMEOUT_SECONDS: 180
 
 # Default maximum tokens for history sent to LLMs and for storing history
-default_max_context_tokens: 3800
+default_max_context_tokens: 100000
+# Buffer to leave for the AI's response tokens
+context_token_output_buffer: 10000
 
 # Add other configurations as needed
 # openrouter_api_key is now managed via .env file

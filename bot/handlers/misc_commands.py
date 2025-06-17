@@ -853,9 +853,47 @@ async def reroll_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     except Exception as e:
         logger.error(f"{log_prefix}Error during /reroll command: {e}", exc_info=True)
         await update.message.reply_text("An error occurred while trying to reroll.", parse_mode=None)
+
+async def shrink_and_retry_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles the 'Shrink and Retry' button press."""
+    query = update.callback_query
+    await query.answer()
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+    log_prefix = f"(Chat {chat_id}) "
+    logger.info(f"{log_prefix}User {user_id} triggered 'Shrink and Retry'.")
+
+    try:
+        # Edit the original message to show it's working
+        await query.edit_message_text("Understood. Retrying with a shortened context...", parse_mode=None)
+
+        current_thread_id = await file_storage.get_current_thread_id(chat_id)
+        last_user_prompt = await file_storage.get_thread_key(chat_id, 'last_user_prompt')
+
+        if not last_user_prompt:
+            logger.error(f"{log_prefix}Could not find last_user_prompt for shrink_and_retry.")
+            await context.bot.send_message(chat_id, "Error: Couldn't find the last prompt to retry.", parse_mode=None)
+            return
+
+        # Re-call the main response generator with the force_truncate flag
+        await _generate_and_send_response(
+            update=update,
+            context=context,
+            chat_id=chat_id,
+            user_id=user_id,
+            prompt=last_user_prompt,
+            current_thread_id=current_thread_id,
+            is_reroll=False, # It's not a standard reroll
+            force_truncate=True # This is the key to bypass the initial check
+        )
+    except Exception as e:
+        logger.error(f"{log_prefix}Error during shrink_and_retry_callback: {e}", exc_info=True)
+        await context.bot.send_message(chat_id, "An error occurred during the retry.", parse_mode=None)
+
 misc_handlers = [
     CommandHandler("help", help_command),
     CommandHandler("reroll", reroll_command),
+    CallbackQueryHandler(shrink_and_retry_callback, pattern="^shrink_and_retry$"),
     # CommandHandler("refresh_menu", refresh_menu_command),
     CommandHandler("new", new_command),
     CommandHandler("provider", provider_command),

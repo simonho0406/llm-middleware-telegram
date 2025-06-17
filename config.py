@@ -94,6 +94,7 @@ SESSION_FILE_PATH = yaml_config.get("session_file_path", "data/sessions.json")
 ALLOWED_CHAT_IDS = yaml_config.get("allowed_chat_ids", None) # None means allow all
 REQUEST_TIMEOUT_SECONDS = yaml_config.get("REQUEST_TIMEOUT_SECONDS", 180) # Default to 180 seconds if not set
 DEFAULT_MAX_CONTEXT_TOKENS = yaml_config.get("default_max_context_tokens", 3800) # Default token limit
+CONTEXT_TOKEN_OUTPUT_BUFFER = yaml_config.get("context_token_output_buffer", 1000) # Default to 1000 if not in yaml
 
 # --- Load Custom OpenAI-Compatible Providers ---
 CUSTOM_PROVIDERS_CONFIG = []
@@ -147,6 +148,7 @@ logger.info(f"  ALLOWED_CHAT_IDS: {ALLOWED_CHAT_IDS}")
 logger.info(f"  REQUEST_TIMEOUT_SECONDS: {REQUEST_TIMEOUT_SECONDS}")
 logger.info(f"  Number of Gemini Keys loaded: {len(GEMINI_API_KEYS)}")
 logger.info(f"  Number of Custom Providers loaded: {len(CUSTOM_PROVIDERS_CONFIG)}")
+logger.info(f"  CONTEXT_TOKEN_OUTPUT_BUFFER: {CONTEXT_TOKEN_OUTPUT_BUFFER}")
 # Avoid logging tokens/keys directly in production logs
 # logger.info(f"  TELEGRAM_BOT_TOKEN: {'Set' if TELEGRAM_BOT_TOKEN else 'Not Set'}")
 # for provider in CUSTOM_PROVIDERS_CONFIG:
