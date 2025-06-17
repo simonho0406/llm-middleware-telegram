@@ -14,14 +14,6 @@ logger = logging.getLogger(__name__)
 
 # --- Basic Command Handlers ---
 
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Sends a welcome message when the /start command is issued."""
-    user = update.effective_user
-    safe_user_name = user.mention_markdown_v2()
-    await update.message.reply_markdown_v2(
-        rf'Hi {safe_user_name}\! I am your friendly LLM bot\. How can I help you today\?'
-    )
-
 # --- Bot Commands and Menu Setup Function ---
 async def setup_bot_commands_and_menu(application: Application) -> None:
     """Sets the bot's command list and menu button for all scopes."""

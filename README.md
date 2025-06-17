@@ -12,6 +12,7 @@ This Telegram bot connects to various Large Language Model (LLM) backends like O
 *   **Configuration:** Flexible configuration via `.env` for secrets and `config.yaml` for settings.
 *   **Dockerized:** Easy deployment using Docker and Docker Compose.
 *   **Reroll Responses:** Regenerate the last AI response using the `/reroll` command.
+*   **Web Search:** Provides real-time information to the LLM to answer questions about current events using the `/search` command.
 
 ## Prerequisites
 
@@ -74,6 +75,7 @@ Interact with your bot in Telegram:
 *   **/list_models:** Lists available/allowed models for the *currently active* provider. (For Ollama, this fetches dynamically; for others, it uses `allowed_models` from `config.yaml`).
 *   **/set_model `<model_name>`:** Sets the model for the *currently active* provider. You can type the name or select from the buttons shown by `/list_models`.
 *   **/rename_thread:** Rename the current thread (sets and displays a custom name)
+*   **/search `<query>`:** Asks the LLM to answer your query using live web search results.
 *   **/reroll:** Regenerates the last response from the AI for your previous prompt.
 *   **Any other text:** Sent as a prompt to the currently selected LLM provider and model.
 

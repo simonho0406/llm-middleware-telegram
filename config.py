@@ -77,6 +77,7 @@ except yaml.YAMLError as e:
 # --- Load API Keys from Environment ---
 # Note: TELEGRAM_BOT_TOKEN and GEMINI_API_KEYS are already loaded from .env above
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY") # Load OpenRouter Key from .env
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 
 # --- Load Provider Defaults ---
 DEFAULT_PROVIDER = yaml_config.get("default_provider", "ollama")
@@ -139,6 +140,7 @@ logger.info(f"  DEFAULT_PROVIDER: {DEFAULT_PROVIDER}")
 logger.info(f"  DEFAULT_OLLAMA_MODEL: {DEFAULT_OLLAMA_MODEL}")
 logger.info(f"  DEFAULT_GEMINI_MODEL: {DEFAULT_GEMINI_MODEL}")
 logger.info(f"  DEFAULT_OPENROUTER_MODEL: {DEFAULT_OPENROUTER_MODEL}") # Log OpenRouter default
+logger.info(f"  Tavily API Key Loaded: {'Yes' if TAVILY_API_KEY else 'No'}")
 logger.info(f"  GEMINI_ASK_ALL_MODELS: {GEMINI_ASK_ALL_MODELS}")
 logger.info(f"  OPENROUTER_ALLOWED_MODELS: {OPENROUTER_ALLOWED_MODELS}") # Log allowed OpenRouter models
 logger.info(f"  OPENROUTER_HTTP_REFERER: {OPENROUTER_HTTP_REFERER}")
