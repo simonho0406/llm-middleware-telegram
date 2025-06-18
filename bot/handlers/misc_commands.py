@@ -39,23 +39,26 @@ MODELS_PER_PAGE = 10
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Sends structured help message with command categories"""
-    help_text = """*Core Functionality*:
+    help_text = """*Core Commands*:
 ├ /start - Initialize the bot
 ├ /help - Show this menu
-├ /search <query> - Search the web to answer a question
-├ /reroll - Regenerate the last AI response
-├ /provider - Show current provider & switch AI service
-└ /new - Start a new conversation thread
+├ /new - Start a new conversation thread
+└ /reroll - Regenerate the last AI response
 
-*Model Management*:
-├ /model - Show current model for active provider
-├ /list_models - List available models for active provider
-└ /set_model `<model_name>` - Set model for active provider (or select from /list_models)
+*Provider & Model Management*:
+├ /provider - Show/switch AI provider
+├ /model - Show current model
+├ /list_models - List available models for the provider
+└ /set_model `<model_name>` - Set a new model
+
+*Advanced Tools*:
+├ /search <query> - Answer a query using web search
+└ /ask_selected <prompt> - Query multiple selected models at once
 
 *Thread Management*:
-├ /rename_thread <name> - Rename the current thread
-└ /threads - List and manage conversation threads"""
-    await update.message.reply_text(escape_markdown(help_text), parse_mode='Markdown')
+├ /threads - List and manage conversation threads
+└ /rename_thread <name> - Rename the current thread"""
+    await update.message.reply_text(escape_markdown(help_text, version=2), parse_mode='MarkdownV2')
 
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """

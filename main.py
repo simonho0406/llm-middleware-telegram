@@ -18,14 +18,23 @@ logger = logging.getLogger(__name__)
 async def setup_bot_commands_and_menu(application: Application) -> None:
     """Sets the bot's command list and menu button for all scopes."""
     commands = [
-        BotCommand("start", "Start the bot and show welcome message"),
-        BotCommand("help", "Show help and available commands"),
-        BotCommand("new", "Start a new conversation thread"),
-        BotCommand("threads", "Manage and switch conversation threads"),
-        BotCommand("provider", "Show/switch LLM provider"),
-        BotCommand("model", "Show current model for active provider"),
-        BotCommand("list_models", "List available models for active provider"),
-        BotCommand("set_model", "Set model for active provider"),
+        # Core
+        BotCommand("help", "Show available commands"),
+        BotCommand("new", "Start a new conversation"),
+        BotCommand("reroll", "Regenerate the last AI response"),
+        # Tools
+        BotCommand("search", "Answer a query using web search"),
+        BotCommand("ask_selected", "Query multiple models at once"),
+        # Provider & Model
+        BotCommand("provider", "Switch AI provider (e.g., Ollama, Gemini)"),
+        BotCommand("model", "Show the current AI model"),
+        BotCommand("list_models", "List available models for the provider"),
+        BotCommand("set_model", "Set a new model for the provider"),
+        # Thread Management
+        BotCommand("threads", "List and manage conversation threads"),
+        BotCommand("rename_thread", "Rename the current thread"),
+        # Misc
+        BotCommand("start", "Initialize the bot"),
     ]
     
     try:

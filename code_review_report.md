@@ -179,18 +179,20 @@ The project provides a good foundation for an LLM middleware bot. Addressing **s
     *   The command and menu button setup logic has been refactored from `run_startup_checks` into a new, dedicated function `setup_bot_commands_and_menu` within `main.py` for improved clarity and encapsulation.
     *   This new function is called during the `post_init` startup sequence. This change, while minor from a logical standpoint, ensures a clean and explicit setup on every bot restart, which should force Telegram clients to update their cached command lists. No further code changes are anticipated for this feature.
 
-## Future Roadmap &amp; Priorities (As of June 2025)
+
+
+## Future Roadmap & Priorities (As of June 2025)
 
 Based on a recent review, the following roadmap has been established to guide future development. Priorities are based on delivering the highest user value and ensuring long-term stability.
 
 ### High-Priority Features:
-*   **Web Search Integration:** This is the next major feature. The goal is to provide the LLM with a tool to access live web search results. This will address the knowledge cutoff limitation and significantly enhance the bot's utility for real-world queries.
+*   **Automatic Search Detection:** The next major feature is to make the web search functionality seamless. The goal is to automatically detect when a user's query requires up-to-date information from the internet, triggering the search workflow without requiring the user to manually invoke the `/search` command.
 
-### Medium-Priority Features &amp; Fixes:
+### Medium-Priority Features & Fixes:
 *   **Multi-Model Interaction:** The `/ask_selected` command will be revisited and refined. This work will serve as a foundation for a potential future "Discussion Mode."
 *   **Database Migration:** The critical task of migrating from `sessions.json` to a scalable database backend (e.g., SQLite) remains a priority to ensure performance and data integrity.
 *   **Provider-Specific Bug Fixes:** Ongoing investigation into the Gemini context recall issue.
 
-### Low-Priority / Code Health Tasks:
+### Low极端的 / Code Health Tasks:
 *   **Configuration Refactoring:** A planned effort to centralize scattered configuration settings into a more cohesive and maintainable structure.
 *   **Pydantic Validation:** The task to implement schema validation for `config.yaml` is still pending.

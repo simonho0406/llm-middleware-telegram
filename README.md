@@ -181,17 +181,17 @@ Interact with your bot in Telegram:
 ## To-Do List
 
 ### High Priority
-1.  **Implement Web Search:** Integrate a web search tool (e.g., via an API like Tavily, Serper, or Brave Search) that the LLM can use to answer questions about recent events or access live information, overcoming knowledge cutoffs.
+1.  **Implement Automatic Search Detection:** Make the web search feature seamless by automatically detecting when a user's query requires up-to-date information. This will remove the need for users to manually use the `/search` command.
 
 ### Medium Priority
-3.  **Refine Multi-Model Queries:** Improve the `/ask_selected` command for better usability and prepare the groundwork for a potential "Discussion Mode" where multiple models can interact.
-4.  **Migrate Session Storage to a Database:** Complete the migration from `sessions.json` to a scalable database like SQLite to improve performance and reliability.
-5.  **Diagnose and Fix Gemini Context Issues:** Continue investigating and resolve any remaining context recall problems with the Gemini provider.
+2.  **Refine Multi-Model Queries:** Improve the `/ask_selected` command for better usability and prepare the groundwork for a potential "Discussion Mode" where multiple models can interact.
+3.  **Migrate Session Storage to a Database:** Complete the migration from `sessions.json` to a scalable database like SQLite to improve performance and reliability.
+4.  **Diagnose and Fix Gemini Context Issues:** Continue investigating and resolve any remaining context recall problems with the Gemini provider.
 
 ### Low Priority (Code Health & Future Enhancements)
-6.  **Consolidate Configuration:** Refactor configuration logic to centralize settings currently scattered across different modules into a more unified and manageable structure.
-7.  **Implement Pydantic Validation:** Add schema validation for `config.yaml` to ensure configuration integrity.
-8.  **Implement Model-Specific Context Management:** Adapt history truncation to respect the unique context window sizes of different models.
+5.  **Consolidate Configuration:** Refactor configuration logic to centralize settings currently scattered across different modules into a more unified and manageable structure.
+6.  **Implement Pydantic Validation:** Add schema validation for `config.yaml` to ensure configuration integrity.
+7.  **Implement Model-Specific Context Management:** Adapt history truncation to respect the unique context window sizes of different models.
 
 ## Contributing
 
