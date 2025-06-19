@@ -146,14 +146,13 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
         llm_error_reported_by_model = True
 
     final_content_to_send = raw_full_llm_response.strip()
+    if not final_content_to_send:
+        final_content_to_send = "[Error: The AI returned an empty response. This might be due to a content filter or an issue with the selected model. Please try rerolling or using a different model.]"
     message_sent_or_edited_successfully = False
     
     reply_to_msg_id = update.message.message_id if update.message else (update.callback_query.message.message_id if update.callback_query else None)
 
     try:
-        if not final_content_to_send:
-            final_content_to_send = "[Error: Received empty response from AI]"
-        
         final_content_to_send = escape_meta_tags_for_markdown_attempt(final_content_to_send)
         
         if len(final_content_to_send) <= TELEGRAM_MAX_LEN and placeholder_message:

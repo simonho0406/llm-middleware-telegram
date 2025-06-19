@@ -415,10 +415,10 @@ async def thread_callback_handler(update: Update, context: ContextTypes.DEFAULT_
     
     if action == "switch_thread":
         await file_storage.set_current_thread_id(chat_id, thread_id)
-        await query.edit_message_text(f"Switched to thread: {thread_id}")
+        await query.edit_message_text(f"Switched to thread: {escape_markdown_v2(thread_id)}")
     elif action == "delete_thread":
         await file_storage.delete_thread(chat_id, thread_id)
-        await query.edit_message_text(f"Deleted thread: {thread_id}")
+        await query.edit_message_text(f"Deleted thread: {escape_markdown_v2(thread_id)}")
     
     await list_threads_command(update, context)
 
