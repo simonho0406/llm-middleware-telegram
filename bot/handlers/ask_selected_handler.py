@@ -39,7 +39,7 @@ async def get_models_for_provider(provider: str) -> List[Dict[str, Any]]:
         models = [{"id": m, "name": m} for m in ollama_models]
     elif provider == "gemini":
         # Fetch models dynamically from Gemini service
-        models = await gemini_service.list_gemini_models()
+        models = await gemini_service.list_models()
     elif provider == "openrouter":
         models = await openrouter_service.list_models() # Fetch free models
     return models

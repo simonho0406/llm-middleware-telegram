@@ -1,6 +1,7 @@
 import logging
 import asyncio
 import time
+import hashlib
 
 from telegram import (
     Update,
@@ -238,42 +239,91 @@ async def model_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     )
 
 async def list_models_command(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 1, provider_name_from_callback: str | None = None) -> None:
-    """Lists available/allowed models for the current provider."""
+    """Lists available/allowed models for the current provider with pagination."""
     chat_id = update.effective_chat.id
     provider_name = provider_name_from_callback or await file_storage.get_thread_key(chat_id, 'provider', config.DEFAULT_PROVIDER)
     
     provider_config = providers.get_config_for_provider(provider_name)
+    if not provider_config:
+        await update.effective_message.reply_text(f"Error: Could not find configuration for provider '{escape_markdown(provider_name)}'.")
+        return
+        
     service = providers.get_service_for_provider(provider_name)
     
     models_result = []
-    if service and hasattr(service, 'list_models'):
-        models_result = await service.list_models()
-    elif provider_config and provider_config.get('allowed_models'):
-        models_result = provider_config.get('allowed_models')
-
-    if not models_result:
-        await update.effective_message.reply_text(f"No models found for provider '{escape_markdown(provider_name)}'.")
+    try:
+        if service and hasattr(service, 'list_models'):
+            models_result = await service.list_models()
+        elif provider_config.get('allowed_models'):
+            models_result = provider_config.get('allowed_models')
+    except Exception as e:
+        logger.error(f"Failed to get models for provider '{provider_name}': {e}")
+        await update.effective_message.reply_text(f"An error occurred while fetching models for '{escape_markdown(provider_name)}'.")
         return
 
+    if not models_result:
+        await update.effective_message.reply_text(f"No models found or configured for provider '{escape_markdown(provider_name)}'.")
+        return
+
+    models_result.sort(key=lambda m: m['name'].lower() if isinstance(m, dict) else m.lower())
+
+    total_models = len(models_result)
+    start_index = (page - 1) * MODELS_PER_PAGE
+    end_index = start_index + MODELS_PER_PAGE
+    paginated_models = models_result[start_index:end_index]
+
+    context.user_data.setdefault('model_metadata', {})
+
     buttons = []
-    for model in models_result:
+    for model in paginated_models:
         model_id = model['id'] if isinstance(model, dict) else model
         display_name = model['name'] if isinstance(model, dict) else model
-        buttons.append([InlineKeyboardButton(display_name, callback_data=f"{MODEL_CALLBACK_PREFIX}{provider_name}:{model_id}")])
+        
+        unique_key = f"{provider_name}_{model_id}".encode()
+        model_hash = hashlib.sha256(unique_key).hexdigest()[:12]
+        
+        context.user_data['model_metadata'][model_hash] = {'provider': provider_name, 'model_id': model_id}
+        
+        display_name_short = (display_name[:25] + '...') if len(display_name) > 28 else display_name
+        buttons.append([InlineKeyboardButton(display_name_short, callback_data=f"{MODEL_CALLBACK_PREFIX}{model_hash}")])
+
+    pagination_row = []
+    if start_index > 0:
+        pagination_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"{MODEL_LIST_PAGE_CALLBACK_PREFIX}{provider_name}:{page-1}"))
+    if end_index < total_models:
+        pagination_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"{MODEL_LIST_PAGE_CALLBACK_PREFIX}{provider_name}:{page+1}"))
+    
+    if pagination_row:
+        buttons.append(pagination_row)
 
     reply_markup = InlineKeyboardMarkup(buttons)
-    await update.effective_message.reply_text(f"Select a model for *{escape_markdown(provider_name)}*:", reply_markup=reply_markup, parse_mode='Markdown')
+    total_pages = (total_models + MODELS_PER_PAGE - 1) // MODELS_PER_PAGE
+    message_text = f"Select a model for *{escape_markdown(provider_name)}* (Page {page}/{total_pages}):"
+    
+    try:
+        if update.callback_query:
+            await update.callback_query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode='Markdown')
+        else:
+            await update.message.reply_text(message_text, reply_markup=reply_markup, parse_mode='Markdown')
+    except BadRequest as e:
+        if "Button_data_invalid" in str(e):
+            logger.error(f"Error sending model list keyboard: {e}. Some model names might be too long for callback data.")
+            await update.effective_message.reply_text("Error: Could not display model list due to an API limitation. Please try a different provider.")
+        else:
+            raise
 
 async def list_models_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles pagination for model list."""
     query = update.callback_query
     await query.answer()
     try:
-        _, provider_name, page_str = query.data.split(":")
+        rest = query.data[len(MODEL_LIST_PAGE_CALLBACK_PREFIX):]
+        provider_name, page_str = rest.split(':', 1)
         page = int(page_str)
         await list_models_command(update, context, page=page, provider_name_from_callback=provider_name)
-    except (ValueError, IndexError):
-        await query.edit_message_text("Error processing pagination.")
+    except (ValueError, IndexError) as e:
+        logger.error(f"Error processing pagination callback: {e}", exc_info=True)
+        await query.edit_message_text(escape_markdown_v2("Error processing pagination. Please try the /list_models command again."))
 
 async def set_model_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles button presses for setting the model."""
@@ -281,16 +331,32 @@ async def set_model_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
     chat_id = update.effective_chat.id
     try:
-        _, provider_name, model_name = query.data.split(":", 2)
+        model_hash = query.data[len(MODEL_CALLBACK_PREFIX):]
+        
+        model_metadata = context.user_data.get('model_metadata', {})
+        model_info = model_metadata.get(model_hash)
+        
+        if not model_info:
+            await query.edit_message_text(escape_markdown_v2("Model selection has expired or the bot was restarted. Please use /list_models again."))
+            return
+            
+        provider_name = model_info['provider']
+        model_name = model_info['model_id']
+        
         provider_config = providers.get_config_for_provider(provider_name)
         if not provider_config:
-            await query.edit_message_text(f"Error: Provider '{escape_markdown(provider_name)}' not found.")
+            await query.edit_message_text(escape_markdown_v2(f"Error: Provider '{provider_name}' not found."))
             return
+            
         model_session_key = provider_config['model_session_key']
         await file_storage.set_thread_key(chat_id, model_session_key, model_name)
+        
+        context.user_data.pop('model_metadata', None)
+            
         await query.edit_message_text(f"Model for *{escape_markdown(provider_name)}* set to: `{escape_markdown(model_name)}`", parse_mode='Markdown')
-    except (ValueError, IndexError):
-        await query.edit_message_text("Error processing model selection.")
+    except Exception as e:
+        logger.error(f"Error in set_model_callback: {e}", exc_info=True)
+        await query.edit_message_text(escape_markdown_v2("An error occurred while setting the model. Please try again."))
 
 async def set_model_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Starts the conversation to set a model by typing."""
