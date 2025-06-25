@@ -11,16 +11,9 @@ from services import ollama_service, gemini_service, openrouter_service
 from services.openai_compatible_service import OpenAICompatibleService
 from config import CUSTOM_PROVIDERS_CONFIG
 from storage import file_storage
-from utils.text_processing import split_message_markdown_aware
+from utils.text_processing import split_message_markdown_aware, escape_markdown_v2
 
 logger = logging.getLogger(__name__)
-
-def escape_markdown_v2(text: str) -> str:
-    """Escapes text for Telegram's MarkdownV2 parse mode."""
-    if not text:
-        return ""
-    escape_chars = r'\_*[]()~`>#+-=|{}.!'
-    return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', text)
 
 def count_tokens(text: str) -> int:
     try:
@@ -147,7 +140,9 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
 
     final_content_to_send = raw_full_llm_response.strip()
     if not final_content_to_send:
-        final_content_to_send = "[Error: The AI returned an empty response. This might be due to a content filter or an issue with the selected model. Please try rerolling or using a different model.]"
+        final_content_to_send = escape_markdown_v2(
+            "[Error: The AI returned an empty response. This might be due to a content filter or an issue with the selected model. Please try rerolling or using a different model.]"
+        )
     message_sent_or_edited_successfully = False
     
     reply_to_msg_id = update.message.message_id if update.message else (update.callback_query.message.message_id if update.callback_query else None)

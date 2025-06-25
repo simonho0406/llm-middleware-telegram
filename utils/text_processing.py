@@ -3,6 +3,13 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+def escape_markdown_v2(text: str) -> str:
+    """Escapes text for Telegram's MarkdownV2 parse mode."""
+    if not text:
+        return ""
+    escape_chars = r'\_*[]()~`>#+-=|{}.!'
+    return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', text)
+
 TELEGRAM_MAX_LEN = 4096 # Default, can be overridden
 
 def split_message_markdown_aware(text: str, max_len: int = TELEGRAM_MAX_LEN) -> list[str]:

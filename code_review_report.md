@@ -2,7 +2,7 @@
 
 ## Code Review Report (Follow-up)
 
-**Date:** 2024-05-07 (Date of this review)
+**Date:** 2025-06-26 (Date of this review)
 **Reviewer:** Gemini
 
 ### Overall Summary (Follow-up)
@@ -104,33 +104,32 @@ The codebase is generally well-structured, utilizing Python's `asyncio` for asyn
 
 ### 2. Context Window Management (`bot/handlers/chat.py`)
 
-* **Issue:** Conversation history (`context_history`) is truncated based on a fixed number of messages (`[-19:]`) rather than token count.
-* **Risk:** Easily exceeds the actual token limit of the selected LLM, leading to API errors or unexpected behavior.
-* **Recommendation:** ✅ Implemented
-  * Token-based truncation implemented using tiktoken and a globally configurable token limit (default_max_context_tokens). Further refinement for model-specific limits could be future work.
+### Context Management (`bot/handlers/chat.py`)
+*   **Status:** ✅ **Implemented**
+*   **Description:** History is truncated based on token count using `tiktoken`, with a globally configurable token limit and output buffer. This prevents most API errors from oversized contexts.
+*   **Next Step:** Future enhancements could include model-specific context window limits.
 
 ### 3. Redundant Command Handlers (`ollama_commands.py`, etc.)
 
-*   **Issue:** Provider-specific command handlers duplicate functionality of generic commands in `misc_commands.py`.
-*   **Risk:** Increased complexity, maintenance overhead, and potential inconsistencies.
-*   **Recommendation:** ✅ Implemented
-    *   Provider-specific list/set model commands have been removed. Model management is now handled by generic commands in misc_commands.py
+### Multi-Model "Round Table" (`/discuss`)
+*   **Status:** ✅ **Implemented & Stabilized (Phase 1 Complete)**
+*   **Description:** The `/discuss` command provides a stable, multi-step `ConversationHandler` for a user to select a single provider, then choose multiple models from a paginated list. It facilitates a sequential, turn-by-turn discussion between the selected models. The feature is fully isolated with robust error handling and state-based logging for debuggability.
+*   **Next Step:** Future enhancements could include model-specific context window limits.
 
 ### 4. Configuration (`config.py`, `config.yaml`)
 
-*   **Issue:** Missing/invalid `config.yaml` results in an empty config. `ALLOWED_CHAT_IDS` defaults to `None` (allow all).
-*   **Risk:** Bot might run with unexpected defaults. Default allow-all chats might be insecure.
-*   **Recommendation:** ⚠️ Partially Implemented
-    *   Schema validation using Pydantic has not been implemented
-    *   The HTTP-Referer for OpenRouter is now configurable via config.yaml
+### Configuration (`config.py`, `config.yaml`)
+*   **Status:** ⚠️ **Partially Implemented**
+*   **Description:** Schema validation using Pydantic is pending. The `HTTP-Referer` for OpenRouter has been moved to environment variables, but other configuration settings remain scattered and unvalidated.
+*   **Next Step:** Implement Pydantic validation for config.yaml and centralize configuration management.
     *   default_max_context_tokens configuration has been added
 
 ### 5. Error Handling & Logging
 
-* **Issue:** Complex error handling for message edits. Logging is good but could be more structured.
-* **Risk:** Difficult to trace issues in production; complex error handling can be prone to bugs.
-* **Recommendation:** ⚠️ Partially Implemented
-  * Basic logging is present, but full structured logging with context (thread/session IDs in every relevant message) is not yet implemented
+### Configuration (`config.py`, `config.yaml`)
+*   **Status:** ⚠️ **Partially Implemented**
+*   **Description:** Schema validation using Pydantic is pending. The `HTTP-Referer` for OpenRouter has been moved to environment variables, but other configuration settings remain scattered and unvalidated.
+*   **Next Step:** Implement Pydantic validation for config.yaml and centralize configuration management.
 
 ### 6. Minor Issues
 
@@ -193,6 +192,6 @@ Based on a recent review, the following roadmap has been established to guide fu
 *   **Database Migration:** The critical task of migrating from `sessions.json` to a scalable database backend (e.g., SQLite) remains a priority to ensure performance and data integrity.
 *   **Provider-Specific Bug Fixes:** Ongoing investigation into the Gemini context recall issue.
 
-### Low极端的 / Code Health Tasks:
+### Low-priority / Code Health Tasks:
 *   **Configuration Refactoring:** A planned effort to centralize scattered configuration settings into a more cohesive and maintainable structure.
 *   **Pydantic Validation:** The task to implement schema validation for `config.yaml` is still pending.

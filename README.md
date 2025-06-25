@@ -1,83 +1,83 @@
-# llm-middleware-telegram - Multi-Backend LLM Telegram Bot
+# llm-middleware-telegram - Multi-Backend LLM Bot
 
 This Telegram bot connects to various Large Language Model (LLM) backends like Ollama, Google Gemini, and OpenRouter, allowing users to interact with different AI models through a Telegram interface.
 
 ## Features
 
 *   **Multiple LLM Backends:** Supports Ollama (local or remote), Google Gemini, OpenRouter, and any OpenAI-compatible API via configuration.
-*   **Provider Switching:** Users can switch between all configured LLM providers using the `/provider` command.
-*   **Generic Model Selection:** Users can list and select models for the *active* provider using `/list_models` and `/set_model`.
-*   **Conversation Threads:** Maintains separate conversation histories for different chats or threads within a chat (`/new` command).
+*   **Provider & Model Switching:** Dynamically switch between providers (`/provider`) and select from paginated model lists (`/list_models`, `/set_model`).
+*   **Conversation Threads:** Maintains separate, persistent conversation histories that can be created (`/new`), listed (`/threads`), and renamed (`/rename_thread`).
 *   **Streaming Responses:** Edits messages in place to show responses as they are generated.
-*   **Configuration:** Flexible configuration via `.env` for secrets and `config.yaml` for settings.
-*   **Dockerized:** Easy deployment using Docker and Docker Compose.
-*   **Reroll Responses:** Regenerate the last AI response using the `/reroll` command.
+*   **Advanced Multi-Model Tools:**
+    *   **/ask_selected:** Query multiple models concurrently with a single prompt.
+    *   **/discuss:** A "Round Table" feature where multiple models from a single provider engage in a sequential, turn-by-turn conversation to refine an answer.
 *   **Web Search:** Provides real-time information to the LLM to answer questions about current events using the `/search` command.
+*   **Dockerized:** Easy deployment using Docker and Docker Compose.
 
 ## Prerequisites
 
-*   **Python:** 3.10 or higher
-*   **Docker:** Latest version recommended
-*   **Docker Compose:** Latest version recommended
+*   **Python:** 3.11 or higher
+*   **Docker & Docker Compose:** Latest versions recommended
 *   **API Keys/Tokens:**
-    *   Telegram Bot Token
-    *   Google Gemini API Key(s) (if using Gemini)
-    *   OpenRouter API Key (if using OpenRouter)
-    *   API Keys for any Custom OpenAI-compatible providers you configure.
-*   **Ollama:** Running instance accessible from the Docker container (if using Ollama).
+    *   A valid Telegram Bot Token.
+    *   API keys for any providers you wish to use (Gemini, OpenRouter, Groq, etc.).
+*   **Ollama:** A running instance if you intend to use the Ollama provider.
 
 ## Setup Instructions
 
 1.  **Clone the repository:**
     ```bash
-    git clone <repository_url> # Replace with the actual URL
+    git clone <repository_url>
     cd llm-middleware-telegram
     ```
 
-2.  **Create the environment file:**
-    *   Copy the example environment file:
-        ```bash
-        cp .env.example .env
-        ```
-    *   **Edit the `.env` file** and add your actual API keys and tokens:
-        *   `TELEGRAM_BOT_TOKEN`: Your Telegram bot token from BotFather.
-        *   `GEMINI_API_KEY_1` (and potentially others like `GEMINI_API_KEY_2`, etc., or `GEMINI_API_KEYS`): Your Google AI Studio API key(s).
-        *   `OPENROUTER_API_KEY`: Your OpenRouter API key.
-        *   `GROQ_API_KEY`, `ANOTHER_PROVIDER_API_KEY`, etc.: API keys for any custom providers you add in `config.yaml`. The environment variable name must match the provider name (uppercase) + `_API_KEY`.
+2.  **Create and configure the environment file:**
+    ```bash
+    cp .env.example .env
+    ```
+    Edit the `.env` file and add your actual API keys and tokens. See `.env.example` for the required format.
 
 3.  **Configure `config.yaml`:**
-    *   Review the `config.yaml` file.
-    *   Adjust default providers and models if desired.
-    *   **Add Custom Providers:** Add entries under the `custom_openai_providers` list to configure providers with OpenAI-compatible APIs (like Groq, Requesty, Together AI, etc.). For each custom provider, specify:
-        *   `name`: A unique identifier (e.g., "groq", "requesty").
-        *   `base_url`: The API base URL (e.g., "https://api.groq.com/openai/v1", "https://router.requesty.ai/v1").
-        *   `default_model`: The default model ID for this provider (e.g., "llama3-8b-8192", "openai/gpt-4o").
-        *   `allowed_models` (Optional): A list of model IDs users can select with `/set_model`. If omitted, only the default model might be selectable via commands.
-    *   Ensure you have set the corresponding API key in your `.env` file (e.g., `GROQ_API_KEY` for a provider named "groq").
+    *   Review `config.yaml` to set default providers, models, and custom provider endpoints.
+    *   For custom OpenAI-compatible providers, ensure you define the `name`, `base_url`, and `default_model`. The corresponding API key must be set in `.env` (e.g., a provider named "groq" requires `GROQ_API_KEY` in the `.env` file).
 
 4.  **Build and Run with Docker Compose:**
     ```bash
     docker compose up --build -d
     ```
-    *   The `-d` flag runs the container in detached mode (in the background). Omit it if you want to see the logs directly in your terminal.
-    *   To view logs when running detached: `docker compose logs -f`
-    *   To stop the bot: `docker compose down`
+    *   Use `docker compose logs -f` to view logs.
+    *   Use `docker compose down` to stop the bot.
 
 ## Usage
 
-Interact with your bot in Telegram:
+*   **/help:** Displays the main list of commands.
+*   **/new:** Starts a new, empty conversation thread.
+*   **/reroll:** Regenerates the last AI response.
+*   **/provider:** Switch between configured AI providers.
+*   **/model:** Show and set the model for the current provider.
+*   **/discuss <prompt>:** Starts a sequential, multi-model discussion on a topic.
+*   **/search <query>:** Answers a query using live web search results.
+*   **/threads:** List, switch between, or delete your conversation threads.
 
-*   **/start:** Shows a welcome message.
-*   **/help:** Displays available commands.
-*   **/new:** Starts a new conversation thread (clears history for the current chat).
-*   **/provider:** Shows the current LLM provider and allows switching between all configured providers (including custom ones).
-*   **/model:** Shows the currently selected model for the active provider.
-*   **/list_models:** Lists available/allowed models for the *currently active* provider. (For Ollama, this fetches dynamically; for others, it uses `allowed_models` from `config.yaml`).
-*   **/set_model `<model_name>`:** Sets the model for the *currently active* provider. You can type the name or select from the buttons shown by `/list_models`.
-*   **/rename_thread:** Rename the current thread (sets and displays a custom name)
-*   **/search `<query>`:** Asks the LLM to answer your query using live web search results.
-*   **/reroll:** Regenerates the last response from the AI for your previous prompt.
-*   **Any other text:** Sent as a prompt to the currently selected LLM provider and model.
+## Project Roadmap & Priorities
+
+Development is guided by a strategic roadmap focused on evolving the bot into a sophisticated collaborative AI tool.
+
+### Phase 1: Multi-Agent "Round Table" Discussion
+*   **Status:** ✅ **Completed & Stabilized**
+*   **Description:** The `/discuss` command allows a user to select multiple models from a single provider to engage in a sequential conversation, where each model critiques or builds upon the previous one's response.
+
+### Phase 1.5: Multi-Provider Discussion (Next)
+*   **Status:** 📝 **Planned**
+*   **Description:** Evolve the `/discuss` command to allow selecting models from *different* providers. This will enable more powerful, heterogeneous agent chains (e.g., a fast model for outlining, a powerful model for generation) and mitigate single-provider rate limits.
+
+### Phase 2: Multi-Agent "Expert Panel" (Future)
+*   **Status:** 📝 **Planned**
+*   **Description:** A true multi-agent system where a lead agent decomposes a query into sub-tasks, assigns them to specialized sub-agents that execute in parallel, and a final agent synthesizes the results.
+
+### High-Priority Technical & Feature Work
+1.  **Database Migration:** Migrate session storage from `sessions.json` to a scalable database backend (e.g., SQLite) to ensure performance and data integrity. This is a prerequisite for more advanced agentic features.
+2.  **Seamless Tool Integration (Automatic Search):** Evolve the bot to automatically detect when a user's query requires up-to-date information, triggering the `/search` workflow without manual user intervention.
 
 ## Configuration Details
 
@@ -101,14 +101,7 @@ Interact with your bot in Telegram:
 *   **Mitigation:**
     *   Uses sessions.json with atomic saves. Migration to a database backend (e.g., SQLite) is the top priority for true scalability and performance.
 
-### 2. Redundant Handlers
-*   **Cause:** Multiple command handlers performing similar validation checks
-*   **Impact:** Code duplication and maintenance overhead
-*   **Mitigation:**
-    *   Create base handler class with common validation logic
-    *   Refactor provider-specific handlers to inherit from base
-
-### 3. Telegram Network Errors (`Bad Gateway`, `NetworkError`)
+### 2. Telegram Network Errors (`Bad Gateway`, `NetworkError`)
 
 *   **Cause:** Transient connectivity issues with Telegram servers or API downtime.
 *   **Impact:** Bot may temporarily stop receiving updates or sending messages.
@@ -117,7 +110,7 @@ Interact with your bot in Telegram:
     *   Check your internet connection and Telegram status.
     *   Consider adding exponential backoff and alerting for repeated failures.
 
-### 4. HTTP Connection Failures (`httpx.ConnectError`)
+### 3. HTTP Connection Failures (`httpx.ConnectError`)
 
 *   **Cause:** Network problems reaching LLM APIs or Telegram.
 *   **Impact:** API calls fail, leading to incomplete responses.
@@ -126,7 +119,7 @@ Interact with your bot in Telegram:
     *   Check firewall/proxy settings.
     *   Implement retries with backoff in service layer (`services/`).
 
-### 5. Message Edit Errors (`Message is not modified`)
+### 4. Message Edit Errors (`Message is not modified`)
 
 *   **Cause:** Bot attempts to edit a message with identical content.
 *   **Impact:** Benign error, but clutters logs.
@@ -134,7 +127,7 @@ Interact with your bot in Telegram:
     *   Catch and ignore this specific error.
     *   Or, compare content before editing.
 
-### 6. Telegram Flood Control
+### 5. Telegram Flood Control
 
 *   **Cause:** Too many messages or edits in a short time.
 *   **Impact:** Delays in message delivery.
@@ -143,13 +136,7 @@ Interact with your bot in Telegram:
     *   Avoid unnecessary edits.
     *   Respect Telegram rate limits.
 
-### 7. Context Window Management
-*   **Cause:** Global token-based history truncation is implemented using default_max_context_tokens
-*   **Impact:** May not account for model-specific context window sizes
-*   **Mitigation:**
-    *   Future enhancement: model-specific context window management
-
-### 8. Gemini Context Recall Issues
+### 6. Gemini Context Recall Issues
 *   **Cause:** When using the Gemini provider, the LLM may occasionally not recall earlier parts of the current conversation thread, particularly after a provider switch or if unrelated API errors occurred previously in the thread.
 *   **Impact:** Inconsistent conversation history for Gemini
 *   **Mitigation:**
@@ -178,21 +165,6 @@ Interact with your bot in Telegram:
 *   **Documentation:**  
     Update this README section if new error patterns emerge or fixes are implemented.
 
-## To-Do List
-
-### High Priority
-1.  **Implement Automatic Search Detection:** Make the web search feature seamless by automatically detecting when a user's query requires up-to-date information. This will remove the need for users to manually use the `/search` command.
-
-### Medium Priority
-2.  **Refine Multi-Model Queries:** Improve the `/ask_selected` command for better usability and prepare the groundwork for a potential "Discussion Mode" where multiple models can interact.
-3.  **Migrate Session Storage to a Database:** Complete the migration from `sessions.json` to a scalable database like SQLite to improve performance and reliability.
-4.  **Diagnose and Fix Gemini Context Issues:** Continue investigating and resolve any remaining context recall problems with the Gemini provider.
-
-### Low Priority (Code Health & Future Enhancements)
-5.  **Consolidate Configuration:** Refactor configuration logic to centralize settings currently scattered across different modules into a more unified and manageable structure.
-6.  **Implement Pydantic Validation:** Add schema validation for `config.yaml` to ensure configuration integrity.
-7.  **Implement Model-Specific Context Management:** Adapt history truncation to respect the unique context window sizes of different models.
-
 ## Contributing
 
-Contributions are welcome! If you'd like to help with any of the to-do items or suggest improvements, please open an issue or submit a pull request.
+Contributions are welcome! If you'd like to help with any of the roadmap items or suggest improvements, please open an issue or submit a pull request.

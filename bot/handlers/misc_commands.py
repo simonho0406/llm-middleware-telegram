@@ -23,7 +23,8 @@ from telegram.error import BadRequest
 import config
 from bot import providers
 from storage import file_storage
-from bot.handlers.chat import _generate_and_send_response, escape_markdown_v2
+from bot.handlers.chat import _generate_and_send_response
+from utils.text_processing import escape_markdown_v2
 from services import web_search_service
 from utils.text_processing import split_message_markdown_aware
 
@@ -54,7 +55,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 *Advanced Tools*:
 ├ /search <query> - Answer a query using web search
-└ /ask_selected <prompt> - Query multiple selected models at once
+├ /ask_selected <prompt> - Query multiple selected models at once
+└ /discuss - Start a multi-model discussion
 
 *Thread Management*:
 ├ /threads - List and manage conversation threads
@@ -201,7 +203,7 @@ async def list_threads_command(update: Update, context: ContextTypes.DEFAULT_TYP
     threads = await file_storage.list_threads(chat_id)
     current_thread = await file_storage.get_current_thread_id(chat_id)
     if not threads:
-        await update.message.reply_text("No threads found.")
+        await update.effective_message.reply_text("No threads found.")
         return
 
     keyboard = []
@@ -220,7 +222,7 @@ async def list_threads_command(update: Update, context: ContextTypes.DEFAULT_TYP
         keyboard.append([InlineKeyboardButton(label, callback_data="noop")] + action_row)
         
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Your conversation threads:", reply_markup=reply_markup)
+    await update.effective_message.reply_text("Your conversation threads:", reply_markup=reply_markup)
 
 async def model_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Shows the currently selected model for the active provider."""
