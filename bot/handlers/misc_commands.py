@@ -22,7 +22,7 @@ from telegram.error import BadRequest
 
 import config
 from bot import providers
-from storage import file_storage
+import storage
 from bot.handlers.chat import _generate_and_send_response
 from utils.text_processing import escape_markdown_v2
 from services import web_search_service
@@ -92,14 +92,14 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         f"--- WEB SEARCH RESULTS ---\n{search_results}"
     )
 
-    session_provider = await file_storage.get_thread_key(chat_id, 'provider', config.DEFAULT_PROVIDER)
+    session_provider = await storage.get_thread_key(chat_id, 'provider', config.DEFAULT_PROVIDER)
     provider_details = providers.get_provider_details()
     provider_config = provider_details.get(session_provider, provider_details[config.DEFAULT_PROVIDER])
     
     service = provider_config['service']
     model_key = provider_config['model_session_key']
     default_model = provider_config['default_model']
-    model_to_use = await file_storage.get_thread_key(chat_id, model_key, default_model)
+    model_to_use = await storage.get_thread_key(chat_id, model_key, default_model)
 
     await placeholder_message.edit_text(f"Found results. Asking {session_provider.capitalize()} ({model_to_use}) for analysis...", parse_mode=None)
 
@@ -123,12 +123,12 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         logger.error(f"{log_prefix}Failed to send final search response: {e}", exc_info=True)
 
     try:
-        history = await file_storage.get_thread_key(chat_id, 'history', [])
+        history = await storage.get_thread_key(chat_id, 'history', [])
         history.extend([
             {'role': 'user', 'content': query},
             {'role': 'assistant', 'content': final_response}
         ])
-        await file_storage.set_thread_key(chat_id, 'history', history)
+        await storage.set_thread_key(chat_id, 'history', history)
         logger.info(f"{log_prefix}Search command successful. History updated with original query.")
     except Exception as e:
         logger.error(f"{log_prefix}Failed to save history after search: {e}", exc_info=True)
@@ -140,17 +140,17 @@ async def new_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     new_thread_id = f"thread_{int(time.time())}"
     logger.info(f"[NEW_THREAD] User {user_id}, Chat {chat_id}: Received /new command. Generating new thread ID: {new_thread_id}")
     try:
-        await file_storage.create_thread(chat_id, new_thread_id)
-        await file_storage.set_current_thread_id(chat_id, new_thread_id)
-        await file_storage.set_thread_key(chat_id, 'history', [])
+        await storage.create_thread(chat_id, new_thread_id)
+        await storage.set_current_thread_id(chat_id, new_thread_id)
+        await storage.set_thread_key(chat_id, 'history', [])
         default_provider = config.DEFAULT_PROVIDER
-        await file_storage.set_thread_key(chat_id, 'provider', default_provider)
+        await storage.set_thread_key(chat_id, 'provider', default_provider)
         provider_config = providers.get_config_for_provider(default_provider)
         if provider_config:
             model_key = provider_config.get('model_session_key')
             default_model = provider_config.get('default_model')
             if model_key and default_model:
-                await file_storage.set_thread_key(chat_id, model_key, default_model)
+                await storage.set_thread_key(chat_id, model_key, default_model)
         msg = f"Started a new thread: `{escape_markdown_v2(new_thread_id)}`"
         await update.message.reply_text(msg, parse_mode=constants.ParseMode.MARKDOWN_V2)
     except Exception as e:
@@ -160,7 +160,7 @@ async def new_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 async def provider_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Shows current provider and buttons to switch."""
     chat_id = update.effective_chat.id
-    current_provider = await file_storage.get_thread_key(chat_id, 'provider', config.DEFAULT_PROVIDER)
+    current_provider = await storage.get_thread_key(chat_id, 'provider', config.DEFAULT_PROVIDER)
     available_providers = providers.get_available_provider_names()
     if not available_providers:
          await update.message.reply_text("Error: No providers available.")
@@ -180,7 +180,7 @@ async def set_provider_callback(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
     chat_id = update.effective_chat.id
     provider_name = query.data.replace(PROVIDER_CALLBACK_PREFIX, "")
-    await file_storage.set_thread_key(chat_id, 'provider', provider_name)
+    await storage.set_thread_key(chat_id, 'provider', provider_name)
     logger.info(f"Chat {chat_id} provider set to '{provider_name}'")
     
     available_providers = providers.get_available_provider_names()
@@ -200,41 +200,47 @@ async def set_provider_callback(update: Update, context: ContextTypes.DEFAULT_TY
 async def list_threads_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Lists all threads for the user with switch/delete buttons."""
     chat_id = update.effective_chat.id
-    threads = await file_storage.list_threads(chat_id)
-    current_thread = await file_storage.get_current_thread_id(chat_id)
+    threads = await storage.list_threads(chat_id)
+    current_thread = await storage.get_current_thread_id(chat_id)
     if not threads:
         await update.effective_message.reply_text("No threads found.")
         return
 
     keyboard = []
-    for thread_id in threads:
-        thread_data = await file_storage.get_thread_data(chat_id, thread_id)
-        custom_name = thread_data.get('name')
+    for thread_info in threads:
+        if isinstance(thread_info, dict):
+            thread_id = thread_info.get("id")
+            custom_name = thread_info.get("name")
+        else:
+            thread_id = thread_info
+            thread_data = await storage.get_thread_data(chat_id, thread_id)
+            custom_name = thread_data.get('name')
+
         display_text = f"{custom_name.strip()} ({thread_id})" if custom_name and custom_name.strip() else thread_id
-        label = f"✅ {display_text}" if thread_id == current_thread else display_text
-        
+        label = f"✅  {display_text}" if thread_id == current_thread else display_text
+
         action_row = []
         if thread_id != current_thread:
             action_row.append(InlineKeyboardButton("Switch", callback_data=f"switch_thread:{thread_id}"))
         if thread_id != "default":
             action_row.append(InlineKeyboardButton("Delete", callback_data=f"delete_thread:{thread_id}"))
-        
+
         keyboard.append([InlineKeyboardButton(label, callback_data="noop")] + action_row)
-        
+
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.effective_message.reply_text("Your conversation threads:", reply_markup=reply_markup)
 
 async def model_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Shows the currently selected model for the active provider."""
     chat_id = update.effective_chat.id
-    provider_name = await file_storage.get_thread_key(chat_id, 'provider', config.DEFAULT_PROVIDER)
+    provider_name = await storage.get_thread_key(chat_id, 'provider', config.DEFAULT_PROVIDER)
     provider_config = providers.get_config_for_provider(provider_name)
     if not provider_config:
         await update.message.reply_text(f"Error: Provider '{escape_markdown(provider_name)}' not found or configured.")
         return
     model_session_key = provider_config['model_session_key']
     default_model = provider_config['default_model']
-    current_model = await file_storage.get_thread_key(chat_id, model_session_key, default_model)
+    current_model = await storage.get_thread_key(chat_id, model_session_key, default_model)
     await update.message.reply_text(
         f"Current model for provider *{escape_markdown(provider_name)}*: `{escape_markdown(current_model)}`",
         parse_mode='Markdown'
@@ -243,7 +249,7 @@ async def model_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def list_models_command(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 1, provider_name_from_callback: str | None = None) -> None:
     """Lists available/allowed models for the current provider with pagination."""
     chat_id = update.effective_chat.id
-    provider_name = provider_name_from_callback or await file_storage.get_thread_key(chat_id, 'provider', config.DEFAULT_PROVIDER)
+    provider_name = provider_name_from_callback or await storage.get_thread_key(chat_id, 'provider', config.DEFAULT_PROVIDER)
     
     provider_config = providers.get_config_for_provider(provider_name)
     if not provider_config:
@@ -351,7 +357,7 @@ async def set_model_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return
             
         model_session_key = provider_config['model_session_key']
-        await file_storage.set_thread_key(chat_id, model_session_key, model_name)
+        await storage.set_thread_key(chat_id, model_session_key, model_name)
         
         context.user_data.pop('model_metadata', None)
             
@@ -363,7 +369,7 @@ async def set_model_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def set_model_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Starts the conversation to set a model by typing."""
     chat_id = update.effective_chat.id
-    provider_name = await file_storage.get_thread_key(chat_id, 'provider', config.DEFAULT_PROVIDER)
+    provider_name = await storage.get_thread_key(chat_id, 'provider', config.DEFAULT_PROVIDER)
     await update.message.reply_text(
         f"Please type the name of the model for *{escape_markdown(provider_name)}*.",
         parse_mode='Markdown'
@@ -374,11 +380,11 @@ async def set_model_typed(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     """Handles user typing a model name."""
     chat_id = update.effective_chat.id
     model_name = update.message.text.strip()
-    provider_name = await file_storage.get_thread_key(chat_id, 'provider', config.DEFAULT_PROVIDER)
+    provider_name = await storage.get_thread_key(chat_id, 'provider', config.DEFAULT_PROVIDER)
     provider_config = providers.get_config_for_provider(provider_name)
     if provider_config:
         model_session_key = provider_config['model_session_key']
-        await file_storage.set_thread_key(chat_id, model_session_key, model_name)
+        await storage.set_thread_key(chat_id, model_session_key, model_name)
         await update.message.reply_text(
             f"Model for *{escape_markdown(provider_name)}* set to `{escape_markdown(model_name)}`.",
             parse_mode='Markdown'
@@ -416,10 +422,10 @@ async def thread_callback_handler(update: Update, context: ContextTypes.DEFAULT_
     action, thread_id = query.data.split(":", 1)
     
     if action == "switch_thread":
-        await file_storage.set_current_thread_id(chat_id, thread_id)
+        await storage.set_current_thread_id(chat_id, thread_id)
         await query.edit_message_text(f"Switched to thread: {escape_markdown_v2(thread_id)}")
     elif action == "delete_thread":
-        await file_storage.delete_thread(chat_id, thread_id)
+        await storage.delete_thread(chat_id, thread_id)
         await query.edit_message_text(f"Deleted thread: {escape_markdown_v2(thread_id)}")
     
     await list_threads_command(update, context)
@@ -431,7 +437,7 @@ async def rename_thread_command(update: Update, context: ContextTypes.DEFAULT_TY
     if not new_name:
         await update.message.reply_text("Usage: /rename_thread <new_name>")
         return
-    await file_storage.rename_thread(chat_id, new_name)
+    await storage.rename_thread(chat_id, new_name)
     await update.message.reply_text(f"Thread renamed to: {new_name}")
 
 async def reroll_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -441,8 +447,8 @@ async def reroll_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     log_prefix = f"(Chat {chat_id}) "
     logger.info(f"{log_prefix}User {user_id} triggered /reroll.")
     try:
-        current_thread_id = await file_storage.get_current_thread_id(chat_id)
-        last_user_prompt = await file_storage.get_thread_key(chat_id, 'last_user_prompt')
+        current_thread_id = await storage.get_current_thread_id(chat_id)
+        last_user_prompt = await storage.get_thread_key(chat_id, 'last_user_prompt')
         if not last_user_prompt:
             await update.message.reply_text("There is no previous prompt to reroll.", parse_mode=None)
             return
@@ -469,8 +475,8 @@ async def shrink_and_retry_callback(update: Update, context: ContextTypes.DEFAUL
     logger.info(f"{log_prefix}User {user_id} triggered 'Shrink and Retry'.")
     try:
         await query.edit_message_text("Understood. Retrying with a shortened context...", parse_mode=None)
-        current_thread_id = await file_storage.get_current_thread_id(chat_id)
-        last_user_prompt = await file_storage.get_thread_key(chat_id, 'last_user_prompt')
+        current_thread_id = await storage.get_current_thread_id(chat_id)
+        last_user_prompt = await storage.get_thread_key(chat_id, 'last_user_prompt')
         if not last_user_prompt:
             await context.bot.send_message(chat_id, "Error: Couldn't find the last prompt to retry.", parse_mode=None)
             return

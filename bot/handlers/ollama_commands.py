@@ -5,7 +5,7 @@ from telegram.ext import CommandHandler, ContextTypes
 from telegram.helpers import escape_markdown
 
 from services import ollama_service
-from storage import file_storage
+import storage
 import config
 
 logger = logging.getLogger(__name__)

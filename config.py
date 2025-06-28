@@ -39,6 +39,9 @@ load_dotenv()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434") # Default if not set
 
+# Storage configuration
+STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "file")  # "file" or "database"
+
 # Load multiple Gemini API keys (comma-separated or numbered)
 # Example .env: GEMINI_API_KEYS="key1,key2,key3" OR
 # GEMINI_API_KEY_1="key1"

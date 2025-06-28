@@ -9,6 +9,13 @@ import config
 
 logger = logging.getLogger(__name__)
 
+async def init_file_storage():
+    """Initializes the file-based storage by loading sessions from the JSON file."""
+    logger.info("Initializing file storage...")
+    # Call the synchronous _load_sessions_from_file in a separate thread
+    await asyncio.to_thread(_load_sessions_from_file)
+    logger.info("File storage initialized.")
+
 # Ensure the data directory exists
 DATA_DIR = os.path.dirname(config.SESSION_FILE_PATH)
 if DATA_DIR and not os.path.exists(DATA_DIR):
@@ -275,7 +282,6 @@ async def rename_thread(chat_id: int, new_name: str) -> bool:
         return False
 
 # Load sessions when the module is imported
-_load_sessions_from_file()
 
 # Example usage (for testing purposes) - Needs update for new structure
 async def _test():

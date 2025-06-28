@@ -5,7 +5,7 @@ from telegram.helpers import escape_markdown
 
 import config
 from services import gemini_service
-from storage import file_storage
+import storage
 
 logger = logging.getLogger(__name__)
 

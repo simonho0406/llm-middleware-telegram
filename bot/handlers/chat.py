@@ -10,7 +10,7 @@ from bot import providers  # Corrected import
 from services import ollama_service, gemini_service, openrouter_service
 from services.openai_compatible_service import OpenAICompatibleService
 from config import CUSTOM_PROVIDERS_CONFIG
-from storage import file_storage
+import storage
 from utils.text_processing import split_message_markdown_aware, escape_markdown_v2
 
 logger = logging.getLogger(__name__)
@@ -63,7 +63,7 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
     """
     log_prefix = f"(Chat {chat_id}) "
     
-    context_history = await file_storage.get_thread_key(chat_id, 'history', [])
+    context_history = await storage.get_thread_key(chat_id, 'history', [])
     if is_reroll and context_history and context_history[-1].get('role') == 'assistant':
         logger.info(f"{log_prefix}Reroll detected. Removing last assistant message from history.")
         context_history.pop()
@@ -81,20 +81,20 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
             )
             return
         
-    session_provider = await file_storage.get_thread_key(chat_id, 'provider', config.DEFAULT_PROVIDER)
+    session_provider = await storage.get_thread_key(chat_id, 'provider', config.DEFAULT_PROVIDER)
     provider_details = providers.get_provider_details()  # Corrected function call
     
     if session_provider not in provider_details:
         logger.error(f"{log_prefix}Invalid provider '{session_provider}', falling back to default.")
         session_provider = config.DEFAULT_PROVIDER
-        await file_storage.set_thread_key(chat_id, 'provider', session_provider)
+        await storage.set_thread_key(chat_id, 'provider', session_provider)
     
     provider_config = provider_details[session_provider]
     service = provider_config['service']
     model_key = provider_config['model_session_key']
     default_model = provider_config['default_model']
     
-    model_to_use = await file_storage.get_thread_key(chat_id, model_key, default_model)
+    model_to_use = await storage.get_thread_key(chat_id, model_key, default_model)
     provider_name_display = session_provider.capitalize()
     logger.info(f"{log_prefix}Using service: {service.__class__.__name__ if hasattr(service, '__class__') else service.__name__}, Model: {model_to_use}")
 
@@ -190,7 +190,7 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
                 output_buffer=0
             )
 
-            await file_storage.set_thread_key(chat_id, 'history', final_truncated_history)
+            await storage.set_thread_key(chat_id, 'history', final_truncated_history)
             logger.info(f"{log_prefix}History updated to {len(final_truncated_history)} entries.")
         except Exception as e_hist:
             logger.error(f"{log_prefix}Failed to update history: {e_hist}")
@@ -212,8 +212,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     try:
-        current_thread_id = await file_storage.get_current_thread_id(chat_id)
-        await file_storage.set_thread_key(chat_id, 'last_user_prompt', message_text)
+        current_thread_id = await storage.get_current_thread_id(chat_id)
+        await storage.set_thread_key(chat_id, 'last_user_prompt', message_text)
         logger.debug(f"{log_prefix}Saved last_user_prompt for thread {current_thread_id}.")
 
         await _generate_and_send_response(
