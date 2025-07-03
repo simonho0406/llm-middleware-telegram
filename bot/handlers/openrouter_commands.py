@@ -5,7 +5,7 @@ from telegram.helpers import escape_markdown
 
 import config
 from services import openrouter_service # Import the service
-import storage
+from storage import storage_manager
 
 logger = logging.getLogger(__name__)
 

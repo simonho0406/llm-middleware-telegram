@@ -8,7 +8,7 @@ from bot.application import create_application
 import config # To access config variables if needed directly
 # Import provider initialization function
 from bot.providers import get_provider_details
-from storage import init_storage
+from storage import storage_manager
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -85,7 +85,7 @@ def main() -> None:
 
         # Initialize storage
         logger.info("Initializing storage...")
-        await init_storage()
+        await storage_manager.init()
         logger.info("Storage initialization complete.")
 
         # Run connection checks and set up the new global commands/menu

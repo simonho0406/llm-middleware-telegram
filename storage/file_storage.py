@@ -207,13 +207,16 @@ async def get_thread_key(chat_id: int, key: str, default: Optional[Any] = None, 
     logger.debug(f"Value for key '{key}' in chat {chat_id}, {target_thread_id_str}: {'<default>' if value is default else '<found>'}")
     return value
 
-async def list_threads(chat_id: int) -> List[str]:
-     """Lists the IDs of all threads for a chat."""
-     logger.debug(f"Listing threads for chat {chat_id}")
-     session = await get_session(chat_id)
-     thread_ids = list(session.get("threads", {}).keys())
-     logger.debug(f"Found threads for chat {chat_id}: {thread_ids}")
-     return thread_ids
+async def list_threads(chat_id: int) -> List[Dict[str, Any]]:
+    """Lists all threads for a chat, returning a list of dicts with id and name."""
+    logger.debug(f"Listing threads for chat {chat_id}")
+    session = await get_session(chat_id)
+    threads = session.get("threads", {})
+    thread_list = []
+    for thread_id, thread_data in threads.items():
+        thread_list.append({"id": thread_id, "name": thread_data.get("name")})
+    logger.debug(f"Found {len(thread_list)} threads for chat {chat_id}")
+    return thread_list
 
 async def create_thread(chat_id: int, thread_id: str) -> bool:
      """Creates a new empty thread, returns True if successful."""
@@ -281,6 +284,14 @@ async def rename_thread(chat_id: int, new_name: str) -> bool:
         logger.error(f"Failed to rename thread for chat {chat_id}: {e}")
         return False
 
+async def get_thread_history(chat_id: int, thread_id: Optional[str] = None) -> List[Dict[str, str]]:
+    """Gets the message history for a thread."""
+    thread_data = await get_thread_data(chat_id, thread_id)
+    return thread_data.get('history', [])
+
+async def set_thread_history(chat_id: int, history: List[Dict[str, str]], thread_id: Optional[str] = None) -> None:
+    """Sets the message history for a thread."""
+    await update_thread_data(chat_id, {'history': history}, thread_id)
 # Load sessions when the module is imported
 
 # Example usage (for testing purposes) - Needs update for new structure

@@ -15,7 +15,7 @@ async def main():
     # Open a single database connection for the entire migration process
     async with aiosqlite.connect(database_storage.DB_PATH) as db:
         # 1. Initialize database schema
-        await database_storage.init_database(db) # Pass the connection
+        await database_storage.init_database()  # No connection argument needed
         logging.info("Database schema initialized.")
 
         # 2. Load all data from the JSON file

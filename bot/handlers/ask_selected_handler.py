@@ -18,7 +18,7 @@ from urllib.parse import quote # Import quote
 
 import config
 from services import ollama_service, gemini_service, openrouter_service
-import storage
+from storage import storage_manager
 
 logger = logging.getLogger(__name__)
 

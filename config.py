@@ -41,6 +41,7 @@ OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434") # Default if no
 
 # Storage configuration
 STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "file")  # "file" or "database"
+DB_PATH = "data/bot_sessions.db"
 
 # Load multiple Gemini API keys (comma-separated or numbered)
 # Example .env: GEMINI_API_KEYS="key1,key2,key3" OR
