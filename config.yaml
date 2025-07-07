@@ -36,7 +36,7 @@ openrouter_allowed_models:
   - "mistral-7b"
   - "stability-ai/stablelm-tuned-alpha-7b"
   # Add more free models here
-default_openrouter_model: "llama-2-70b"
+default_openrouter_model: "deepseek/deepseek-chat-v3-0324:free"
 openrouter_http_referer: "YOUR_APP_URL_OR_NAME"
 
 # google_api_key is legacy and managed via .env (GEMINI_API_KEY_*)

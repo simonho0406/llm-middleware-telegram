@@ -25,7 +25,7 @@ async def perform_search(query: str) -> str:
 
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
-            response = await client.post(TAVILY_API_URL, json=payload)
+            response = await client.post(TAVILY_API_URL, json=payload, timeout=30.0)
             response.raise_for_status()
             results = response.json()
 

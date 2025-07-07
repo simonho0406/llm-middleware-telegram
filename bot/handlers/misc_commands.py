@@ -53,10 +53,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 ├ /list_models - List available models for the provider
 └ /set_model `<model_name>` - Set a new model
 
-*Advanced Tools*:
-├ /search <query> - Answer a query using web search
-├ /ask_selected <prompt> - Query multiple selected models at once
-└ /discuss - Start a multi-model discussion
+    *Advanced Tools*:
+    ├ /search <query> - Answer a query using web search
+    ├ /ask_selected <prompt> - Query multiple selected models at once
+    ├ /discuss <prompt> - Start a multi-model, multi-provider discussion
+    └ /discuss_panel - Orchestrate an expert AI panel
 
 *Thread Management*:
 ├ /threads - List and manage conversation threads
@@ -97,7 +98,7 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     provider_config = provider_details.get(session_provider, provider_details[config.DEFAULT_PROVIDER])
     
     service = provider_config['service']
-    model_key = provider_config['model_session_key']
+    model_key = 'model'
     default_model = provider_config['default_model']
     model_to_use = await storage_manager.get_thread_key(chat_id, model_key, default_model)
 
@@ -123,12 +124,12 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         logger.error(f"{log_prefix}Failed to send final search response: {e}", exc_info=True)
 
     try:
-        history = await storage_manager.get_thread_key(chat_id, 'history', [])
+        history = await storage_manager.get_thread_history(chat_id)
         history.extend([
             {'role': 'user', 'content': query},
             {'role': 'assistant', 'content': final_response}
         ])
-        await storage_manager.set_thread_key(chat_id, 'history', history)
+        await storage_manager.set_thread_history(chat_id, history)
         logger.info(f"{log_prefix}Search command successful. History updated with original query.")
     except Exception as e:
         logger.error(f"{log_prefix}Failed to save history after search: {e}", exc_info=True)
@@ -378,7 +379,7 @@ async def set_model_typed(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     provider_name = await storage_manager.get_thread_key(chat_id, 'provider', config.DEFAULT_PROVIDER)
     provider_config = providers.get_config_for_provider(provider_name)
     if provider_config:
-        model_session_key = provider_config['model_session_key']
+        model_session_key = 'model'
         await storage_manager.set_thread_key(chat_id, model_session_key, model_name)
         await update.message.reply_text(
             f"Model for *{escape_markdown(provider_name)}* set to `{escape_markdown(model_name)}`.",
@@ -433,6 +434,11 @@ async def rename_thread_command(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text("Usage: /rename_thread <new_name>")
         return
     
+    success = await storage_manager.rename_thread(chat_id, new_name)
+    if success:
+        await update.message.reply_text(f"Thread renamed to: {new_name}")
+    else:
+        await update.message.reply_text("An error occurred while renaming the thread.")
 async def delete_thread_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Deletes a specific thread by ID."""
     chat_id = update.effective_chat.id

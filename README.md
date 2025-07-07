@@ -10,7 +10,7 @@ This Telegram bot connects to various Large Language Model (LLM) backends like O
 *   **Streaming Responses:** Edits messages in place to show responses as they are generated.
 *   **Advanced Multi-Model Tools:**
     *   **/ask_selected:** Query multiple models concurrently with a single prompt.
-    *   **/discuss:** A "Round Table" feature where multiple models from a single provider engage in a sequential, turn-by-turn conversation to refine an answer.
+    *   **/discuss:** A "Round Table" feature where multiple models from any configured provider engage in a sequential, turn-by-turn conversation to refine an answer.
 *   **Web Search:** Provides real-time information to the LLM to answer questions about current events using the `/search` command.
 *   **Dockerized:** Easy deployment using Docker and Docker Compose.
 
@@ -58,6 +58,7 @@ This Telegram bot connects to various Large Language Model (LLM) backends like O
 *   **/discuss <prompt>:** Starts a sequential, multi-model discussion on a topic.
 *   **/search <query>:** Answers a query using live web search results.
 *   **/threads:** List, switch between, or delete your conversation threads.
+*   **/ask_selected <prompt>:** Query multiple models concurrently with a single prompt.
 
 ## Project Roadmap & Priorities
 
@@ -67,8 +68,8 @@ Development is guided by a strategic roadmap focused on evolving the bot into a 
 *   **Status:** ✅ **Completed & Stabilized**
 *   **Description:** The `/discuss` command allows a user to select multiple models from a single provider to engage in a sequential conversation, where each model critiques or builds upon the previous one's response.
 
-### Phase 1.5: Multi-Provider Discussion (Next)
-*   **Status:** 📝 **Planned**
+### Phase 1.5: Multi-Provider Discussion
+*   **Status:** ✅ **Completed & Stabilized**
 *   **Description:** Evolve the `/discuss` command to allow selecting models from *different* providers. This will enable more powerful, heterogeneous agent chains (e.g., a fast model for outlining, a powerful model for generation) and mitigate single-provider rate limits.
 
 ### Phase 2: Multi-Agent "Expert Panel" (Future)

@@ -1,6 +1,3 @@
-# File: storage/database_storage.py
-# This is the canonical, correct implementation.
-
 import aiosqlite
 import os
 import logging
@@ -18,11 +15,15 @@ async def _get_or_create_chat(conn: aiosqlite.Connection, chat_id: int) -> None:
     async with conn.cursor() as cursor:
         await cursor.execute("SELECT chat_id FROM chats WHERE chat_id = ?", (chat_id,))
         if await cursor.fetchone() is None:
-            # Use a transaction for multi-statement write
-            async with conn.transaction():
+            await conn.execute("BEGIN")
+            try:
                 await cursor.execute("INSERT INTO chats (chat_id, current_thread_id) VALUES (?, ?)", (chat_id, _DEFAULT_THREAD_ID))
                 await cursor.execute("INSERT INTO threads (chat_id, thread_id) VALUES (?, ?)", (chat_id, _DEFAULT_THREAD_ID))
-            logger.info(f"Created new chat record and default thread for chat_id: {chat_id}")
+                await conn.commit()
+                logger.info(f"Created new chat record and default thread for chat_id: {chat_id}")
+            except Exception as e:
+                await conn.rollback()
+                raise e
 
 async def _get_thread_pk(conn: aiosqlite.Connection, chat_id: int, thread_id: Optional[str] = None) -> Optional[int]:
     """Gets the primary key (thread_pk) of a specific thread, or the current thread if thread_id is None."""
@@ -75,15 +76,15 @@ async def set_current_thread_id(chat_id: int, thread_id: str) -> None:
 async def get_thread_key(chat_id: int, key: str, default: Any = None, thread_id: Optional[str] = None) -> Any:
     valid_keys = {"name", "provider", "model", "last_user_prompt"}
     if key not in valid_keys:
-        # This is the abstraction break. History is not a simple key.
+        # This is the new, critical check
         if key == 'history':
+            # Redirect to the correct function instead of failing
             return await get_thread_history(chat_id, thread_id)
-        raise ValueError(f"Invalid key '{key}' for get_thread_key")
+        raise ValueError(f"Invalid key '{key}' for get_thread_key. Must be one of {valid_keys}")
     
     async with aiosqlite.connect(config.DB_PATH) as db:
         thread_pk = await _get_thread_pk(db, chat_id, thread_id)
         if not thread_pk: return default
-        
         async with db.cursor() as cursor:
             await cursor.execute(f"SELECT {key} FROM threads WHERE thread_pk = ?", (thread_pk,))
             row = await cursor.fetchone()
@@ -92,15 +93,15 @@ async def get_thread_key(chat_id: int, key: str, default: Any = None, thread_id:
 async def set_thread_key(chat_id: int, key: str, value: Any, thread_id: Optional[str] = None) -> None:
     valid_keys = {"name", "provider", "model", "last_user_prompt"}
     if key not in valid_keys:
-        # This is the abstraction break. History is not a simple key.
+        # This is the new, critical check
         if key == 'history':
+            # Redirect to the correct function instead of failing
             return await set_thread_history(chat_id, value, thread_id)
-        raise ValueError(f"Invalid key '{key}' for set_thread_key")
+        raise ValueError(f"Invalid key '{key}' for set_thread_key. Must be one of {valid_keys}")
 
     async with aiosqlite.connect(config.DB_PATH) as db:
         thread_pk = await _get_thread_pk(db, chat_id, thread_id)
         if not thread_pk: return
-
         await db.execute(f"UPDATE threads SET {key} = ? WHERE thread_pk = ?", (value, thread_pk))
         await db.commit()
 
@@ -108,12 +109,8 @@ async def get_thread_history(chat_id: int, thread_id: Optional[str] = None) -> L
     async with aiosqlite.connect(config.DB_PATH) as db:
         thread_pk = await _get_thread_pk(db, chat_id, thread_id)
         if not thread_pk: return []
-
         async with db.cursor() as cursor:
-            await cursor.execute(
-                "SELECT role, content FROM messages WHERE thread_fk = ? ORDER BY timestamp ASC",
-                (thread_pk,)
-            )
+            await cursor.execute("SELECT role, content FROM messages WHERE thread_fk = ? ORDER BY timestamp ASC", (thread_pk,))
             rows = await cursor.fetchall()
             return [{"role": row[0], "content": row[1]} for row in rows]
 
@@ -121,19 +118,17 @@ async def set_thread_history(chat_id: int, history: List[Dict[str, str]], thread
     async with aiosqlite.connect(config.DB_PATH) as db:
         thread_pk = await _get_thread_pk(db, chat_id, thread_id)
         if not thread_pk: return
-
-        async with db.transaction():
+        await db.execute("BEGIN")
+        try:
             await db.execute("DELETE FROM messages WHERE thread_fk = ?", (thread_pk,))
             if history:
                 ts = int(time.time())
-                messages_to_insert = [
-                    (thread_pk, msg['role'], msg['content'], ts + i)
-                    for i, msg in enumerate(history)
-                ]
-                await db.executemany(
-                    "INSERT INTO messages (thread_fk, role, content, timestamp) VALUES (?, ?, ?, ?)",
-                    messages_to_insert
-                )
+                messages_to_insert = [(thread_pk, msg['role'], msg['content'], ts + i) for i, msg in enumerate(history)]
+                await db.executemany("INSERT INTO messages (thread_fk, role, content, timestamp) VALUES (?, ?, ?, ?)", messages_to_insert)
+            await db.commit()
+        except Exception as e:
+            await db.rollback()
+            raise e
 
 async def create_thread(chat_id: int, thread_id: str) -> bool:
     async with aiosqlite.connect(config.DB_PATH) as db:
@@ -147,15 +142,12 @@ async def create_thread(chat_id: int, thread_id: str) -> bool:
             return False
 
 async def delete_thread(chat_id: int, thread_id: str) -> bool:
-    if thread_id == _DEFAULT_THREAD_ID:
-        logger.warning(f"Attempt to delete default thread for chat {chat_id} denied.")
-        return False
-        
     async with aiosqlite.connect(config.DB_PATH) as db:
+        if thread_id == _DEFAULT_THREAD_ID:
+            return False
         current_id = await get_current_thread_id(chat_id)
         if current_id == thread_id:
             await set_current_thread_id(chat_id, _DEFAULT_THREAD_ID)
-
         cursor = await db.execute("DELETE FROM threads WHERE chat_id = ? AND thread_id = ?", (chat_id, thread_id))
         await db.commit()
         return cursor.rowcount > 0
@@ -164,12 +156,9 @@ async def list_threads(chat_id: int) -> List[Dict[str, Any]]:
     async with aiosqlite.connect(config.DB_PATH) as db:
         await _get_or_create_chat(db, chat_id)
         async with db.cursor() as cursor:
-            await cursor.execute(
-                "SELECT thread_id, name FROM threads WHERE chat_id = ?", (chat_id,)
-            )
+            await cursor.execute("SELECT thread_id, name FROM threads WHERE chat_id = ?", (chat_id,))
             rows = await cursor.fetchall()
             return [{"id": row[0], "name": row[1]} for row in rows]
 
 async def rename_thread(chat_id: int, new_name: str) -> bool:
-    # This now correctly uses the modified set_thread_key
     return await set_thread_key(chat_id, "name", new_name)

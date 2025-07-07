@@ -63,7 +63,7 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
     """
     log_prefix = f"(Chat {chat_id}) "
     
-    context_history = await storage_manager.get_thread_key(chat_id, 'history', [])
+    context_history = await storage_manager.get_thread_history(chat_id)
     if is_reroll and context_history and context_history[-1].get('role') == 'assistant':
         logger.info(f"{log_prefix}Reroll detected. Removing last assistant message from history.")
         context_history.pop()
@@ -190,7 +190,7 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
                 output_buffer=0
             )
 
-            await storage_manager.set_thread_key(chat_id, 'history', final_truncated_history)
+            await storage_manager.set_thread_history(chat_id, final_truncated_history)
             logger.info(f"{log_prefix}History updated to {len(final_truncated_history)} entries.")
         except Exception as e_hist:
             logger.error(f"{log_prefix}Failed to update history: {e_hist}")

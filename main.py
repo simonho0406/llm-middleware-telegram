@@ -27,6 +27,7 @@ async def setup_bot_commands_and_menu(application: Application) -> None:
         BotCommand("search", "Answer a query using web search"),
         BotCommand("ask_selected", "Query multiple models at once"),
         BotCommand("discuss", "Start a multi-model discussion"),
+        BotCommand("discuss_panel", "[WIP] Orchestrate an expert AI panel"),
         # Provider & Model
         BotCommand("provider", "Switch AI provider (e.g., Ollama, Gemini)"),
         BotCommand("model", "Show the current AI model"),
@@ -113,10 +114,12 @@ def main() -> None:
     from bot.handlers.ask_selected_handler import ask_selected_handlers
     from bot.handlers.chat import chat_handler
     from bot.handlers.discuss_handler import discuss_conv_handler
+    from bot.handlers.discuss_panel_handler import discuss_panel_conv_handler
 
     app.add_handlers(misc_handlers)
     app.add_handlers(ask_selected_handlers)
     app.add_handler(discuss_conv_handler)
+    app.add_handler(discuss_panel_conv_handler)
     logger.info("Registered command and conversation handlers.")
     app.add_handler(chat_handler)
     logger.info("Registered main chat handler.")

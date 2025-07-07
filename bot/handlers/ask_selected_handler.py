@@ -17,7 +17,7 @@ from hashlib import sha256 # Import sha256
 from urllib.parse import quote # Import quote
 
 import config
-from services import ollama_service, gemini_service, openrouter_service
+from services import ollama_service, gemini_service, openrouter_service, openai_compatible_service
 from storage import storage_manager
 
 logger = logging.getLogger(__name__)
@@ -42,18 +42,21 @@ async def get_models_for_provider(provider: str) -> List[Dict[str, Any]]:
         models = await gemini_service.list_models()
     elif provider == "openrouter":
         models = await openrouter_service.list_models() # Fetch free models
+    else:
+        # Handle custom OpenAI-compatible providers
+        provider_config = providers.get_config_for_provider(provider)
+        if provider_config and provider_config.get('allowed_models'):
+            models = [{"id": model_id, "name": model_id} for model_id in provider_config['allowed_models']]
     return models
 
+from bot import providers # Ensure this import exists
+
 def build_provider_keyboard() -> InlineKeyboardMarkup:
-    """Builds the initial provider selection keyboard."""
-    keyboard = [
-        [
-            InlineKeyboardButton("Ollama", callback_data=f"{CALLBACK_PROVIDER_PREFIX}ollama"),
-            InlineKeyboardButton("Gemini", callback_data=f"{CALLBACK_PROVIDER_PREFIX}gemini"),
-            InlineKeyboardButton("OpenRouter", callback_data=f"{CALLBACK_PROVIDER_PREFIX}openrouter"),
-        ],
-         [InlineKeyboardButton("❌ Cancel", callback_data=f"{CALLBACK_ACTION_PREFIX}cancel")],
-    ]
+    """Builds a dynamic provider selection keyboard."""
+    provider_names = providers.get_available_provider_names()
+    buttons = [InlineKeyboardButton(p, callback_data=f"{CALLBACK_PROVIDER_PREFIX}{p}") for p in provider_names]
+    keyboard = [buttons[i:i + 2] for i in range(0, len(buttons), 2)] # 2 buttons per row
+    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data=f"{CALLBACK_ACTION_PREFIX}cancel")])
     return InlineKeyboardMarkup(keyboard)
 
 async def build_model_keyboard(provider: str, selected_models: set, context: ContextTypes.DEFAULT_TYPE) -> InlineKeyboardMarkup:
@@ -198,6 +201,24 @@ async def select_model_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
     return SELECT_MODELS
 
+async def page_models_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handles model list pagination."""
+    query = update.callback_query
+    await query.answer()
+    
+    page = int(query.data.split(':')[-1])
+    provider = context.user_data.get('current_provider_selection')
+    selected_models = context.user_data.get('ask_selected_models', set())
+    
+    if not provider:
+        await query.edit_message_text("Error: Provider context lost. Please start over.")
+        return ConversationHandler.END
+    
+    reply_markup = await build_model_keyboard(provider, selected_models, context, page=page)
+    await query.edit_message_reply_markup(reply_markup=reply_markup)
+    
+    return SELECT_MODELS
+
 async def back_to_providers_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handles going back to provider selection."""
     query = update.callback_query
@@ -296,6 +317,10 @@ async def done_selecting_callback(update: Update, context: ContextTypes.DEFAULT_
             # OpenRouter uses provider/model_name format (e.g., 'google/gemini-pro')
             # We stored the correct ID in 'actual_id' when fetching models
             actual_id_for_api = actual_id
+        else:
+            # Handle custom OpenAI-compatible providers
+            service = openai_compatible_service
+            actual_id_for_api = actual_id
 
         if service:
             service_func = getattr(service, "_generate_single_model_non_streaming", None)
@@ -329,37 +354,36 @@ async def done_selecting_callback(update: Update, context: ContextTypes.DEFAULT_
             results[model_key_display] = str(result_data)
 
     # --- Format and Send Final Response ---
-    escaped_prompt = escape_markdown(prompt, version=2)
-    # Removed italics around prompt for safer parsing
+    from utils.text_processing import split_message_markdown_aware, escape_markdown_v2
+    from telegram import constants
+
+    escaped_prompt = escape_markdown_v2(prompt)
     response_parts = [f"*Responses for prompt:* {escaped_prompt}"]
     sorted_results = sorted(results.items())
 
     for model_key_display, response_text in sorted_results:
-        escaped_model = escape_markdown(model_key_display, version=2)
-        escaped_response = escape_markdown(response_text, version=2)
-        response_parts.append(f"\n\n___\n*Model: `{escaped_model}`*\n___\n{escaped_response}")
+        escaped_model = escape_markdown_v2(model_key_display)
+        escaped_response = escape_markdown_v2(response_text)
+        response_parts.append(f"\\n\\n___\\n*Model: `{escaped_model}`*\\n___\\n{escaped_response}")
 
-    final_response_text = "\n".join(response_parts)
-    max_len = 4096
-    if len(final_response_text) > max_len:
-         logger.warning("Combined /ask_selected response exceeds Telegram length limit. Truncating.")
-         final_response_text = final_response_text[:max_len-20] + "\\.\\.\\. \\(truncated\\)"
+    final_response_text = "".join(response_parts)
 
-    try:
-        await context.bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=placeholder_message.message_id,
-            text=final_response_text,
-            parse_mode='MarkdownV2'
-        )
-    except BadRequest as e:
-         logger.error(f"Failed to edit message with final /ask_selected results: {e}")
-         try:
-              await context.bot.send_message(chat_id=chat_id, text="Error displaying formatted results. See logs.")
-         except Exception as fallback_e:
-              logger.error(f"Failed to send fallback error message: {fallback_e}")
-    except Exception as e:
-         logger.error(f"Unexpected error editing final message: {e}")
+    # Delete the placeholder "Asking..." message
+    await placeholder_message.delete()
+
+    # Use the modern, robust message splitting and sending logic
+    message_parts = split_message_markdown_aware(final_response_text)
+    for part in message_parts:
+        try:
+            await context.bot.send_message(
+                chat_id,
+                text=part,
+                parse_mode=constants.ParseMode.MARKDOWN_V2
+            )
+        except BadRequest:
+            # Fallback to sending as plain text if markdown fails
+            logger.warning(f"MarkdownV2 parsing failed for a message part. Sending as plain text.")
+            await context.bot.send_message(chat_id, text=part, parse_mode=None)
 
 
     # Clean up user_data
@@ -408,12 +432,13 @@ ask_selected_conv_handler = ConversationHandler(
             CallbackQueryHandler(select_provider_callback, pattern=f"^{CALLBACK_PROVIDER_PREFIX}"),
             CallbackQueryHandler(cancel_callback, pattern=f"^{CALLBACK_ACTION_PREFIX}cancel$"),
         ],
-        SELECT_MODELS: [
-            CallbackQueryHandler(select_model_callback, pattern=f"^{CALLBACK_MODEL_PREFIX}"),
-            CallbackQueryHandler(back_to_providers_callback, pattern=f"^{CALLBACK_ACTION_PREFIX}back_providers$"),
-            CallbackQueryHandler(done_selecting_callback, pattern=f"^{CALLBACK_ACTION_PREFIX}done$"),
-            CallbackQueryHandler(cancel_callback, pattern=f"^{CALLBACK_ACTION_PREFIX}cancel$"),
-        ],
+    SELECT_MODELS: [
+        CallbackQueryHandler(select_model_callback, pattern=f"^{CALLBACK_MODEL_PREFIX}"),
+        CallbackQueryHandler(page_models_callback, pattern=f"^{CALLBACK_ACTION_PREFIX}page:"),
+        CallbackQueryHandler(back_to_providers_callback, pattern=f"^{CALLBACK_ACTION_PREFIX}back_providers$"),
+        CallbackQueryHandler(done_selecting_callback, pattern=f"^{CALLBACK_ACTION_PREFIX}done$"),
+        CallbackQueryHandler(cancel_callback, pattern=f"^{CALLBACK_ACTION_PREFIX}cancel$"),
+    ],
     },
     fallbacks=[CommandHandler("cancel", cancel_callback)],
     conversation_timeout=300,

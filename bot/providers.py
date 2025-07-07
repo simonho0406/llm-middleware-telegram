@@ -37,7 +37,6 @@ def get_provider_details() -> dict:
     # Ollama
     details['ollama'] = {
         'service': ollama_service,
-        'model_session_key': 'ollama_model',
         'default_model': config.DEFAULT_OLLAMA_MODEL,
         'allowed_models': [] # Will be fetched dynamically via API if needed
     }
@@ -45,7 +44,6 @@ def get_provider_details() -> dict:
     if config.GEMINI_API_KEYS: # Only add if keys are configured
         details['gemini'] = {
             'service': gemini_service,
-            'model_session_key': 'gemini_model',
             'default_model': config.DEFAULT_GEMINI_MODEL,
             'allowed_models': config.GEMINI_ASK_ALL_MODELS # Use ask_all list for selection
         }
@@ -56,7 +54,6 @@ def get_provider_details() -> dict:
     if config.OPENROUTER_API_KEY and config.OPENROUTER_API_KEY != "YOUR_OPENROUTER_API_KEY":
          details['openrouter'] = {
             'service': openrouter_service,
-            'model_session_key': 'openrouter_model',
             'default_model': config.DEFAULT_OPENROUTER_MODEL,
             'allowed_models': config.OPENROUTER_ALLOWED_MODELS
         }
@@ -87,7 +84,6 @@ def get_provider_details() -> dict:
         if name in _initialized_services:
              details[name] = {
                 'service': _initialized_services[name],
-                'model_session_key': f'{name}_model', # e.g., groq_model
                 'default_model': provider_conf['default_model'],
                 'allowed_models': provider_conf.get('allowed_models', [])
             }
