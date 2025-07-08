@@ -1,5 +1,6 @@
 import logging
 import re
+import asyncio
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler, CommandHandler
 
@@ -20,10 +21,15 @@ async def start_panel_discussion(update: Update, context: ContextTypes.DEFAULT_T
         parse_mode=None
     )
 
-    # Select an Orchestrator Model: Groq's llama3-8b-8192
+    # Select an Orchestrator Model from config
     from bot import providers
-    orchestrator_provider = "groq"
-    orchestrator_model = "qwen/qwen3-32b"
+    import config
+    orchestrator_config = config.EXPERT_PANEL_CONFIG.get('orchestrator', {})
+    orchestrator_provider = orchestrator_config.get('provider')
+    orchestrator_model = orchestrator_config.get('model')
+    if not all([orchestrator_provider, orchestrator_model]):
+        await assembling_msg.edit_text("Error: Expert panel orchestrator is not configured correctly.", parse_mode=None)
+        return ConversationHandler.END
     orchestrator_service = providers.get_service_for_provider(orchestrator_provider)
     if orchestrator_service is None:
         await assembling_msg.edit_text("Error: Orchestrator service (Groq) is not available.", parse_mode=None)
@@ -55,6 +61,7 @@ async def start_panel_discussion(update: Update, context: ContextTypes.DEFAULT_T
 
     # Log the raw response
     logger.info(f"Orchestrator response: {orchestrator_response}")
+    logger.info("Attempting to parse orchestrator's JSON plan...")
 
     # Parse the JSON response
     import json
@@ -71,30 +78,18 @@ async def start_panel_discussion(update: Update, context: ContextTypes.DEFAULT_T
         tasks_list = json.loads(json_str)
         if not isinstance(tasks_list, list):
             raise ValueError("Expected a JSON array")
+        logger.info(f"Successfully parsed orchestrator's plan. Found {len(tasks_list)} tasks.")
     except (json.JSONDecodeError, ValueError) as e:
         logger.error(f"Failed to parse orchestrator response: {e}")
         await assembling_msg.edit_text("The panel's plan was unclear. Please try again with a different prompt.", parse_mode=None)
         return ConversationHandler.END
 
-    # Extract sub-tasks
-    proposer_prompt = None
-    critic_prompt = None
-    for task in tasks_list:
-        if task.get('role') == 'Proposer':
-            proposer_prompt = task.get('prompt')
-        elif task.get('role') == 'Critic':
-            critic_prompt = task.get('prompt')
+    # Get role configurations from expert_panel config
+    role_configs = config.EXPERT_PANEL_CONFIG.get('roles', {})
+    tasks_to_run = []
+    task_role_map = {}  # To map asyncio task back to its role and response
 
-    if not proposer_prompt or not critic_prompt:
-        await assembling_msg.edit_text("The panel could not form a proper plan. Please try again with a different prompt.", parse_mode=None)
-        return ConversationHandler.END
-
-    # Execute tasks in parallel
-    import asyncio
-    from bot import providers
-
-    await assembling_msg.edit_text("Executing expert tasks in parallel...", parse_mode=None)
-
+    # Define helper function to get full response from a service
     async def get_full_response(provider_name, model, prompt):
         """Helper to consume an async generator from a service and return the full string."""
         service = providers.get_service_for_provider(provider_name)
@@ -108,16 +103,41 @@ async def start_panel_discussion(update: Update, context: ContextTypes.DEFAULT_T
             logger.error(f"Sub-task for model {model} failed: {e}")
             return f"Error generating response from {model}: {e}"
 
-    # Create tasks to run the helpers
-    proposer_task = asyncio.create_task(get_full_response("openrouter", "deepseek/deepseek-r1-0528:free", proposer_prompt))
-    critic_task = asyncio.create_task(get_full_response("nvidia", "nvidia/llama-3.1-nemotron-ultra-253b-v1", critic_prompt))
+    for task_spec in tasks_list:
+        role = task_spec.get('role')
+        prompt = task_spec.get('prompt')
+        
+        if role in role_configs:
+            role_config = role_configs[role]
+            provider = role_config.get('provider')
+            model = role_config.get('model')
+            
+            if all([provider, model, prompt]):
+                task = asyncio.create_task(get_full_response(provider, model, prompt))
+                tasks_to_run.append(task)
+                task_role_map[task] = role  # Map the task object to its role name
+
+    if not tasks_to_run:
+        await assembling_msg.edit_text("Error: No valid expert roles could be assigned based on the plan.", parse_mode=None)
+        return ConversationHandler.END
 
     # Run tasks concurrently
-    results = await asyncio.gather(proposer_task, critic_task, return_exceptions=True)
+    logger.info(f"Executing {len(tasks_to_run)} expert tasks concurrently...")
+    results = await asyncio.gather(*tasks_to_run, return_exceptions=True)
+    logger.info("Expert tasks completed.")
 
-    # Process results
-    proposer_response = results[0] if not isinstance(results[0], Exception) else f"Error: {results[0]}"
-    critic_response = results[1] if not isinstance(results[1], Exception) else f"Error: {results[1]}"
+    # Process results using the map
+    panel_results = {}
+    for i, task in enumerate(tasks_to_run):
+        role = task_role_map[task]
+        result_data = results[i]
+        response = result_data if not isinstance(result_data, Exception) else f"Error: {result_data}"
+        panel_results[role] = response
+    logger.info("Expert responses processed. Preparing synthesis prompt.")
+
+    # Get responses for specific roles
+    proposer_response = panel_results.get("Proposer", "No response from proposer.")
+    critic_response = panel_results.get("Critic", "No response from critic.")
 
     # Construct the Final Synthesis Prompt
     synthesis_prompt = (
@@ -144,6 +164,7 @@ async def start_panel_discussion(update: Update, context: ContextTypes.DEFAULT_T
         ):
             response_chunks.append(chunk)
         synthesized_response = "".join(response_chunks)
+        logger.info("Synthesis task completed. Sending final response to user.")
     except Exception as e:
         logger.error(f"Synthesis call failed: {e}")
         synthesized_response = "Failed to synthesize the final answer. Please try again later."

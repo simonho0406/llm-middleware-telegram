@@ -104,6 +104,9 @@ CONTEXT_TOKEN_OUTPUT_BUFFER = yaml_config.get("context_token_output_buffer", 100
 # --- Load Custom OpenAI-Compatible Providers ---
 CUSTOM_PROVIDERS_CONFIG = []
 custom_providers_list = yaml_config.get("custom_openai_providers", [])
+
+# --- Load Expert Panel Configuration ---
+EXPERT_PANEL_CONFIG = yaml_config.get("expert_panel", {})
 if isinstance(custom_providers_list, list):
     for provider_config in custom_providers_list:
         if isinstance(provider_config, dict) and 'name' in provider_config and 'base_url' in provider_config and 'default_model' in provider_config:

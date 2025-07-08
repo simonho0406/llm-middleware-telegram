@@ -76,3 +76,23 @@ custom_openai_providers:
   #   default_model: "some-model-v2"
   #   allowed_models:
   #     - "some-model-v2"
+
+# --- Expert Panel Configuration ---
+expert_panel:
+  orchestrator:
+    provider: "groq"
+    model: "qwen/qwen3-32b" # Or another suitable Groq model
+
+  # Define the roles and the models assigned to them
+  # The keys (e.g., "Proposer", "Critic") must match the roles the orchestrator uses
+  roles:
+    Proposer:
+      provider: "openrouter"
+      model: "deepseek/deepseek-r1-0528:free" # Or another suitable OpenRouter model
+    Critic:
+      provider: "nvidia"
+      model: "qwen/qwen3-235b-a22b" # Or another suitable Nvidia model
+    # We can add more roles here in the future without changing code
+    # Refiner:
+    #   provider: "openai"
+    #   model: "gpt-4"
