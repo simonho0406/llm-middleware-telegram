@@ -80,8 +80,8 @@ custom_openai_providers:
 # --- Expert Panel Configuration ---
 expert_panel:
   orchestrator:
-    provider: "groq"
-    model: "qwen/qwen3-32b" # Or another suitable Groq model
+    provider: "nvidia"
+    model: "nvidia/llama-3.1-nemotron-ultra-253b-v1" # Or another suitable Groq model
 
   # Define the roles and the models assigned to them
   # The keys (e.g., "Proposer", "Critic") must match the roles the orchestrator uses

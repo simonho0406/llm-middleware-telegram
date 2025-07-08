@@ -26,10 +26,11 @@ async def setup_bot_commands_and_menu(application: Application) -> None:
         # Tools
         BotCommand("search", "Answer a query using web search"),
         BotCommand("ask_selected", "Query multiple models at once"),
-        BotCommand("discuss", "Start a multi-model discussion"),
-        BotCommand("discuss_panel", "[WIP] Orchestrate an expert AI panel"),
+        BotCommand("discuss", "Start a multi-model, multi-provider discussion"),
+        BotCommand("discuss_panel", "Orchestrate an expert AI panel"),
+        BotCommand("end_discussion", "Conclude an ongoing panel discussion"),
         # Provider & Model
-        BotCommand("provider", "Switch AI provider (e.g., Ollama, Gemini)"),
+        BotCommand("provider", "Switch AI provider"),
         BotCommand("model", "Show the current AI model"),
         BotCommand("list_models", "List available models for the provider"),
         BotCommand("set_model", "Set a new model for the provider"),

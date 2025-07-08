@@ -57,7 +57,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     ├ /search <query> - Answer a query using web search
     ├ /ask_selected <prompt> - Query multiple selected models at once
     ├ /discuss <prompt> - Start a multi-model, multi-provider discussion
-    └ /discuss_panel - Orchestrate an expert AI panel
+    ├ /discuss_panel - Orchestrate an expert AI panel
+    └ /end_discussion - Conclude an ongoing panel discussion
 
 *Thread Management*:
 ├ /threads - List and manage conversation threads
