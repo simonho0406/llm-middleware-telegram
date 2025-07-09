@@ -93,6 +93,6 @@ expert_panel:
       provider: "nvidia"
       model: "qwen/qwen3-235b-a22b" # Or another suitable Nvidia model
     # We can add more roles here in the future without changing code
-    # Refiner:
-    #   provider: "openai"
-    #   model: "gpt-4"
+    Refiner:
+      provider: "nvidia"
+      model: "deepseek-ai/deepseek-r1-0528"
