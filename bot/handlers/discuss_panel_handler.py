@@ -15,13 +15,21 @@ AWAITING_FOLLOW_UP, PANEL_IN_PROGRESS = range(2)
 
 logger = logging.getLogger(__name__)
 
+def _format_panel_summary(panel_results: dict) -> str:
+    """Formats the results of the panel execution into a markdown string."""
+    summary_parts = ["*Panel Execution Summary:*"]
+    for role, result in panel_results.items():
+        status_icon = "✅" if result.get('status') == 'Success' else "⚠️"
+        model_info = f"`{result.get('provider')}/{result.get('model')}`"
+        summary_parts.append(f"{status_icon} *{role}:* {model_info} ({result.get('status')})")
+    return "\n".join(summary_parts)
 
-async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: str, full_history: list, placeholder_msg) -> dict:
-    """Runs the full panel workflow, updating a placeholder message, and returns a dictionary of results."""
-    
+async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: str, full_history: list, placeholder_msg) -> tuple:
+    """Runs the full panel workflow, updating a placeholder message, and returns a dictionary of results and the final answer."""
+    panel_results = {}
+
     # --- 1. Deconstruct Task ---
     await placeholder_msg.edit_text("Assembling panel... Decomposing task...", parse_mode=None)
-    
     orchestrator_config = config.EXPERT_PANEL_CONFIG.get('orchestrator', {})
     orchestrator_provider = orchestrator_config.get('provider')
     orchestrator_model = orchestrator_config.get('model')
@@ -63,13 +71,11 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
     logger.info("Attempting to parse orchestrator's JSON plan...")
 
     try:
-        # Use regex to find a JSON block, which might be wrapped in markdown
         json_match = re.search(r'(\[[\s\S]*\]|{[\s\S]*})', orchestrator_response)
         if json_match:
             json_str = json_match.group(0)
             tasks_list = json.loads(json_str)
         else:
-            # If no JSON structure is found at all
             raise ValueError("No valid JSON found in the orchestrator's response.")
 
         if not isinstance(tasks_list, list):
@@ -83,18 +89,6 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
     # --- 2. Execute Sub-Tasks in Parallel ---
     
     async def get_full_response(provider_name, model, prompt, history):
-        # Handle structured prompts by converting to a single string
-        if isinstance(prompt, dict):
-            # Format the structured prompt into a single string
-            prompt_parts = []
-            if 'instructions' in prompt:
-                prompt_parts.append(f"INSTRUCTIONS:\n{prompt['instructions']}")
-            if 'context' in prompt:
-                prompt_parts.append(f"\nCONTEXT:\n{prompt['context']}")
-            if 'task' in prompt:
-                prompt_parts.append(f"\nTASK:\n{prompt['task']}")
-            prompt = "\n".join(prompt_parts)
-        
         service = providers.get_service_for_provider(provider_name)
         if service is None:
             logger.error(f"Service for provider '{provider_name}' is not available.")
@@ -111,12 +105,13 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
     task_role_map = {}
     for task_spec in tasks_list:
         role = task_spec.get('role')
-        prompt = task_spec.get('prompt')
+        prompt = task_spec.get('prompt') or task_spec.get('content')
         if role in role_configs:
             role_config = role_configs[role]
             provider = role_config.get('provider')
             model = role_config.get('model')
             if all([provider, model, prompt]):
+                panel_results[role] = {'provider': provider, 'model': model} # Pre-populate
                 task = asyncio.create_task(get_full_response(provider, model, prompt, full_history))
                 tasks_to_run.append(task)
                 task_role_map[task] = role
@@ -125,24 +120,23 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
         raise RuntimeError("No valid expert roles could be assigned based on the plan.")
 
     await placeholder_msg.edit_text("Executing expert tasks in parallel...", parse_mode=None)
-    logger.info(f"Executing {len(tasks_to_run)} expert tasks concurrently...")
     results = await asyncio.gather(*tasks_to_run, return_exceptions=True)
-    logger.info("Expert tasks completed.")
 
-    panel_results = {}
     for i, task in enumerate(tasks_to_run):
         role = task_role_map[task]
         result_data = results[i]
-        response = result_data if not isinstance(result_data, Exception) else f"Error: {result_data}"
-        panel_results[role] = response
-    
+        if isinstance(result_data, Exception):
+            panel_results[role]['status'] = 'Failure'
+            panel_results[role]['response'] = f"Error: {result_data}"
+        else:
+            panel_results[role]['status'] = 'Success'
+            panel_results[role]['response'] = result_data
+
     # --- 3. Synthesize Final Answer ---
     await placeholder_msg.edit_text("Synthesizing final answer...", parse_mode=None)
-    logger.info("Expert responses processed. Preparing synthesis prompt.")
-
-    proposer_response = panel_results.get("Proposer", "No response from proposer.")
-    critic_response = panel_results.get("Critic", "No response from critic.")
-
+    proposer_response = panel_results.get("Proposer", {}).get('response', 'No response from proposer.')
+    critic_response = panel_results.get("Critic", {}).get('response', 'No response from critic.')
+    
     synthesis_prompt = f"""
     You are a lead editor. Your task is to synthesize the work of your expert panel into a final answer for the user, taking into account the entire conversation history.
     
@@ -157,44 +151,48 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
     --- YOUR TASK ---\n
     Synthesize the proposal and critique into a direct, comprehensive answer to the LATEST USER QUERY, using the history for context. Do not repeat old information unless necessary.
     """
-
+    
     try:
         response_chunks = [chunk async for chunk in orchestrator_service.generate_response(model=orchestrator_model, prompt=synthesis_prompt, context_history=None)]
         synthesized_response = "".join(response_chunks).strip()
-        logger.info("Synthesis task completed.")
     except Exception as e:
-        logger.error(f"Synthesis call failed: {e}")
-        synthesized_response = "Failed to synthesize the final answer. Please try again later."
+        synthesized_response = "Failed to synthesize the final answer."
 
     # --- 4. Refine Final Answer ---
     await placeholder_msg.edit_text("Polishing final answer...", parse_mode=None)
     logger.info("Invoking Refiner agent...")
 
-    refiner_config = role_configs.get("Refiner", {})
-    refiner_provider = refiner_config.get('provider')
-    refiner_model = refiner_config.get('model')
-    refiner_prompt_template = next((task.get('prompt') for task in tasks_list if task.get('role') == 'Refiner'), "Refine the following text.")
+    final_answer = synthesized_response # Default to synthesized response
+    refiner_config = role_configs.get("Refiner")
 
-    if not all([refiner_provider, refiner_model]):
-        logger.warning("Refiner agent is not configured. Skipping refinement.")
-        final_answer = synthesized_response
-    else:
-        full_refiner_prompt = f"{refiner_prompt_template}\n\n--- DOCUMENT TO REFINE ---\n{synthesized_response}"
-        try:
-            refined_chunks = [chunk async for chunk in get_full_response(refiner_provider, refiner_model, full_refiner_prompt, full_history)]
-            final_answer = "".join(refined_chunks).strip()
-            logger.info("Refinement task completed.")
-        except Exception as e:
-            logger.error(f"Refiner call failed: {e}")
-            final_answer = synthesized_response # Fallback to synthesized response
+    if refiner_config:
+        refiner_provider = refiner_config.get('provider')
+        refiner_model = refiner_config.get('model')
+        refiner_prompt_template = next((task.get('prompt') for task in tasks_list if task.get('role') == 'Refiner'), "Refine the following text.")
+        
+        panel_results["Refiner"] = {'provider': refiner_provider, 'model': refiner_model}
 
-    return {
-        "proposer_response": proposer_response,
-        "critic_response": critic_response,
-        "synthesized_answer": synthesized_response,
-        "final_answer": final_answer
-    }
-
+        if not all([refiner_provider, refiner_model]):
+            panel_results["Refiner"]['status'] = 'Skipped'
+            panel_results["Refiner"]['response'] = 'Refiner not configured.'
+        else:
+            full_refiner_prompt = f"{refiner_prompt_template}\n\n--- DOCUMENT TO REFINE ---\n{synthesized_response}"
+            try:
+                refined_response = await get_full_response(refiner_provider, refiner_model, full_refiner_prompt, full_history)
+                if refined_response and not refined_response.startswith("Error:"):
+                    final_answer = refined_response.strip()
+                    panel_results["Refiner"]['status'] = 'Success'
+                    panel_results["Refiner"]['response'] = final_answer
+                    logger.info("Refinement task completed successfully.")
+                else:
+                    raise ValueError(f"Refiner returned an empty or error response: {refined_response}")
+            except Exception as e:
+                logger.error(f"Refiner call failed: {e}")
+                panel_results["Refiner"]['status'] = 'Failure'
+                panel_results["Refiner"]['response'] = str(e)
+                # Fallback to synthesized_response is already handled by default
+    
+    return panel_results, final_answer
 
 async def start_panel_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Entry point for the /discuss_panel command."""
@@ -211,7 +209,7 @@ async def start_panel_discussion(update: Update, context: ContextTypes.DEFAULT_T
     )
 
     try:
-        panel_results = await _run_panel_workflow(context, user_prompt, [], assembling_msg)
+        panel_results, final_answer = await _run_panel_workflow(context, user_prompt, [], assembling_msg)
     except Exception as e:
         logger.error(f"Panel workflow failed in start_panel_discussion: {e}")
         await assembling_msg.edit_text(str(e), parse_mode=None)
@@ -220,19 +218,18 @@ async def start_panel_discussion(update: Update, context: ContextTypes.DEFAULT_T
     # Save panel state for follow-up questions
     context.user_data['panel_state'] = {
         "original_prompt": user_prompt,
-        "proposer_response": panel_results["proposer_response"],
-        "critic_response": panel_results["critic_response"],
-        "synthesized_answer": panel_results["synthesized_answer"],
-        "final_answer": panel_results["final_answer"],
+        "panel_results": panel_results,
         "full_transcript": [
             {"role": "user", "content": user_prompt},
-            {"role": "assistant", "content": panel_results["final_answer"]}
+            {"role": "assistant", "content": final_answer}
         ]
     }
 
     # Send the Final Synthesized Response
     await assembling_msg.delete()
-    message_parts = split_message_markdown_aware(escape_markdown_v2(panel_results["final_answer"]))
+    summary_text = _format_panel_summary(panel_results)
+    final_text = f"{summary_text}\n\n---\n\n{final_answer}"
+    message_parts = split_message_markdown_aware(final_text)
     for part in message_parts:
         try:
             await context.bot.send_message(
@@ -244,7 +241,6 @@ async def start_panel_discussion(update: Update, context: ContextTypes.DEFAULT_T
             await context.bot.send_message(chat_id, text=part, parse_mode=None)
 
     return AWAITING_FOLLOW_UP
-
 
 async def handle_follow_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handles a follow-up question from the user."""
@@ -260,7 +256,7 @@ async def handle_follow_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return ConversationHandler.END
 
     try:
-        new_panel_results = await _run_panel_workflow(
+        new_panel_results, new_final_answer = await _run_panel_workflow(
             context, 
             follow_up_prompt, 
             panel_state['full_transcript'],
@@ -273,12 +269,14 @@ async def handle_follow_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     # Update the panel state with the new interaction
     panel_state['full_transcript'].append({"role": "user", "content": follow_up_prompt})
-    panel_state['full_transcript'].append({"role": "assistant", "content": new_panel_results["final_answer"]})
-    panel_state['synthesized_answer'] = new_panel_results["final_answer"] # Update latest answer
+    panel_state['full_transcript'].append({"role": "assistant", "content": new_final_answer})
+    panel_state['panel_results'] = new_panel_results # Update with the latest results
 
     # Send the response
     await placeholder.delete()
-    message_parts = split_message_markdown_aware(escape_markdown_v2(new_panel_results["final_answer"]))
+    summary_text = _format_panel_summary(new_panel_results)
+    final_text = f"{summary_text}\n\n---\n\n{new_final_answer}"
+    message_parts = split_message_markdown_aware(final_text)
     for part in message_parts:
         try:
             await context.bot.send_message(chat_id, text=part, parse_mode=constants.ParseMode.MARKDOWN_V2)
@@ -287,13 +285,11 @@ async def handle_follow_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     return AWAITING_FOLLOW_UP
 
-
 async def end_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """End the panel discussion and clear state"""
     context.user_data.pop('panel_state', None)
     await update.message.reply_text("Panel discussion concluded.", parse_mode=None)
     return ConversationHandler.END
-
 
 # Create command handler for ending discussions
 end_discussion_handler = CommandHandler('end_discussion', end_discussion)

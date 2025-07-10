@@ -90,9 +90,10 @@ expert_panel:
       provider: "openrouter"
       model: "deepseek/deepseek-r1-0528:free" # Or another suitable OpenRouter model
     Critic:
-      provider: "nvidia"
-      model: "qwen/qwen3-235b-a22b" # Or another suitable Nvidia model
+      provider: "openrouter"
+      # model: "qwen/qwen3-235b-a22b" # Or another suitable Nvidia model
+      model: "qwen/qwen3-235b-a22b:free"
     # We can add more roles here in the future without changing code
     Refiner:
-      provider: "nvidia"
-      model: "deepseek-ai/deepseek-r1-0528"
+      provider: "openrouter"
+      model: "deepseek/deepseek-r1-0528-qwen3-8b:free"
