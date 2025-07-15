@@ -69,7 +69,7 @@ class OpenAICompatibleService:
         logger.info(f"Falling back to configured 'allowed_models' for '{self.provider_name}'.")
         return self.allowed_models
 
-    async def generate_response(self, model: str, prompt: str, context_history: list = None):
+    async def generate_response(self, model: str, prompt: str, context_history: list = None, request_timeout: int = None):
         if not self.client:
             yield f"[Error: Client for provider '{self.provider_name}' not initialized]"
             return
@@ -86,11 +86,16 @@ class OpenAICompatibleService:
 
         for attempt in range(retries + 1):
             try:
-                stream = await self.client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    stream=True,
-                )
+                # Prepare keyword arguments for the API call
+                api_kwargs = {
+                    "model": model,
+                    "messages": messages,
+                    "stream": True,
+                }
+                if request_timeout is not None:
+                    api_kwargs["timeout"] = request_timeout
+
+                stream = await self.client.chat.completions.create(**api_kwargs)
                 async for chunk in stream:
                     content = chunk.choices[0].delta.content
                     if content is not None:

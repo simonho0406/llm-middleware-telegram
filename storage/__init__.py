@@ -22,6 +22,7 @@ class StorageManager:
             self.delete_thread = database_storage.delete_thread
             self.list_threads = database_storage.list_threads
             self.rename_thread = database_storage.rename_thread
+            self.save_message = database_storage.save_message
         elif backend == "file":
             self.init = file_storage.init_file_storage
             self.get_current_thread_id = file_storage.get_current_thread_id
@@ -34,6 +35,7 @@ class StorageManager:
             self.delete_thread = file_storage.delete_thread
             self.list_threads = file_storage.list_threads
             self.rename_thread = file_storage.rename_thread
+            self.save_message = file_storage.save_message
         else:
             raise ValueError(f"Invalid STORAGE_BACKEND: {backend}")
 

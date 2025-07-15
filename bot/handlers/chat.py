@@ -64,12 +64,31 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
     log_prefix = f"(Chat {chat_id}) "
     
     context_history = await storage_manager.get_thread_history(chat_id)
-    if is_reroll and context_history and context_history[-1].get('role') == 'assistant':
+    import json
+    processed_history = []
+    for message in context_history:
+        role = message.get('role')
+        content = message.get('content')
+        
+        if role == 'panel_discussion':
+            try:
+                panel_data = json.loads(content)
+                summary = (
+                    f"A previous expert panel discussion was held on the topic: '{panel_data.get('original_prompt')}'.\n"
+                    f"The final synthesized answer was: '{panel_data.get('final_answer')}'"
+                )
+                processed_history.append({'role': 'assistant', 'content': f"[Summary of Prior Panel Discussion]:\n{summary}"})
+            except (json.JSONDecodeError, TypeError):
+                processed_history.append({'role': 'assistant', 'content': "[A complex panel discussion occurred previously.]"})
+        else:
+            processed_history.append(message)
+    
+    if is_reroll and processed_history and processed_history[-1].get('role') == 'assistant':
         logger.info(f"{log_prefix}Reroll detected. Removing last assistant message from history.")
-        context_history.pop()
+        processed_history.pop()
 
     if not force_truncate:
-        total_tokens = count_tokens(prompt) + sum(count_tokens(msg.get("content", "")) for msg in context_history)
+        total_tokens = count_tokens(prompt) + sum(count_tokens(msg.get("content", "")) for msg in processed_history)
         if total_tokens > config.DEFAULT_MAX_CONTEXT_TOKENS:
             logger.warning(f"{log_prefix}Context limit exceeded ({total_tokens} > {config.DEFAULT_MAX_CONTEXT_TOKENS}). Prompting user to shrink.")
             keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Shrink and Retry", callback_data="shrink_and_retry")]])
@@ -118,7 +137,7 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
         logger.info(f"{log_prefix}Starting LLM generation for thread {current_thread_id}...")
         
         truncated_history = await _truncate_history_by_tokens(
-            history=context_history,
+            history=processed_history,
             prompt=prompt,
             max_tokens=config.DEFAULT_MAX_CONTEXT_TOKENS,
             output_buffer=config.CONTEXT_TOKEN_OUTPUT_BUFFER
@@ -177,7 +196,7 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
     if not llm_error_reported_by_model and final_content_to_send and message_sent_or_edited_successfully:
         logger.debug(f"{log_prefix}Updating conversation history.")
         try:
-            history_to_save = truncated_history
+            history_to_save = processed_history
             history_to_save.extend([
                 {'role': 'user', 'content': prompt},
                 {'role': 'assistant', 'content': final_content_to_send}

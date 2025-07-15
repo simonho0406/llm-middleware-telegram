@@ -82,6 +82,7 @@ expert_panel:
   orchestrator:
     provider: "nvidia"
     model: "nvidia/llama-3.1-nemotron-ultra-253b-v1" # Or another suitable Groq model
+    request_timeout_seconds: 600 # Add this line
 
   # Define the roles and the models assigned to them
   # The keys (e.g., "Proposer", "Critic") must match the roles the orchestrator uses
@@ -89,11 +90,12 @@ expert_panel:
     Proposer:
       provider: "openrouter"
       model: "deepseek/deepseek-r1-0528:free" # Or another suitable OpenRouter model
+      request_timeout_seconds: 600
     Critic:
       provider: "openrouter"
-      # model: "qwen/qwen3-235b-a22b" # Or another suitable Nvidia model
-      model: "qwen/qwen3-235b-a22b:free"
-    # We can add more roles here in the future without changing code
+      model: "qwen/qwen3-235b-a22b:free" # Or another suitable Nvidia model
+      request_timeout_seconds: 600
     Refiner:
       provider: "openrouter"
-      model: "deepseek/deepseek-r1-0528-qwen3-8b:free"
+      model: "deepseek/deepseek-r1-0528-qwen3-8b:free" # Or another suitable model
+      request_timeout_seconds: 600

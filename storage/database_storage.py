@@ -130,6 +130,22 @@ async def set_thread_history(chat_id: int, history: List[Dict[str, str]], thread
             await db.rollback()
             raise e
 
+async def save_message(chat_id: int, role: str, content: str, thread_id: Optional[str] = None) -> None:
+    """Saves a single message to the history of a specific or current thread."""
+    async with aiosqlite.connect(config.DB_PATH) as db:
+        thread_pk = await _get_thread_pk(db, chat_id, thread_id)
+        if not thread_pk:
+            logger.error(f"Attempted to save message to non-existent thread for chat_id {chat_id}")
+            return
+
+        timestamp = int(time.time())
+        await db.execute(
+            "INSERT INTO messages (thread_fk, role, content, timestamp) VALUES (?, ?, ?, ?)",
+            (thread_pk, role, content, timestamp)
+        )
+        await db.commit()
+        logger.info(f"Saved single message with role '{role}' to thread_pk {thread_pk} for chat {chat_id}")
+
 async def create_thread(chat_id: int, thread_id: str) -> bool:
     async with aiosqlite.connect(config.DB_PATH) as db:
         try:

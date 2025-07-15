@@ -292,6 +292,27 @@ async def get_thread_history(chat_id: int, thread_id: Optional[str] = None) -> L
 async def set_thread_history(chat_id: int, history: List[Dict[str, str]], thread_id: Optional[str] = None) -> None:
     """Sets the message history for a thread."""
     await update_thread_data(chat_id, {'history': history}, thread_id)
+
+async def save_message(chat_id: int, role: str, content: str, thread_id: Optional[str] = None) -> None:
+    """Saves a single message to the history of a specific or current thread for the file backend."""
+    async with _lock:
+        session = _sessions.get(chat_id)
+        if not session:
+            logger.warning(f"No session found for chat_id {chat_id} in save_message.")
+            return
+
+        target_thread_id = thread_id if thread_id is not None else session.get("current_thread_id", _DEFAULT_THREAD_ID)
+        
+        if target_thread_id not in session.get("threads", {}):
+            logger.error(f"Attempted to save message to non-existent thread '{target_thread_id}' for chat {chat_id}")
+            return
+
+        if "history" not in session["threads"][target_thread_id]:
+            session["threads"][target_thread_id]["history"] = []
+
+        session["threads"][target_thread_id]["history"].append({"role": role, "content": content})
+
+    await _save_sessions_to_file()
 # Load sessions when the module is imported
 
 # Example usage (for testing purposes) - Needs update for new structure

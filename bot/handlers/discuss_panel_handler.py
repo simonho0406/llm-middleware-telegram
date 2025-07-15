@@ -60,8 +60,16 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
     - Do NOT answer the user's request yourself. Your only output is the JSON plan.
     """
 
+    # Get timeout from config
+    orchestrator_timeout = orchestrator_config.get('request_timeout_seconds')
+
     try:
-        response_chunks = [chunk async for chunk in orchestrator_service.generate_response(model=orchestrator_model, prompt=meta_prompt, context_history=None)]
+        response_chunks = [chunk async for chunk in orchestrator_service.generate_response(
+            model=orchestrator_model,
+            prompt=meta_prompt,
+            context_history=None,
+            request_timeout=orchestrator_timeout
+        )]
         orchestrator_response = "".join(response_chunks)
     except Exception as e:
         logger.error(f"Orchestrator call failed: {e}")
@@ -86,52 +94,80 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
         logger.error(f"Failed to parse orchestrator response: {e}\nFull response:\n{orchestrator_response}")
         raise RuntimeError("The panel's plan was unclear. Please try again with a different prompt.")
 
-    # --- 2. Execute Sub-Tasks in Parallel ---
+    # --- 2. Execute Sub-Tasks Sequentially ---
     
-    async def get_full_response(provider_name, model, prompt, history):
+    async def get_full_response(provider_name, model, prompt, history, role_config):
         service = providers.get_service_for_provider(provider_name)
         if service is None:
             logger.error(f"Service for provider '{provider_name}' is not available.")
             return f"Error: Service for '{provider_name}' not configured or available."
+        
+        # Get timeout from role config if available
+        request_timeout = role_config.get('request_timeout_seconds')
+        
         try:
-            response_chunks = [chunk async for chunk in service.generate_response(model=model, prompt=prompt, context_history=history)]
+            response_chunks = [chunk async for chunk in service.generate_response(
+                model=model,
+                prompt=prompt,
+                context_history=history,
+                request_timeout=request_timeout
+            )]
             return "".join(response_chunks)
         except Exception as e:
             logger.error(f"Sub-task for model {model} failed: {e}")
             return f"Error generating response from {model}: {e}"
 
     role_configs = config.EXPERT_PANEL_CONFIG.get('roles', {})
-    tasks_to_run = []
-    task_role_map = {}
-    for task_spec in tasks_list:
-        role = task_spec.get('role')
-        prompt = task_spec.get('prompt') or task_spec.get('content')
-        if role in role_configs:
-            role_config = role_configs[role]
-            provider = role_config.get('provider')
-            model = role_config.get('model')
-            if all([provider, model, prompt]):
-                panel_results[role] = {'provider': provider, 'model': model} # Pre-populate
-                task = asyncio.create_task(get_full_response(provider, model, prompt, full_history))
-                tasks_to_run.append(task)
-                task_role_map[task] = role
+    
+    # Find Proposer and Critic in tasks_list
+    proposer_task = next((t for t in tasks_list if t.get('role') == 'Proposer'), None)
+    critic_task = next((t for t in tasks_list if t.get('role') == 'Critic'), None)
+    
+    if not proposer_task or not critic_task:
+        raise RuntimeError("Orchestrator's plan must include Proposer and Critic roles.")
 
-    if not tasks_to_run:
-        raise RuntimeError("No valid expert roles could be assigned based on the plan.")
+    # Execute Proposer
+    await placeholder_msg.edit_text("Proposer is working...", parse_mode=None)
+    proposer_role_config = role_configs.get('Proposer', {})
+    proposer_provider = proposer_role_config.get('provider')
+    proposer_model = proposer_role_config.get('model')
+    proposer_prompt = proposer_task.get('prompt') or proposer_task.get('content')
+    
+    if not all([proposer_provider, proposer_model, proposer_prompt]):
+        raise RuntimeError("Proposer configuration is incomplete.")
+    
+    proposer_response = await get_full_response(proposer_provider, proposer_model, proposer_prompt, full_history, proposer_role_config)
+    panel_results['Proposer'] = {
+        'provider': proposer_provider,
+        'model': proposer_model,
+        'status': 'Success' if not proposer_response.startswith("Error:") else 'Failure',
+        'response': proposer_response
+    }
 
-    await placeholder_msg.edit_text("Executing expert tasks in parallel...", parse_mode=None)
-    results = await asyncio.gather(*tasks_to_run, return_exceptions=True)
-
-    for i, task in enumerate(tasks_to_run):
-        role = task_role_map[task]
-        result_data = results[i]
-        if isinstance(result_data, Exception):
-            panel_results[role]['status'] = 'Failure'
-            panel_results[role]['response'] = f"Error: {result_data}"
-        else:
-            panel_results[role]['status'] = 'Success'
-            panel_results[role]['response'] = result_data
-
+    # Execute Critic with Proposer's response
+    await placeholder_msg.edit_text("Critic is reviewing...", parse_mode=None)
+    critic_role_config = role_configs.get('Critic', {})
+    critic_provider = critic_role_config.get('provider')
+    critic_model = critic_role_config.get('model')
+    critic_prompt_template = critic_task.get('prompt') or critic_task.get('content')
+    
+    if not all([critic_provider, critic_model, critic_prompt_template]):
+        raise RuntimeError("Critic configuration is incomplete.")
+    
+    # Build enhanced prompt for Critic
+    full_critic_prompt = (
+        f"{critic_prompt_template}\n\n"
+        f"--- USER'S ORIGINAL QUERY ---\n{user_prompt}\n\n"
+        f"--- PROPOSER'S DRAFT ANSWER ---\n{proposer_response}"
+    )
+    
+    critic_response = await get_full_response(critic_provider, critic_model, full_critic_prompt, full_history, critic_role_config)
+    panel_results['Critic'] = {
+        'provider': critic_provider,
+        'model': critic_model,
+        'status': 'Success' if not critic_response.startswith("Error:") else 'Failure',
+        'response': critic_response
+    }
     # --- 3. Synthesize Final Answer ---
     await placeholder_msg.edit_text("Synthesizing final answer...", parse_mode=None)
     proposer_response = panel_results.get("Proposer", {}).get('response', 'No response from proposer.')
@@ -178,7 +214,7 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
         else:
             full_refiner_prompt = f"{refiner_prompt_template}\n\n--- DOCUMENT TO REFINE ---\n{synthesized_response}"
             try:
-                refined_response = await get_full_response(refiner_provider, refiner_model, full_refiner_prompt, full_history)
+                refined_response = await get_full_response(refiner_provider, refiner_model, full_refiner_prompt, full_history, refiner_config)
                 if refined_response and not refined_response.startswith("Error:"):
                     final_answer = refined_response.strip()
                     panel_results["Refiner"]['status'] = 'Success'
@@ -286,9 +322,37 @@ async def handle_follow_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     return AWAITING_FOLLOW_UP
 
 async def end_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """End the panel discussion and clear state"""
-    context.user_data.pop('panel_state', None)
-    await update.message.reply_text("Panel discussion concluded.", parse_mode=None)
+    """End the panel discussion, save its state as a single message, and clear context."""
+    from storage import database_storage
+    import json
+
+    chat_id = update.effective_chat.id
+    panel_state = context.user_data.get('panel_state')
+
+    if panel_state:
+        # Extract the final answer from the last assistant message in transcript
+        final_answer = next(
+            (msg['content'] for msg in reversed(panel_state['full_transcript'])
+             if msg['role'] == 'assistant'),
+            "No final answer recorded"
+        )
+
+        # Create and save panel summary
+        await database_storage.save_message(
+            chat_id,
+            'panel_discussion',
+            json.dumps({
+                "original_prompt": panel_state["original_prompt"],
+                "participants": list(panel_state["panel_results"].keys()),
+                "final_answer": final_answer
+            }, indent=2)
+        )
+
+        context.user_data.pop('panel_state', None)
+        await update.message.reply_text("✅ Panel discussion saved to thread history", parse_mode=None)
+    else:
+        await update.message.reply_text("⚠️ No active discussion to save", parse_mode=None)
+
     return ConversationHandler.END
 
 # Create command handler for ending discussions
