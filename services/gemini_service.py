@@ -73,7 +73,7 @@ async def _generate_single_model_non_streaming(model: str, prompt: str, context_
         logger.error(f"Gemini error (Key {_current_key_index}, Model: {model}): {e}")
         return f"[Error: {e}]"
 
-async def generate_response(model: str, prompt: str, context_history: Optional[List[Dict]] = None) -> AsyncGenerator[str, None]:
+async def generate_response(model: str, prompt: str, context_history: Optional[List[Dict]] = None, request_timeout: int = None) -> AsyncGenerator[str, None]:
     """
     Generates a response from the specified Gemini model using streaming with key rotation.
     """
@@ -117,7 +117,8 @@ async def generate_response(model: str, prompt: str, context_history: Optional[L
                     response_stream = await asyncio.to_thread(
                         gemini_model.generate_content,
                         contents=full_prompt,
-                        stream=True
+                        stream=True,
+                        request_options={'timeout': request_timeout} if request_timeout else None
                     )
                     # Iterate over the synchronous iterator within the same thread
                     for chunk in response_stream:

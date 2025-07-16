@@ -102,9 +102,9 @@ class OpenAICompatibleService:
                         yield content
                 success = True
                 break
-            except (APIConnectionError, RateLimitError) as e:
+            except (APIConnectionError, RateLimitError, httpx.ReadTimeout, httpx.ConnectTimeout) as e:
                 if attempt < retries:
-                    logger.error(f"[{self.provider_name}] API Error: {e}. Retrying in {delay} seconds.")
+                    logger.warning(f"[{self.provider_name}] API Error: {e}. Retrying in {delay} seconds. (Attempt {attempt + 1}/{retries})")
                     await asyncio.sleep(delay)
                     delay *= 2
                 else:

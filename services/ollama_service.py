@@ -76,7 +76,7 @@ async def _generate_single_model_non_streaming(model: str, prompt: str, context_
         logger.error(f"Error generating Ollama response (model: {model}): {e}")
         return f"[Error: {str(e)}]"
 
-async def generate_response(model: str, prompt: str, context_history: Optional[List[Dict]] = None) -> AsyncGenerator[str, None]:
+async def generate_response(model: str, prompt: str, context_history: Optional[List[Dict]] = None, request_timeout: int = None) -> AsyncGenerator[str, None]:
     """
     Generates a response from the specified Ollama model using streaming.
 
@@ -102,7 +102,11 @@ async def generate_response(model: str, prompt: str, context_history: Optional[L
     logger.info(f"Sending request to Ollama model '{model}'")
     try:
         # Use stream=True for asynchronous streaming
-        async for part in await client.chat(model=model, messages=messages, stream=True):
+        options = {}
+        if request_timeout is not None:
+            options['request_timeout'] = request_timeout
+
+        async for part in await client.chat(model=model, messages=messages, stream=True, options=options):
             if part.message and part.message.content:
                 chunk = part.message.content
                 yield chunk

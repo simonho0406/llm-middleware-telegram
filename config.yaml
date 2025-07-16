@@ -89,7 +89,7 @@ expert_panel:
   roles:
     Proposer:
       provider: "openrouter"
-      model: "deepseek/deepseek-r1-0528:free" # Or another suitable OpenRouter model
+      model: "deepseek/deepseek-chat-v3-0324:free" # Or another suitable OpenRouter model
       request_timeout_seconds: 600
     Critic:
       provider: "openrouter"
@@ -97,5 +97,5 @@ expert_panel:
       request_timeout_seconds: 600
     Refiner:
       provider: "openrouter"
-      model: "deepseek/deepseek-r1-0528-qwen3-8b:free" # Or another suitable model
+      model: "deepseek/deepseek-r1-0528:free" # Or another suitable model
       request_timeout_seconds: 600

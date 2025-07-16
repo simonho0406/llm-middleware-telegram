@@ -140,7 +140,7 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
     panel_results['Proposer'] = {
         'provider': proposer_provider,
         'model': proposer_model,
-        'status': 'Success' if not proposer_response.startswith("Error:") else 'Failure',
+        'status': 'Success' if "[Error:" not in proposer_response else 'Failure',
         'response': proposer_response
     }
 
@@ -165,7 +165,7 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
     panel_results['Critic'] = {
         'provider': critic_provider,
         'model': critic_model,
-        'status': 'Success' if not critic_response.startswith("Error:") else 'Failure',
+        'status': 'Success' if "[Error:" not in critic_response else 'Failure',
         'response': critic_response
     }
     # --- 3. Synthesize Final Answer ---
@@ -212,21 +212,19 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
             panel_results["Refiner"]['status'] = 'Skipped'
             panel_results["Refiner"]['response'] = 'Refiner not configured.'
         else:
-            full_refiner_prompt = f"{refiner_prompt_template}\n\n--- DOCUMENT TO REFINE ---\n{synthesized_response}"
-            try:
-                refined_response = await get_full_response(refiner_provider, refiner_model, full_refiner_prompt, full_history, refiner_config)
-                if refined_response and not refined_response.startswith("Error:"):
-                    final_answer = refined_response.strip()
-                    panel_results["Refiner"]['status'] = 'Success'
-                    panel_results["Refiner"]['response'] = final_answer
-                    logger.info("Refinement task completed successfully.")
-                else:
-                    raise ValueError(f"Refiner returned an empty or error response: {refined_response}")
-            except Exception as e:
-                logger.error(f"Refiner call failed: {e}")
+            full_refiner_prompt = f"{refiner_prompt_template}\n\n--- DOCUMENT TO REFINE ---\n{json.dumps(synthesized_response)}"
+            refined_response = await get_full_response(refiner_provider, refiner_model, full_refiner_prompt, full_history, refiner_config)
+
+            if refined_response and "[Error:" not in refined_response:
+                final_answer = refined_response.strip()
+                panel_results["Refiner"]['status'] = 'Success'
+                panel_results["Refiner"]['response'] = final_answer
+                logger.info("Refinement task completed successfully.")
+            else:
+                logger.error(f"Refiner call failed or returned error: {refined_response}")
                 panel_results["Refiner"]['status'] = 'Failure'
-                panel_results["Refiner"]['response'] = str(e)
-                # Fallback to synthesized_response is already handled by default
+                panel_results["Refiner"]['response'] = refined_response if refined_response else "[Empty Response]"
+                # Fallback to synthesized_response is already handled by default as final_answer is not updated
     
     return panel_results, final_answer
 
@@ -355,6 +353,49 @@ async def end_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     return ConversationHandler.END
 
+async def reroll_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handles the /reroll command within a panel discussion."""
+    chat_id = update.effective_chat.id
+    logger.info(f"[{chat_id}] User triggered /reroll within a discussion.")
+
+    panel_state = context.user_data.get('panel_state')
+    if not panel_state or not panel_state.get('full_transcript'):
+        await update.message.reply_text("⚠️ No discussion history found to reroll. Please start a new one.", parse_mode=None)
+        return AWAITING_FOLLOW_UP
+
+    # Find the last user message in the transcript
+    last_user_prompt = next((msg['content'] for msg in reversed(panel_state['full_transcript']) if msg['role'] == 'user'), None)
+
+    if not last_user_prompt:
+        await update.message.reply_text("⚠️ Could not find the last user prompt to reroll.", parse_mode=None)
+        return AWAITING_FOLLOW_UP
+
+    placeholder_msg = await update.message.reply_text(f'Re-running panel for: "{last_user_prompt[:50]}..."', parse_mode=None)
+    
+    # Remove the last assistant response from the transcript before rerunning
+    if panel_state['full_transcript'][-1]['role'] == 'assistant':
+        panel_state['full_transcript'].pop()
+
+    try:
+        panel_results, final_answer = await _run_panel_workflow(context, last_user_prompt, panel_state['full_transcript'], placeholder_msg)
+        
+        # Update history and send response (similar to handle_follow_up)
+        panel_state['full_transcript'].append({"role": "assistant", "content": final_answer})
+        panel_state['panel_results'] = panel_results
+
+        await placeholder_msg.delete()
+        summary_text = _format_panel_summary(panel_results)
+        final_text = f"{summary_text}\n\n---\n\n{final_answer}"
+        message_parts = split_message_markdown_aware(final_text)
+        for part in message_parts:
+            await context.bot.send_message(chat_id, text=part, parse_mode=constants.ParseMode.MARKDOWN_V2)
+
+    except Exception as e:
+        logger.error(f"Panel workflow failed during reroll: {e}")
+        await placeholder_msg.edit_text(str(e), parse_mode=None)
+
+    return AWAITING_FOLLOW_UP
+
 # Create command handler for ending discussions
 end_discussion_handler = CommandHandler('end_discussion', end_discussion)
 
@@ -363,6 +404,7 @@ discuss_panel_conv_handler = ConversationHandler(
     entry_points=[CommandHandler('discuss_panel', start_panel_discussion)],
     states={
         AWAITING_FOLLOW_UP: [
+            CommandHandler('reroll', reroll_discussion),
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_follow_up),
             end_discussion_handler
         ],
