@@ -2,18 +2,37 @@ import logging
 import re
 import asyncio
 import json
-from telegram import Update
+from telegram import Update, BotCommand
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, MessageHandler, filters
+from telegram import BotCommandScopeChat
 from utils.text_processing import split_message_markdown_aware, escape_markdown_v2
 from telegram import constants
 import config
 from bot import providers
+from services import web_search_service
+from bot.menu_setup import setup_bot_commands_and_menu
 
 # Define conversation states
 AWAITING_FOLLOW_UP, PANEL_IN_PROGRESS = range(2)
 
 logger = logging.getLogger(__name__)
+
+async def set_panel_commands(application, chat_id: int) -> None:
+    """Sets the bot's command list to panel-specific commands."""
+    panel_commands = [
+        BotCommand("reroll", "Rerun the last panel turn"),
+        BotCommand("search", "Inject web search results into the discussion"),
+        BotCommand("end_discussion", "End the current panel discussion"),
+    ]
+    try:
+        await application.bot.set_my_commands(
+            commands=panel_commands,
+            scope=BotCommandScopeChat(chat_id)
+        )
+        logger.info(f"Set panel-specific commands for chat {chat_id}")
+    except Exception as e:
+        logger.error(f"Failed to set panel-specific commands for chat {chat_id}: {e}")
 
 def _format_panel_summary(panel_results: dict) -> str:
     """Formats the results of the panel execution into a markdown string."""
@@ -21,7 +40,8 @@ def _format_panel_summary(panel_results: dict) -> str:
     for role, result in panel_results.items():
         status_icon = "✅" if result.get('status') == 'Success' else "⚠️"
         model_info = f"`{result.get('provider')}/{result.get('model')}`"
-        summary_parts.append(f"{status_icon} *{role}:* {model_info} ({result.get('status')})")
+        fallback_note = escape_markdown_v2(" (Fallback)") if result.get('fallback') else ""
+        summary_parts.append(f"{status_icon} *{role}:* {model_info} ({result.get('status')}){fallback_note}")
     return "\n".join(summary_parts)
 
 async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: str, full_history: list, placeholder_msg) -> tuple:
@@ -62,47 +82,49 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
 
     # Get timeout from config
     orchestrator_timeout = orchestrator_config.get('request_timeout_seconds')
-
-    try:
-        response_chunks = [chunk async for chunk in orchestrator_service.generate_response(
-            model=orchestrator_model,
-            prompt=meta_prompt,
-            context_history=None,
-            request_timeout=orchestrator_timeout
-        )]
-        orchestrator_response = "".join(response_chunks)
-    except Exception as e:
-        logger.error(f"Orchestrator call failed: {e}")
-        raise RuntimeError("Failed to decompose the task. Please try again later.")
-
-    logger.info(f"Orchestrator response: {orchestrator_response}")
-    logger.info("Attempting to parse orchestrator's JSON plan...")
-
-    try:
-        json_match = re.search(r'(\[[\s\S]*\]|{[\s\S]*})', orchestrator_response)
-        if json_match:
-            json_str = json_match.group(0)
-            tasks_list = json.loads(json_str)
-        else:
-            raise ValueError("No valid JSON found in the orchestrator's response.")
-
-        if not isinstance(tasks_list, list):
-            raise ValueError("Expected a JSON array of tasks.")
-
-        logger.info(f"Successfully parsed orchestrator's plan. Found {len(tasks_list)} tasks.")
-    except (json.JSONDecodeError, ValueError) as e:
-        logger.error(f"Failed to parse orchestrator response: {e}\nFull response:\n{orchestrator_response}")
-        raise RuntimeError("The panel's plan was unclear. Please try again with a different prompt.")
+    
+    max_retries = 3
+    tasks_list = None
+    for attempt in range(max_retries):
+        try:
+            response_chunks = [chunk async for chunk in orchestrator_service.generate_response(
+                model=orchestrator_model,
+                prompt=meta_prompt,
+                context_history=None,
+                request_timeout=orchestrator_timeout
+            )]
+            orchestrator_response = "".join(response_chunks)
+            
+            logger.debug(f"Orchestrator response (Attempt {attempt+1}/{max_retries}): {orchestrator_response}")
+            
+            # Attempt to parse JSON
+            json_match = re.search(r'(\[[\s\S]*\]|{[\s\S]*})', orchestrator_response)
+            if json_match:
+                json_str = json_match.group(0)
+                tasks_list = json.loads(json_str)
+            else:
+                raise ValueError("No valid JSON found in the orchestrator's response.")
+            
+            if not isinstance(tasks_list, list):
+                raise ValueError("Expected a JSON array of tasks.")
+            
+            logger.info(f"Successfully parsed orchestrator's plan. Found {len(tasks_list)} tasks.")
+            break # Break out of retry loop on success
+        except (json.JSONDecodeError, ValueError, Exception) as e:
+            logger.error(f"Orchestrator attempt {attempt+1}/{max_retries} failed: {e}")
+            if attempt < max_retries - 1:
+                await asyncio.sleep(2) # Wait before retrying
+            else:
+                raise RuntimeError("Failed to get a valid plan from the orchestrator after 3 attempts.")
 
     # --- 2. Execute Sub-Tasks Sequentially ---
     
-    async def get_full_response(provider_name, model, prompt, history, role_config):
+    async def get_full_response(provider_name, model, prompt, history, role_config, role_name):
         service = providers.get_service_for_provider(provider_name)
         if service is None:
             logger.error(f"Service for provider '{provider_name}' is not available.")
-            return f"Error: Service for '{provider_name}' not configured or available."
+            return f"[Error: Service for '{provider_name}' not configured or available.]"
         
-        # Get timeout from role config if available
         request_timeout = role_config.get('request_timeout_seconds')
         
         try:
@@ -112,11 +134,45 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
                 context_history=history,
                 request_timeout=request_timeout
             )]
-            return "".join(response_chunks)
-        except Exception as e:
-            logger.error(f"Sub-task for model {model} failed: {e}")
-            return f"Error generating response from {model}: {e}"
+            response = "".join(response_chunks)
 
+            if "[Error:" in response:
+                raise ValueError(f"Initial response from {role_name} contained an error: {response}")
+
+            return response
+
+        except Exception as e:
+            logger.warning(f"Sub-task for {role_name} ({provider_name}/{model}) failed: {e}. Falling back to orchestrator.")
+            
+            fallback_prompt = (
+                f"You must now take on the role of the '{role_name}'. The original agent failed. "
+                f"Analyze the following original prompt and provide a comprehensive response that fulfills the role's task.\n\n"
+                f"--- ORIGINAL PROMPT FOR {role_name.upper()} ---\n{prompt}"
+            )
+            
+            try:
+                orchestrator_service = providers.get_service_for_provider(orchestrator_provider)
+                fallback_chunks = [chunk async for chunk in orchestrator_service.generate_response(
+                    model=orchestrator_model,
+                    prompt=fallback_prompt,
+                    context_history=history,
+                    request_timeout=orchestrator_timeout
+                )]
+                fallback_response = "".join(fallback_chunks)
+                
+                # Prefix the fallback response to make it clear it's a fallback
+                return f"[Fallback by Orchestrator as {role_name}]: {fallback_response}"
+
+            except Exception as fallback_e:
+                logger.error(f"Orchestrator fallback for {role_name} also failed: {fallback_e}")
+                return f"[Error: {role_name} failed, and Orchestrator fallback also failed.]"
+
+    # --- 2. Dynamic Iteration with Quality Gate ---
+    max_iterations = 3
+    iteration = 1
+    sufficient_quality = False
+    proposer_response = ""
+    critic_response = ""
     role_configs = config.EXPERT_PANEL_CONFIG.get('roles', {})
     
     # Find Proposer and Critic in tasks_list
@@ -126,48 +182,83 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
     if not proposer_task or not critic_task:
         raise RuntimeError("Orchestrator's plan must include Proposer and Critic roles.")
 
-    # Execute Proposer
-    await placeholder_msg.edit_text("Proposer is working...", parse_mode=None)
+    # Get role configs
     proposer_role_config = role_configs.get('Proposer', {})
+    critic_role_config = role_configs.get('Critic', {})
     proposer_provider = proposer_role_config.get('provider')
     proposer_model = proposer_role_config.get('model')
-    proposer_prompt = proposer_task.get('prompt') or proposer_task.get('content')
-    
-    if not all([proposer_provider, proposer_model, proposer_prompt]):
-        raise RuntimeError("Proposer configuration is incomplete.")
-    
-    proposer_response = await get_full_response(proposer_provider, proposer_model, proposer_prompt, full_history, proposer_role_config)
-    panel_results['Proposer'] = {
-        'provider': proposer_provider,
-        'model': proposer_model,
-        'status': 'Success' if "[Error:" not in proposer_response else 'Failure',
-        'response': proposer_response
-    }
-
-    # Execute Critic with Proposer's response
-    await placeholder_msg.edit_text("Critic is reviewing...", parse_mode=None)
-    critic_role_config = role_configs.get('Critic', {})
     critic_provider = critic_role_config.get('provider')
     critic_model = critic_role_config.get('model')
+    
+    if not all([proposer_provider, proposer_model, critic_provider, critic_model]):
+        raise RuntimeError("Proposer or Critic configuration is incomplete.")
+
+    # Initial Proposer prompt
+    current_proposer_prompt = proposer_task.get('prompt') or proposer_task.get('content')
     critic_prompt_template = critic_task.get('prompt') or critic_task.get('content')
     
-    if not all([critic_provider, critic_model, critic_prompt_template]):
-        raise RuntimeError("Critic configuration is incomplete.")
-    
-    # Build enhanced prompt for Critic
-    full_critic_prompt = (
-        f"{critic_prompt_template}\n\n"
-        f"--- USER'S ORIGINAL QUERY ---\n{user_prompt}\n\n"
-        f"--- PROPOSER'S DRAFT ANSWER ---\n{proposer_response}"
-    )
-    
-    critic_response = await get_full_response(critic_provider, critic_model, full_critic_prompt, full_history, critic_role_config)
-    panel_results['Critic'] = {
-        'provider': critic_provider,
-        'model': critic_model,
-        'status': 'Success' if "[Error:" not in critic_response else 'Failure',
-        'response': critic_response
-    }
+    for iteration in range(1, max_iterations + 1):
+        await placeholder_msg.edit_text(f"Round {iteration}/{max_iterations}: Proposer is working...", parse_mode=None)
+        
+        # Execute Proposer
+        proposer_response = await get_full_response(proposer_provider, proposer_model, current_proposer_prompt, full_history, proposer_role_config, 'Proposer')
+        proposer_fallback = "[Fallback by Orchestrator" in proposer_response
+        panel_results['Proposer'] = {
+            'provider': proposer_provider,
+            'model': proposer_model,
+            'status': 'Success' if "[Error:" not in proposer_response else 'Failure',
+            'response': proposer_response,
+            'fallback': proposer_fallback
+        }
+
+        # Execute Critic
+        await placeholder_msg.edit_text(f"Round {iteration}/{max_iterations}: Critic is reviewing...", parse_mode=None)
+        full_critic_prompt = (
+            f"{critic_prompt_template}\n\n"
+            f"--- USER'S ORIGINAL QUERY ---\n{user_prompt}\n\n"
+            f"--- PROPOSER'S DRAFT ANSWER ---\n{proposer_response}"
+        )
+        
+        critic_response = await get_full_response(critic_provider, critic_model, full_critic_prompt, full_history, critic_role_config, 'Critic')
+        critic_fallback = "[Fallback by Orchestrator" in critic_response
+        panel_results['Critic'] = {
+            'provider': critic_provider,
+            'model': critic_model,
+            'status': 'Success' if "[Error:" not in critic_response else 'Failure',
+            'response': critic_response,
+            'fallback': critic_fallback
+        }
+
+        # Quality check
+        await placeholder_msg.edit_text(f"Round {iteration}/{max_iterations}: Assessing quality...", parse_mode=None)
+        quality_check_prompt = (
+            f"You are a quality assurance manager. Given the following proposal and critique, is the quality sufficient for a final answer? "
+            f"Answer only with the single word 'SUFFICIENT' or the single word 'ITERATE'.\n\n"
+            f"--- PROPOSAL ---\n{proposer_response}\n\n"
+            f"--- CRITIQUE ---\n{critic_response}"
+        )
+        
+        quality_decision = await get_full_response(orchestrator_provider, orchestrator_model, quality_check_prompt, None, orchestrator_config, 'Orchestrator')
+        quality_decision = quality_decision.strip().upper()
+        
+        if "SUFFICIENT" in quality_decision:
+            sufficient_quality = True
+            break
+        elif "ITERATE" in quality_decision and iteration < max_iterations:
+            # Prepare for next iteration
+            current_proposer_prompt = (
+                f"Please refine your previous answer based on the following critique. This is round {iteration+1}.\n\n"
+                f"--- PREVIOUS ANSWER ---\n{proposer_response}\n\n"
+                f"--- CRITIQUE ---\n{critic_response}\n\n"
+                f"--- YOUR TASK ---\n"
+                f"Provide a new, improved, and comprehensive answer that addresses the critique."
+            )
+            await placeholder_msg.edit_text(f"Quality check failed. Starting round {iteration+1}...", parse_mode=None)
+        else:
+            break
+
+    if not sufficient_quality and iteration == max_iterations:
+        await placeholder_msg.edit_text("Reached maximum iterations without achieving sufficient quality.", parse_mode=None)
     # --- 3. Synthesize Final Answer ---
     await placeholder_msg.edit_text("Synthesizing final answer...", parse_mode=None)
     proposer_response = panel_results.get("Proposer", {}).get('response', 'No response from proposer.')
@@ -189,7 +280,12 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
     """
     
     try:
-        response_chunks = [chunk async for chunk in orchestrator_service.generate_response(model=orchestrator_model, prompt=synthesis_prompt, context_history=None)]
+        response_chunks = [chunk async for chunk in orchestrator_service.generate_response(
+            model=orchestrator_model,
+            prompt=synthesis_prompt,
+            context_history=None,
+            request_timeout=orchestrator_timeout
+        )]
         synthesized_response = "".join(response_chunks).strip()
     except Exception as e:
         synthesized_response = "Failed to synthesize the final answer."
@@ -213,7 +309,7 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
             panel_results["Refiner"]['response'] = 'Refiner not configured.'
         else:
             full_refiner_prompt = f"{refiner_prompt_template}\n\n--- DOCUMENT TO REFINE ---\n{json.dumps(synthesized_response)}"
-            refined_response = await get_full_response(refiner_provider, refiner_model, full_refiner_prompt, full_history, refiner_config)
+            refined_response = await get_full_response(refiner_provider, refiner_model, full_refiner_prompt, full_history, refiner_config, 'Refiner')
 
             if refined_response and "[Error:" not in refined_response:
                 final_answer = refined_response.strip()
@@ -224,6 +320,7 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
                 logger.error(f"Refiner call failed or returned error: {refined_response}")
                 panel_results["Refiner"]['status'] = 'Failure'
                 panel_results["Refiner"]['response'] = refined_response if refined_response else "[Empty Response]"
+                panel_results["Refiner"]['fallback'] = refiner_fallback
                 # Fallback to synthesized_response is already handled by default as final_answer is not updated
     
     return panel_results, final_answer
@@ -241,6 +338,8 @@ async def start_panel_discussion(update: Update, context: ContextTypes.DEFAULT_T
         text="Assembling an expert panel...",
         parse_mode=None
     )
+    # Update commands to panel-specific set
+    await set_panel_commands(context.application, chat_id)
 
     try:
         panel_results, final_answer = await _run_panel_workflow(context, user_prompt, [], assembling_msg)
@@ -280,7 +379,7 @@ async def handle_follow_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     """Handles a follow-up question from the user."""
     chat_id = update.effective_chat.id
     follow_up_prompt = update.message.text
-    logger.debug(f"[{chat_id}] Handling follow-up: '{follow_up_prompt}'")
+    logger.info(f"[{chat_id}] Handling follow-up: '{follow_up_prompt}'")
 
     placeholder = await update.message.reply_text("Panel is reconvening...", parse_mode=None)
 
@@ -319,39 +418,50 @@ async def handle_follow_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     return AWAITING_FOLLOW_UP
 
+async def _cleanup_discussion_state(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
+    """Resets panel-specific commands and clears user data."""
+    context.user_data.pop('panel_state', None)
+    # Reset commands to the default set for the specific chat
+    await setup_bot_commands_and_menu(context.application, chat_id)
+    logger.info(f"Cleaned up panel state and reset commands for chat {chat_id}.")
+
 async def end_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """End the panel discussion, save its state as a single message, and clear context."""
-    from storage import database_storage
-    import json
-
+    """Ends the panel discussion cleanly."""
     chat_id = update.effective_chat.id
-    panel_state = context.user_data.get('panel_state')
-
-    if panel_state:
-        # Extract the final answer from the last assistant message in transcript
-        final_answer = next(
-            (msg['content'] for msg in reversed(panel_state['full_transcript'])
-             if msg['role'] == 'assistant'),
-            "No final answer recorded"
-        )
-
-        # Create and save panel summary
-        await database_storage.save_message(
-            chat_id,
-            'panel_discussion',
-            json.dumps({
-                "original_prompt": panel_state["original_prompt"],
-                "participants": list(panel_state["panel_results"].keys()),
-                "final_answer": final_answer
-            }, indent=2)
-        )
-
-        context.user_data.pop('panel_state', None)
-        await update.message.reply_text("✅ Panel discussion saved to thread history", parse_mode=None)
+    if 'panel_state' in context.user_data:
+        await update.message.reply_text("✅ Panel discussion ended and state cleared.", parse_mode=None)
+        await _cleanup_discussion_state(context, chat_id)
     else:
-        await update.message.reply_text("⚠️ No active discussion to save", parse_mode=None)
-
+        await update.message.reply_text("⚠️ No active discussion to end.", parse_mode=None)
     return ConversationHandler.END
+
+async def search_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handles the /search command within a panel discussion."""
+    chat_id = update.effective_chat.id
+    logger.info(f"[{chat_id}] User triggered /search within a discussion.")
+
+    if not context.args:
+        await update.message.reply_text("Please provide a query to search. Usage: /search <your query>", parse_mode=None)
+        return AWAITING_FOLLOW_UP
+
+    query = " ".join(context.args)
+    placeholder_msg = await update.message.reply_text(f"Searching the web for: \"{query}\"...", parse_mode=None)
+
+    search_results = await web_search_service.perform_search(query)
+
+    if search_results.startswith("Error:"):
+        await placeholder_msg.edit_text(search_results, parse_mode=None)
+        return AWAITING_FOLLOW_UP
+
+    # Add the search results to the panel's transcript
+    panel_state = context.user_data.get('panel_state')
+    if panel_state and panel_state.get('full_transcript'):
+        panel_state['full_transcript'].append({'role': 'user', 'content': f"Search results for '{query}':\n{search_results}"})
+        await placeholder_msg.edit_text("✅ Search results have been added to the discussion context." , parse_mode=None)
+    else:
+        await placeholder_msg.edit_text("⚠️ Could not find an active discussion to add search results to.", parse_mode=None)
+
+    return AWAITING_FOLLOW_UP
 
 async def reroll_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handles the /reroll command within a panel discussion."""
@@ -370,16 +480,24 @@ async def reroll_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text("⚠️ Could not find the last user prompt to reroll.", parse_mode=None)
         return AWAITING_FOLLOW_UP
 
-    placeholder_msg = await update.message.reply_text(f'Re-running panel for: "{last_user_prompt[:50]}..."', parse_mode=None)
-    
+    placeholder_msg = await update.message.reply_text(f'Re-running panel for: \"{last_user_prompt[:50]}...\"', parse_mode=None)
+
+    # Make a copy of the history to be passed to the workflow
+    history_for_reroll = list(panel_state['full_transcript'])
+
     # Remove the last assistant response from the transcript before rerunning
-    if panel_state['full_transcript'][-1]['role'] == 'assistant':
-        panel_state['full_transcript'].pop()
+    if history_for_reroll and history_for_reroll[-1]['role'] == 'assistant':
+        history_for_reroll.pop()
 
     try:
-        panel_results, final_answer = await _run_panel_workflow(context, last_user_prompt, panel_state['full_transcript'], placeholder_msg)
+        panel_results, final_answer = await _run_panel_workflow(context, last_user_prompt, history_for_reroll, placeholder_msg)
+
+        # --- Correctly update the transcript ---
+        # 1. Pop the old assistant message if it exists
+        if panel_state['full_transcript'] and panel_state['full_transcript'][-1]['role'] == 'assistant':
+            panel_state['full_transcript'].pop()
         
-        # Update history and send response (similar to handle_follow_up)
+        # 2. Append the new, successful response
         panel_state['full_transcript'].append({"role": "assistant", "content": final_answer})
         panel_state['panel_results'] = panel_results
 
@@ -388,13 +506,36 @@ async def reroll_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         final_text = f"{summary_text}\n\n---\n\n{final_answer}"
         message_parts = split_message_markdown_aware(final_text)
         for part in message_parts:
-            await context.bot.send_message(chat_id, text=part, parse_mode=constants.ParseMode.MARKDOWN_V2)
+            try:
+                await context.bot.send_message(chat_id, text=part, parse_mode=constants.ParseMode.MARKDOWN_V2)
+            except BadRequest as e:
+                if "Can't parse entities" in str(e):
+                    logger.warning(f"MarkdownV2 parsing failed for a message part. Sending as plain text. Error: {e}")
+                    await context.bot.send_message(chat_id, text=part, parse_mode=None)
+                else:
+                    raise
 
     except Exception as e:
-        logger.error(f"Panel workflow failed during reroll: {e}")
-        await placeholder_msg.edit_text(str(e), parse_mode=None)
+        logger.error(f"Panel workflow failed during reroll: {e}", exc_info=True)
+        error_message = f"An error occurred during the reroll: {escape_markdown_v2(str(e))}"
+        try:
+            if placeholder_msg:
+                await placeholder_msg.edit_text(error_message, parse_mode=constants.ParseMode.MARKDOWN_V2)
+            else:
+                await context.bot.send_message(chat_id, error_message, parse_mode=constants.ParseMode.MARKDOWN_V2)
+        except Exception as send_e:
+            logger.error(f"Failed to send error message to user after reroll failure: {send_e}")
 
     return AWAITING_FOLLOW_UP
+
+async def timeout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handles conversation timeout."""
+    chat_id = update.effective_chat.id
+    logger.info(f"Panel discussion timed out for chat {chat_id}.")
+    if 'panel_state' in context.user_data:
+        await context.bot.send_message(chat_id, "Panel discussion has timed out due to inactivity.", parse_mode=None)
+        await _cleanup_discussion_state(context, chat_id)
+    return ConversationHandler.END
 
 # Create command handler for ending discussions
 end_discussion_handler = CommandHandler('end_discussion', end_discussion)
@@ -405,11 +546,12 @@ discuss_panel_conv_handler = ConversationHandler(
     states={
         AWAITING_FOLLOW_UP: [
             CommandHandler('reroll', reroll_discussion),
+            CommandHandler('search', search_discussion),
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_follow_up),
-            end_discussion_handler
         ],
     },
-    fallbacks=[end_discussion_handler],
+    fallbacks=[CommandHandler('end_discussion', end_discussion), CommandHandler('timeout', timeout_handler)],
     per_user=True,
-    per_chat=True
+    per_chat=True,
+    conversation_timeout=1800,  # 30 minutes
 )

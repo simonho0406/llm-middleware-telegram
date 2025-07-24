@@ -72,9 +72,9 @@ Development is guided by a strategic roadmap focused on evolving the bot into a 
 *   **Status:** ✅ **Completed & Stabilized**
 *   **Description:** Evolve the `/discuss` command to allow selecting models from *different* providers. This will enable more powerful, heterogeneous agent chains (e.g., a fast model for outlining, a powerful model for generation) and mitigate single-provider rate limits.
 
-### Phase 2: Multi-Agent "Expert Panel" (Future)
-*   **Status:** 📝 **Planned**
-*   **Description:** A true multi-agent system where a lead agent decomposes a query into sub-tasks, assigns them to specialized sub-agents that execute in parallel, and a final agent synthesizes the results.
+### Phase 2: Multi-Agent "Agentic Workshop"
+*   **Status:** ✅ **Completed & V2.0 Released**
+*   **Description:** A true multi-agent system where a lead "Orchestrator" agent decomposes a query, assigns tasks to specialized sub-agents (e.g., "Proposer", "Critic"), and then decides if the quality is sufficient or if another iteration of refinement is needed. This "Quality Gate" loop allows the system to dynamically improve its response before synthesizing a final answer.
 
 ### High-Priority Technical & Feature Work
 1.  **Database Migration:** Migrate session storage from `sessions.json` to a scalable database backend (e.g., SQLite) to ensure performance and data integrity. This is a prerequisite for more advanced agentic features.

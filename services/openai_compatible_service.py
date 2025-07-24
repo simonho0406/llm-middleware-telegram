@@ -92,8 +92,9 @@ class OpenAICompatibleService:
                     "messages": messages,
                     "stream": True,
                 }
-                if request_timeout is not None:
-                    api_kwargs["timeout"] = request_timeout
+                # Use per-request timeout or fallback to global default
+                timeout_value = request_timeout if request_timeout is not None else config.REQUEST_TIMEOUT_SECONDS
+                api_kwargs["timeout"] = timeout_value
 
                 stream = await self.client.chat.completions.create(**api_kwargs)
                 async for chunk in stream:

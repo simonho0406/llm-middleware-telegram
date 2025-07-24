@@ -1,4 +1,6 @@
 import logging
+import time
+from telegram.error import BadRequest
 import asyncio
 import re
 import tiktoken
@@ -14,6 +16,8 @@ from storage import storage_manager
 from utils.text_processing import split_message_markdown_aware, escape_markdown_v2
 
 logger = logging.getLogger(__name__)
+
+STREAMING_THROTTLE_SECONDS = 1.5
 
 def count_tokens(text: str) -> int:
     try:
@@ -130,7 +134,9 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
     except Exception as e:
         logger.error(f"{log_prefix}Failed to send placeholder message: {e}")
 
+    # --- Start of response generation ---
     raw_full_llm_response = ""
+    last_edit_time = time.time()
     llm_error_reported_by_model = False
     truncated_history = []
     try:
@@ -148,7 +154,22 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
                 raw_full_llm_response = chunk
                 llm_error_reported_by_model = True
                 break
+            # Append the chunk to the raw response
             raw_full_llm_response += chunk
+
+            # --- Throttled Streaming Update ---
+            current_time = time.time()
+            if (current_time - last_edit_time) > STREAMING_THROTTLE_SECONDS:
+                try:
+                    # Edit with parse_mode=None for intermediate updates to prevent errors
+                    await placeholder_message.edit_text(
+                        text=raw_full_llm_response + " ▌",  # Add a blinking cursor effect
+                        parse_mode=None
+                    )
+                    last_edit_time = current_time
+                except BadRequest as e:
+                    if "Message is not modified" not in str(e):
+                        logger.warning(f"Throttled streaming edit failed: {e}")
         
         if not llm_error_reported_by_model: logger.info(f"{log_prefix}LLM generation complete. Length: {len(raw_full_llm_response)}")
 
@@ -196,7 +217,7 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
     if not llm_error_reported_by_model and final_content_to_send and message_sent_or_edited_successfully:
         logger.debug(f"{log_prefix}Updating conversation history.")
         try:
-            history_to_save = processed_history
+            history_to_save = list(processed_history)
             history_to_save.extend([
                 {'role': 'user', 'content': prompt},
                 {'role': 'assistant', 'content': final_content_to_send}

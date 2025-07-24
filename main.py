@@ -1,7 +1,8 @@
 import logging
 import asyncio
-from telegram import Update, BotCommand, MenuButtonCommands
+from telegram import Update
 from telegram.ext import CommandHandler, Application, ContextTypes
+from bot.menu_setup import setup_bot_commands_and_menu
 
 # Import the function to create the application
 from bot.application import create_application
@@ -15,44 +16,7 @@ logger = logging.getLogger(__name__)
 
 # --- Basic Command Handlers ---
 
-# --- Bot Commands and Menu Setup Function ---
-async def setup_bot_commands_and_menu(application: Application) -> None:
-    """Sets the bot's command list and menu button for all scopes."""
-    commands = [
-        # Core
-        BotCommand("help", "Show available commands"),
-        BotCommand("new", "Start a new conversation"),
-        BotCommand("reroll", "Regenerate the last AI response"),
-        # Tools
-        BotCommand("search", "Answer a query using web search"),
-        BotCommand("ask_selected", "Query multiple models at once"),
-        BotCommand("discuss", "Start a multi-model, multi-provider discussion"),
-        BotCommand("discuss_panel", "Orchestrate an expert AI panel"),
-        BotCommand("end_discussion", "Conclude an ongoing panel discussion"),
-        # Provider & Model
-        BotCommand("provider", "Switch AI provider"),
-        BotCommand("model", "Show the current AI model"),
-        BotCommand("list_models", "List available models for the provider"),
-        BotCommand("set_model", "Set a new model for the provider"),
-        # Thread Management
-        BotCommand("threads", "List and manage conversation threads"),
-        BotCommand("rename_thread", "Rename the current thread"),
-        # Misc
-        BotCommand("start", "Initialize the bot"),
-    ]
-    
-    try:
-        # 1. Set commands for the default scope (for all users)
-        await application.bot.set_my_commands(commands)
-        
-        # 2. Set the menu button to show commands for the default scope
-        await application.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
-        
-        logger.info("Successfully set bot command list and menu button for the default scope.")
-
-
-    except Exception as e:
-        logger.error(f"Failed to set bot commands or menu button: {e}")
+# --- Basic Command Handlers ---
 
 # --- Startup Checks Function ---
 async def run_startup_checks(application: Application) -> None:
@@ -117,13 +81,18 @@ def main() -> None:
     from bot.handlers.discuss_handler import discuss_conv_handler
     from bot.handlers.discuss_panel_handler import discuss_panel_conv_handler
 
-    app.add_handlers(misc_handlers)
-    app.add_handlers(ask_selected_handlers)
-    app.add_handler(discuss_conv_handler)
-    app.add_handler(discuss_panel_conv_handler)
-    logger.info("Registered command and conversation handlers.")
-    app.add_handler(chat_handler)
-    logger.info("Registered main chat handler.")
+    # High-priority group for conversation handlers (group=0)
+    app.add_handler(discuss_conv_handler, group=0)
+    app.add_handler(discuss_panel_conv_handler, group=0)
+    app.add_handler(chat_handler, group=0)
+    for handler in ask_selected_handlers:
+        app.add_handler(handler, group=0)
+    
+    # Lower-priority group for command handlers (group=1)
+    for handler in misc_handlers:
+        app.add_handler(handler, group=1)
+    
+    logger.info("Registered handlers with priority groups")
 
     async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error("Exception while handling an update:", exc_info=context.error)
@@ -139,9 +108,22 @@ def main() -> None:
     app.add_error_handler(error_handler)
     logger.info("Registered global error handler.")
 
+    import time
+    from telegram.error import NetworkError
+
     logger.info("Starting bot polling...")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
-    logger.info("Bot stopped.")
+    while True:
+        try:
+            app.run_polling(allowed_updates=Update.ALL_TYPES)
+            logger.info("Bot stopped normally.")
+            break  # Exit loop if stopped normally
+        except NetworkError as e:
+            logger.error(f"Telegram NetworkError: {e}. Reconnecting in 10 seconds...")
+            time.sleep(10)
+        except Exception as e:
+            logger.critical(f"Unexpected error in polling loop: {e}", exc_info=True)
+            logger.info("Restarting in 30 seconds...")
+            time.sleep(30)
 
 
 if __name__ == "__main__":
