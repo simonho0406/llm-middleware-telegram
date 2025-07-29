@@ -1,0 +1,781 @@
+2025-07-27 21:40:25.096 | 2025-07-27 21:40:25 - config - INFO - Configuration loaded:
+2025-07-27 21:40:25.096 | 2025-07-27 21:40:25 - config - INFO -   DEFAULT_PROVIDER: ollama
+2025-07-27 21:40:25.096 | 2025-07-27 21:40:25 - config - INFO -   DEFAULT_OLLAMA_MODEL: qwq
+2025-07-27 21:40:25.096 | 2025-07-27 21:40:25 - config - INFO -   DEFAULT_GEMINI_MODEL: gemini-1.5-pro-latest
+2025-07-27 21:40:25.096 | 2025-07-27 21:40:25 - config - INFO -   DEFAULT_OPENROUTER_MODEL: deepseek/deepseek-chat-v3-0324:free
+2025-07-27 21:40:25.096 | 2025-07-27 21:40:25 - config - INFO -   Tavily API Key Loaded: Yes
+2025-07-27 21:40:25.096 | 2025-07-27 21:40:25 - config - INFO -   GEMINI_ASK_ALL_MODELS: ['gemini-1.5-pro-latest', 'gemini-1.5-flash-latest']
+2025-07-27 21:40:25.096 | 2025-07-27 21:40:25 - config - INFO -   OPENROUTER_ALLOWED_MODELS: ['llama-2-70b', 'mistral-7b', 'stability-ai/stablelm-tuned-alpha-7b']
+2025-07-27 21:40:25.096 | 2025-07-27 21:40:25 - config - INFO -   OPENROUTER_HTTP_REFERER: YOUR_APP_URL_OR_NAME
+2025-07-27 21:40:25.096 | 2025-07-27 21:40:25 - config - INFO -   OLLAMA_HOST: http://host.docker.internal:11434
+2025-07-27 21:40:25.096 | 2025-07-27 21:40:25 - config - INFO -   SESSION_FILE_PATH: data/sessions.json
+2025-07-27 21:40:25.096 | 2025-07-27 21:40:25 - config - INFO -   ALLOWED_CHAT_IDS: None
+2025-07-27 21:40:25.096 | 2025-07-27 21:40:25 - config - INFO -   REQUEST_TIMEOUT_SECONDS: 180
+2025-07-27 21:40:25.096 | 2025-07-27 21:40:25 - config - INFO -   Number of Gemini Keys loaded: 3
+2025-07-27 21:40:25.096 | 2025-07-27 21:40:25 - config - INFO -   Number of Custom Providers loaded: 3
+2025-07-27 21:40:25.096 | 2025-07-27 21:40:25 - config - INFO -   CONTEXT_TOKEN_OUTPUT_BUFFER: 10000
+2025-07-27 21:40:25.280 | 2025-07-27 21:40:25 - services.ollama_service - INFO - Ollama client initialized for host: http://host.docker.internal:11434
+2025-07-27 21:40:26.514 | 2025-07-27 21:40:26 - storage - INFO - Initializing StorageManager with backend: database
+2025-07-27 21:40:26.514 | 2025-07-27 21:40:26 - __main__ - INFO - Starting bot initialization...
+2025-07-27 21:40:26.551 | 2025-07-27 21:40:26 - bot.application - INFO - Telegram Application created.
+2025-07-27 21:40:26.559 | /app/bot/handlers/ask_selected_handler.py:428: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-07-27 21:40:26.559 |   ask_selected_conv_handler = ConversationHandler(
+2025-07-27 21:40:26.561 | /app/bot/handlers/discuss_handler.py:299: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-07-27 21:40:26.561 |   discuss_conv_handler = ConversationHandler(
+2025-07-27 21:40:26.563 | 2025-07-27 21:40:26 - __main__ - INFO - Registered handlers with priority groups
+2025-07-27 21:40:26.563 | 2025-07-27 21:40:26 - __main__ - INFO - Registered global error handler.
+2025-07-27 21:40:26.563 | 2025-07-27 21:40:26 - __main__ - INFO - Starting bot polling...
+2025-07-27 21:40:27.350 | 2025-07-27 21:40:27 - __main__ - INFO - Initializing provider details...
+2025-07-27 21:40:27.367 | 2025-07-27 21:40:27 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'groq' with base URL 'https://api.groq.com/openai/v1'
+2025-07-27 21:40:27.385 | 2025-07-27 21:40:27 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'requesty' with base URL 'https://router.requesty.ai/v1'
+2025-07-27 21:40:27.385 | 2025-07-27 21:40:27 - services.openai_compatible_service - WARNING - Allowed models not configured for provider 'nvidia'. Using default empty list.
+2025-07-27 21:40:27.404 | 2025-07-27 21:40:27 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'nvidia' with base URL 'https://integrate.api.nvidia.com/v1'
+2025-07-27 21:40:27.404 | 2025-07-27 21:40:27 - bot.providers - INFO - Initialized provider details for: ['ollama', 'gemini', 'openrouter', 'groq', 'requesty', 'nvidia']
+2025-07-27 21:40:27.404 | 2025-07-27 21:40:27 - __main__ - INFO - Provider details initialization complete.
+2025-07-27 21:40:27.404 | 2025-07-27 21:40:27 - __main__ - INFO - Initializing storage...
+2025-07-27 21:40:27.414 | 2025-07-27 21:40:27 - storage.database_storage - INFO - Database initialized successfully.
+2025-07-27 21:40:27.415 | 2025-07-27 21:40:27 - __main__ - INFO - Storage initialization complete.
+2025-07-27 21:40:27.415 | 2025-07-27 21:40:27 - __main__ - INFO - Running startup failsafe: resetting command scopes for all known chats...
+2025-07-27 21:40:27.857 | 2025-07-27 21:40:27 - bot.menu_setup - INFO - Successfully set bot command list for chat 0.
+2025-07-27 21:40:27.857 | 2025-07-27 21:40:27 - __main__ - INFO - Completed command scope reset for 1 chats.
+2025-07-27 21:40:27.857 | 2025-07-27 21:40:27 - __main__ - INFO - Performing startup checks for AI services...
+2025-07-27 21:40:27.878 | 2025-07-27 21:40:27 - services.gemini_service - INFO - Gemini connection successful (checked with Key Index: 0).
+2025-07-27 21:40:27.932 | 2025-07-27 21:40:27 - services.ollama_service - INFO - Ollama connection successful.
+2025-07-27 21:40:28.170 | 2025-07-27 21:40:28 - services.openrouter_service - INFO - OpenRouter connection check successful (fetched models).
+2025-07-27 21:40:28.170 | 2025-07-27 21:40:28 - __main__ - INFO - Ollama connection check successful.
+2025-07-27 21:40:28.170 | 2025-07-27 21:40:28 - __main__ - INFO - Gemini connection check successful.
+2025-07-27 21:40:28.170 | 2025-07-27 21:40:28 - __main__ - INFO - OpenRouter connection check successful.
+2025-07-27 21:40:29.040 | 2025-07-27 21:40:29 - bot.menu_setup - INFO - Successfully set bot command list and menu button for the default scope.
+2025-07-27 21:40:29.300 | 2025-07-27 21:40:29 - __main__ - INFO - Bot initialized: Username='SmsFowardingBot', Token='64687...D5E4'
+2025-07-27 21:40:29.567 | 2025-07-27 21:40:29 - apscheduler.scheduler - INFO - Scheduler started
+2025-07-27 21:40:29.567 | 2025-07-27 21:40:29 - telegram.ext.Application - INFO - Application started
+2025-07-27 21:41:06.946 | 2025-07-27 21:41:06 - bot.handlers.discuss_panel_handler - INFO - Set panel-specific commands for chat 0
+2025-07-27 21:41:17.877 | 2025-07-27 21:41:17 - bot.handlers.discuss_panel_handler - INFO - Successfully parsed orchestrator's plan. Found 3 tasks.
+2025-07-27 21:44:59.626 | 2025-07-27 21:44:59 - bot.handlers.discuss_panel_handler - INFO - Invoking Refiner agent...
+2025-07-27 21:45:02.101 | 2025-07-27 21:45:02 - services.openrouter_service - WARNING - OpenRouter request failed (Attempt 1/3): Client error '429 Too Many Requests' for url 'https://openrouter.ai/api/v1/chat/completions'
+2025-07-27 21:45:02.101 | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429
+2025-07-27 21:45:52.430 | 2025-07-27 21:45:52 - bot.handlers.discuss_panel_handler - INFO - Refinement task completed successfully.
+2025-07-27 21:45:54.255 | 2025-07-27 21:45:54 - apscheduler.scheduler - INFO - Added job "_trigger_timeout" to job store "default"
+2025-07-27 21:55:02.986 | 2025-07-27 21:55:02 - apscheduler.scheduler - INFO - Removed job f8ab4acd943e4df199a2927eb06b41f2
+2025-07-27 21:55:02.986 | 2025-07-27 21:55:02 - bot.handlers.discuss_panel_handler - INFO - [0] Handling follow-up: 'I'm usually at office, with computer, ipad and phone at hand. Also I do always have a notebook with me for pen and paper, even more frequently than ipad. But I don't prefer any saying out loud thing since I don't want to disturb others. Walking to get water would do but that would need backup if I'm more urgent. Meditation I think would be even longer but more helpful reset. The answer last time was more like it.
+2025-07-27 21:55:02.986 | 
+2025-07-27 21:55:02.986 | ---
+2025-07-27 21:55:02.986 | 
+2025-07-27 21:55:02.986 | 2-Minute (Or Less) Context-Switching Routine  
+2025-07-27 21:55:02.986 | *Use this after meetings, closing tabs (Slack/email), or switching tools to reset focus swiftly.*  
+2025-07-27 21:55:02.986 | 
+2025-07-27 21:55:02.986 | ---
+2025-07-27 21:55:02.986 | 
+2025-07-27 21:55:02.986 | 1. RESET (45 SEC)  
+2025-07-27 21:55:02.986 | [ ] Shoulder Rolls: 3 slow rolls forward/backward, seated.  
+2025-07-27 21:55:02.986 | [ ] Controlled Breathing: Inhale for 3 seconds → Exhale for 5 seconds. Repeat 3x.  
+2025-07-27 21:55:02.986 | [ ] Mantra: Silently say: “Reset. Ready.”  
+2025-07-27 21:55:02.986 | 
+2025-07-27 21:55:02.986 | 2. ANCHOR (30 SEC)  
+2025-07-27 21:55:02.986 | [ ] Pick a Consistent Cue: Choose a quiet object at your desk to signal the shift.  
+2025-07-27 21:55:02.986 |    - Example: Squeeze a stress ball twice.  
+2025-07-27 21:55:02.986 |    - Example: Open a hidden sticky note, type “Draft mode ON,” then close it.  
+2025-07-27 21:55:02.986 | [ ] Keep the Cue Fixed: Only change the action’s *text* if the task role differs (e.g., “Meeting mode OFF”).  
+2025-07-27 21:55:02.986 | 
+2025-07-27 21:55:02.986 | 3. SENSORY SWAP (15–20 SEC)  
+2025-07-27 21:55:02.986 | [ ] Switch Your Environment: Do one physical action to reset attention.  
+2025-07-27 21:55:02.986 |    - Headphones: Pop them on or off.  
+2025-07-27 21:55:02.986 |    - Wallpaper: Hit a pre-set hotkey to toggle between screens (e.g., to a solid focus color).  
+2025-07-27 21:55:02.986 | 
+2025-07-27 21:55:02.986 | 4. GAMEPLAN (30 SEC)  
+2025-07-27 21:55:02.986 | [ ] Name the First Action: Zoom in on the next task’s *literal first move*.  
+2025-07-27 21:55:02.986 |    - Example: “Open 2024-Q2-budget draft → type date in title.”  
+2025-07-27 21:55:02.986 |    - *No planning perfection*: Just specify the keystroke or click that starts the chain.  
+2025-07-27 21:55:02.986 | 
+2025-07-27 21:55:02.986 | 5. OPTIONAL 3-2-1 FALLBACK (10 SEC)  
+2025-07-27 21:55:02.986 | [ ] If Rushed: Skip steps → do this instant reset:  
+2025-07-27 21:55:02.986 |    - 3: Identify one visible object (e.g., your mug).  
+2025-07-27 21:55:02.986 |    - 2: Notice a physical feeling (e.g., feet on floor).  
+2025-07-27 21:55:02.986 |    - 1: Move cursor to the next file or tab.  
+2025-07-27 21:55:02.986 | 
+2025-07-27 21:55:02.986 | ---
+2025-07-27 21:55:02.986 | 
+2025-07-27 21:55:02.986 | TIP: Do this *immediately* after consistent triggers (e.g., closing a meeting, hitting “save,” or navigating between apps). After 7 days, the routine becomes automatic.  
+2025-07-27 21:55:02.986 | 
+2025-07-27 21:55:02.986 | *Total Time: 2:10–2:20 minutes (less with practice).*'
+2025-07-27 21:55:14.461 | 2025-07-27 21:55:14 - bot.handlers.discuss_panel_handler - INFO - Successfully parsed orchestrator's plan. Found 3 tasks.
+2025-07-27 21:56:12.986 | 2025-07-27 21:56:12 - bot.handlers.discuss_panel_handler - INFO - Invoking Refiner agent...
+2025-07-27 21:56:37.202 | 2025-07-27 21:56:37 - bot.handlers.discuss_panel_handler - INFO - Refinement task completed successfully.
+2025-07-27 21:56:38.907 | 2025-07-27 21:56:38 - apscheduler.scheduler - INFO - Added job "_trigger_timeout" to job store "default"
+2025-07-27 21:58:58.176 | 2025-07-27 21:58:58 - apscheduler.scheduler - INFO - Removed job d31a2a4413934809a133622fab1f2641
+2025-07-27 21:58:59.609 | 2025-07-27 21:58:59 - bot.menu_setup - INFO - Successfully set bot command list for chat 0.
+2025-07-27 21:58:59.609 | 2025-07-27 21:58:59 - bot.handlers.discuss_panel_handler - INFO - Cleaned up panel state and reset commands for chat 0.
+2025-07-27 21:59:09.093 | 2025-07-27 21:59:09 - services.openrouter_service - INFO - Fetched 56 free models from OpenRouter.
+2025-07-27 21:59:27.257 | 2025-07-27 21:59:27 - bot.handlers.misc_commands - INFO - Chat 0 provider set to 'nvidia'
+2025-07-27 21:59:28.250 | 2025-07-27 21:59:28 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 21:59:30.729 | 2025-07-27 21:59:30 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 21:59:32.303 | 2025-07-27 21:59:32 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 21:59:33.754 | 2025-07-27 21:59:33 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 21:59:35.264 | 2025-07-27 21:59:35 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 21:59:36.577 | 2025-07-27 21:59:36 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 21:59:39.456 | 2025-07-27 21:59:39 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 21:59:42.238 | 2025-07-27 21:59:42 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 21:59:47.261 | 2025-07-27 21:59:47 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 21:59:50.185 | 2025-07-27 21:59:50 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 21:59:51.712 | 2025-07-27 21:59:51 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 21:59:53.929 | 2025-07-27 21:59:53 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 21:59:55.660 | 2025-07-27 21:59:55 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 21:59:56.380 | 2025-07-27 21:59:56 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:00:01.780 | 2025-07-27 22:00:01 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:00:05.479 | 2025-07-27 22:00:05 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:00:07.879 | 2025-07-27 22:00:07 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:00:14.173 | 2025-07-27 22:00:14 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:00:17.864 | 2025-07-27 22:00:17 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:00:19.390 | 2025-07-27 22:00:19 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:00:20.691 | 2025-07-27 22:00:20 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:00:22.094 | 2025-07-27 22:00:22 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:00:23.962 | 2025-07-27 22:00:23 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:00:25.177 | 2025-07-27 22:00:25 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:00:34.291 | 2025-07-27 22:00:34 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:00:35.737 | 2025-07-27 22:00:35 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:00:39.599 | 2025-07-27 22:00:39 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:00:42.755 | 2025-07-27 22:00:42 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:00:57.019 | 2025-07-27 22:00:57 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:00:58.696 | 2025-07-27 22:00:58 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:01:07.636 | 2025-07-27 22:01:07 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:01:12.023 | 2025-07-27 22:01:12 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:01:13.679 | 2025-07-27 22:01:13 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:01:15.296 | 2025-07-27 22:01:15 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:01:21.923 | 2025-07-27 22:01:21 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:01:22.923 | 2025-07-27 22:01:22 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:01:24.572 | 2025-07-27 22:01:24 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:01:26.014 | 2025-07-27 22:01:26 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:01:46.809 | 2025-07-27 22:01:46 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:01:48.486 | 2025-07-27 22:01:48 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:01:51.515 | 2025-07-27 22:01:51 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:02:40.215 | 2025-07-27 22:02:40 - bot.handlers.chat - INFO - (Chat 0) Message from User 0: 'Alright. I think we can call that a wrap. I'll try and revisit how this routine work later....'
+2025-07-27 22:02:42.697 | 2025-07-27 22:02:42 - bot.handlers.chat - INFO - (Chat 0) Using service: OpenAICompatibleService, Model: nvidia/llama-3.3-nemotron-super-49b-v1.5
+2025-07-27 22:02:43.703 | 2025-07-27 22:02:43 - bot.handlers.chat - INFO - (Chat 0) Starting LLM generation for thread default...
+2025-07-27 22:02:51.885 | 2025-07-27 22:02:51 - bot.handlers.chat - INFO - (Chat 0) LLM generation complete. Length: 684
+2025-07-27 22:02:52.444 | 2025-07-27 22:02:52 - bot.handlers.chat - INFO - (Chat 0) History updated to 87 entries.
+2025-07-27 22:03:06.986 | 2025-07-27 22:03:06 - bot.handlers.misc_commands - INFO - [NEW_THREAD] User 0, Chat 0: Received /new command. Generating new thread ID: thread_1753624986
+2025-07-27 22:03:24.690 | 2025-07-27 22:03:24 - bot.handlers.discuss_panel_handler - INFO - Set panel-specific commands for chat 0
+2025-07-27 22:03:32.293 | 2025-07-27 22:03:32 - bot.handlers.discuss_panel_handler - INFO - Successfully parsed orchestrator's plan. Found 3 tasks.
+2025-07-27 22:05:22.515 | 2025-07-27 22:05:22 - bot.handlers.discuss_panel_handler - INFO - Invoking Refiner agent...
+2025-07-27 22:07:46.837 | 2025-07-27 22:07:46 - bot.handlers.discuss_panel_handler - INFO - Refinement task completed successfully.
+2025-07-27 22:07:48.541 | 2025-07-27 22:07:48 - apscheduler.scheduler - INFO - Added job "_trigger_timeout" to job store "default"
+2025-07-27 22:09:13.696 | 2025-07-27 22:09:13 - apscheduler.scheduler - INFO - Removed job 6ffbb7dcd1f741b8a78673d484fa4db7
+2025-07-27 22:09:13.696 | 2025-07-27 22:09:13 - bot.handlers.discuss_panel_handler - INFO - [0] Handling follow-up: 'I'm usually at office, with computer, ipad and phone at hand. Also I do always have a notebook with me for pen and paper, even more frequently than ipad. But I don't prefer any saying out loud thing since I don't want to disturb others. Meditation I think would be even longer but more helpful reset.'
+2025-07-27 22:09:27.436 | 2025-07-27 22:09:27 - bot.handlers.discuss_panel_handler - INFO - Successfully parsed orchestrator's plan. Found 3 tasks.
+2025-07-27 22:14:30.635 | 2025-07-27 22:14:30 - bot.handlers.discuss_panel_handler - INFO - Invoking Refiner agent...
+2025-07-27 22:14:33.003 | 2025-07-27 22:14:33 - services.openrouter_service - WARNING - OpenRouter request failed (Attempt 1/3): Client error '429 Too Many Requests' for url 'https://openrouter.ai/api/v1/chat/completions'
+2025-07-27 22:14:33.003 | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429
+2025-07-27 22:14:36.792 | 2025-07-27 22:14:36 - services.openrouter_service - WARNING - OpenRouter request failed (Attempt 2/3): Client error '429 Too Many Requests' for url 'https://openrouter.ai/api/v1/chat/completions'
+2025-07-27 22:14:36.792 | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429
+2025-07-27 22:14:53.130 | 2025-07-27 22:14:53 - bot.handlers.discuss_panel_handler - INFO - Refinement task completed successfully.
+2025-07-27 22:14:54.939 | 2025-07-27 22:14:54 - apscheduler.scheduler - INFO - Added job "_trigger_timeout" to job store "default"
+2025-07-27 22:44:15.843 | 2025-07-27 22:44:15 - apscheduler.scheduler - INFO - Removed job 3359ea5b498c423688e73dd3386e580c
+2025-07-27 22:44:17.256 | 2025-07-27 22:44:17 - bot.menu_setup - INFO - Successfully set bot command list for chat 0.
+2025-07-27 22:44:17.256 | 2025-07-27 22:44:17 - bot.handlers.discuss_panel_handler - INFO - Cleaned up panel state and reset commands for chat 0.
+2025-07-27 22:44:24.533 | 2025-07-27 22:44:24 - bot.handlers.misc_commands - INFO - Chat 0 provider set to 'nvidia'
+2025-07-27 22:44:27.483 | 2025-07-27 22:44:27 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:44:30.977 | 2025-07-27 22:44:30 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:44:33.471 | 2025-07-27 22:44:33 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:44:35.692 | 2025-07-27 22:44:35 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:44:38.047 | 2025-07-27 22:44:38 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:44:39.654 | 2025-07-27 22:44:39 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:44:41.143 | 2025-07-27 22:44:41 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:44:43.404 | 2025-07-27 22:44:43 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:44:45.983 | 2025-07-27 22:44:45 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:44:49.279 | 2025-07-27 22:44:49 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:44:52.682 | 2025-07-27 22:44:52 - services.openai_compatible_service - INFO - Fetched 151 models dynamically from 'nvidia'.
+2025-07-27 22:45:26.907 | 2025-07-27 22:45:26 - bot.handlers.chat - INFO - (Chat 0) Message from User 0: 'As talked, I think we can call that a wrap. I'll try and revisit how this routine work later....'
+2025-07-27 22:45:26.992 | 2025-07-27 22:45:26 - bot.handlers.chat - INFO - (Chat 0) Using service: OpenAICompatibleService, Model: nvidia/llama-3.3-nemotron-super-49b-v1.5
+2025-07-27 22:45:30.758 | 2025-07-27 22:45:30 - bot.handlers.chat - INFO - (Chat 0) Starting LLM generation for thread thread_1753624986...
+2025-07-27 22:45:36.468 | 2025-07-27 22:45:36 - bot.handlers.chat - INFO - (Chat 0) LLM generation complete. Length: 1479
+2025-07-27 22:45:37.272 | 2025-07-27 22:45:37 - bot.handlers.chat - INFO - (Chat 0) History updated to 2 entries.
+2025-07-27 22:46:48.064 | 2025-07-27 22:46:48 - bot.handlers.chat - INFO - (Chat 0) Message from User 0: 'List some checkpoints I need to revisit on the former discussion. Tell me if you don't know what we ...'
+2025-07-27 22:46:48.150 | 2025-07-27 22:46:48 - bot.handlers.chat - INFO - (Chat 0) Using service: OpenAICompatibleService, Model: nvidia/llama-3.3-nemotron-super-49b-v1.5
+2025-07-27 22:46:54.954 | 2025-07-27 22:46:54 - bot.handlers.chat - INFO - (Chat 0) Starting LLM generation for thread thread_1753624986...
+2025-07-27 22:47:02.539 | 2025-07-27 22:47:02 - bot.handlers.chat - INFO - (Chat 0) LLM generation complete. Length: 2056
+2025-07-27 22:47:02.895 | 2025-07-27 22:47:02 - bot.handlers.chat - INFO - (Chat 0) History updated to 4 entries.
+2025-07-27 22:48:03.967 | 2025-07-27 22:48:03 - bot.handlers.chat - INFO - (Chat 0) Message from User 0: 'The question is "I find myself struggling when switching context lately. But work require me to do s...'
+2025-07-27 22:48:04.054 | 2025-07-27 22:48:04 - bot.handlers.chat - INFO - (Chat 0) Using service: OpenAICompatibleService, Model: nvidia/llama-3.3-nemotron-super-49b-v1.5
+2025-07-27 22:48:07.457 | 2025-07-27 22:48:07 - bot.handlers.chat - INFO - (Chat 0) Starting LLM generation for thread thread_1753624986...
+2025-07-27 22:48:19.046 | 2025-07-27 22:48:19 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:20.010 | 2025-07-27 22:48:20 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:21.052 | 2025-07-27 22:48:21 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:22.069 | 2025-07-27 22:48:22 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:23.148 | 2025-07-27 22:48:23 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:24.280 | 2025-07-27 22:48:24 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:25.361 | 2025-07-27 22:48:25 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:26.448 | 2025-07-27 22:48:26 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:27.683 | 2025-07-27 22:48:27 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:28.834 | 2025-07-27 22:48:28 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:30.148 | 2025-07-27 22:48:30 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:30.438 | 2025-07-27 22:48:30 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:31.487 | 2025-07-27 22:48:31 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:32.683 | 2025-07-27 22:48:32 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:33.858 | 2025-07-27 22:48:33 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:34.988 | 2025-07-27 22:48:34 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:36.179 | 2025-07-27 22:48:36 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:37.385 | 2025-07-27 22:48:37 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:38.529 | 2025-07-27 22:48:38 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:39.574 | 2025-07-27 22:48:39 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:40.717 | 2025-07-27 22:48:40 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:41.925 | 2025-07-27 22:48:41 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:43.090 | 2025-07-27 22:48:43 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:44.001 | 2025-07-27 22:48:44 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:45.027 | 2025-07-27 22:48:45 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:46.080 | 2025-07-27 22:48:46 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:47.162 | 2025-07-27 22:48:47 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:48.264 | 2025-07-27 22:48:48 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:49.365 | 2025-07-27 22:48:49 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:50.432 | 2025-07-27 22:48:50 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:51.508 | 2025-07-27 22:48:51 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:52.616 | 2025-07-27 22:48:52 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:53.715 | 2025-07-27 22:48:53 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:54.809 | 2025-07-27 22:48:54 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:55.812 | 2025-07-27 22:48:55 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:56.825 | 2025-07-27 22:48:56 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:57.960 | 2025-07-27 22:48:57 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:58.828 | 2025-07-27 22:48:58 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:48:59.174 | 2025-07-27 22:48:59 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:00.301 | 2025-07-27 22:49:00 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:01.432 | 2025-07-27 22:49:01 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:02.611 | 2025-07-27 22:49:02 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:03.830 | 2025-07-27 22:49:03 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:04.924 | 2025-07-27 22:49:04 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:06.047 | 2025-07-27 22:49:06 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:07.105 | 2025-07-27 22:49:07 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:08.201 | 2025-07-27 22:49:08 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:09.221 | 2025-07-27 22:49:09 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:10.185 | 2025-07-27 22:49:10 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:11.229 | 2025-07-27 22:49:11 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:12.217 | 2025-07-27 22:49:12 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:13.121 | 2025-07-27 22:49:13 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:14.257 | 2025-07-27 22:49:14 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:15.131 | 2025-07-27 22:49:15 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:15.935 | 2025-07-27 22:49:15 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:16.782 | 2025-07-27 22:49:16 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:17.753 | 2025-07-27 22:49:17 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:18.695 | 2025-07-27 22:49:18 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:19.705 | 2025-07-27 22:49:19 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:20.692 | 2025-07-27 22:49:20 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:21.654 | 2025-07-27 22:49:21 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:22.632 | 2025-07-27 22:49:22 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:23.639 | 2025-07-27 22:49:23 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:24.684 | 2025-07-27 22:49:24 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:25.688 | 2025-07-27 22:49:25 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:26.736 | 2025-07-27 22:49:26 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:26.811 | 2025-07-27 22:49:26 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:27.661 | 2025-07-27 22:49:27 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:28.603 | 2025-07-27 22:49:28 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:29.629 | 2025-07-27 22:49:29 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:30.615 | 2025-07-27 22:49:30 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:31.546 | 2025-07-27 22:49:31 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:32.573 | 2025-07-27 22:49:32 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:33.354 | 2025-07-27 22:49:33 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:34.204 | 2025-07-27 22:49:34 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:35.154 | 2025-07-27 22:49:35 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:36.151 | 2025-07-27 22:49:36 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:37.121 | 2025-07-27 22:49:37 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:38.117 | 2025-07-27 22:49:38 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:39.164 | 2025-07-27 22:49:39 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:40.243 | 2025-07-27 22:49:40 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:41.312 | 2025-07-27 22:49:41 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:42.296 | 2025-07-27 22:49:42 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:43.354 | 2025-07-27 22:49:43 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:44.458 | 2025-07-27 22:49:44 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:45.258 | 2025-07-27 22:49:45 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:46.069 | 2025-07-27 22:49:46 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:47.102 | 2025-07-27 22:49:47 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:48.135 | 2025-07-27 22:49:48 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:49.141 | 2025-07-27 22:49:49 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:50.102 | 2025-07-27 22:49:50 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:51.060 | 2025-07-27 22:49:51 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:52.028 | 2025-07-27 22:49:52 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:54.325 | 2025-07-27 22:49:54 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:55.202 | 2025-07-27 22:49:55 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:56.169 | 2025-07-27 22:49:56 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:55.947 | 2025-07-27 22:49:55 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:56.849 | 2025-07-27 22:49:56 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:57.727 | 2025-07-27 22:49:57 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:58.594 | 2025-07-27 22:49:58 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:49:59.478 | 2025-07-27 22:49:59 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:00.373 | 2025-07-27 22:50:00 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:01.408 | 2025-07-27 22:50:01 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:02.425 | 2025-07-27 22:50:02 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:03.416 | 2025-07-27 22:50:03 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:04.483 | 2025-07-27 22:50:04 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:05.548 | 2025-07-27 22:50:05 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:06.586 | 2025-07-27 22:50:06 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:07.471 | 2025-07-27 22:50:07 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:08.399 | 2025-07-27 22:50:08 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:09.417 | 2025-07-27 22:50:09 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:11.350 | 2025-07-27 22:50:11 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:12.594 | 2025-07-27 22:50:12 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:13.552 | 2025-07-27 22:50:13 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:14.414 | 2025-07-27 22:50:14 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:16.361 | 2025-07-27 22:50:16 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:17.297 | 2025-07-27 22:50:17 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:19.291 | 2025-07-27 22:50:19 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:20.324 | 2025-07-27 22:50:20 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:21.376 | 2025-07-27 22:50:21 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:22.397 | 2025-07-27 22:50:22 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:23.359 | 2025-07-27 22:50:23 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:24.375 | 2025-07-27 22:50:24 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:24.682 | 2025-07-27 22:50:24 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:25.973 | 2025-07-27 22:50:25 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:27.016 | 2025-07-27 22:50:27 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:28.028 | 2025-07-27 22:50:28 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:29.039 | 2025-07-27 22:50:29 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:30.045 | 2025-07-27 22:50:30 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:31.045 | 2025-07-27 22:50:31 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:33.024 | 2025-07-27 22:50:33 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:33.995 | 2025-07-27 22:50:33 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:34.971 | 2025-07-27 22:50:34 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:35.923 | 2025-07-27 22:50:35 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:36.904 | 2025-07-27 22:50:36 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:37.864 | 2025-07-27 22:50:37 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:38.810 | 2025-07-27 22:50:38 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:39.803 | 2025-07-27 22:50:39 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:41.804 | 2025-07-27 22:50:41 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:42.785 | 2025-07-27 22:50:42 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:43.749 | 2025-07-27 22:50:43 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:44.575 | 2025-07-27 22:50:44 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:45.415 | 2025-07-27 22:50:45 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:46.362 | 2025-07-27 22:50:46 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:47.348 | 2025-07-27 22:50:47 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:48.351 | 2025-07-27 22:50:48 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:49.251 | 2025-07-27 22:50:49 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:50.213 | 2025-07-27 22:50:50 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:51.169 | 2025-07-27 22:50:51 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:53.006 | 2025-07-27 22:50:53 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:53.616 | 2025-07-27 22:50:53 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:53.898 | 2025-07-27 22:50:53 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:54.957 | 2025-07-27 22:50:54 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:56.069 | 2025-07-27 22:50:56 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:58.186 | 2025-07-27 22:50:58 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:50:59.140 | 2025-07-27 22:50:59 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:01.059 | 2025-07-27 22:51:01 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:02.083 | 2025-07-27 22:51:02 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:03.006 | 2025-07-27 22:51:03 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:03.824 | 2025-07-27 22:51:03 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:04.856 | 2025-07-27 22:51:04 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:06.839 | 2025-07-27 22:51:06 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:07.709 | 2025-07-27 22:51:07 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:08.609 | 2025-07-27 22:51:08 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:09.440 | 2025-07-27 22:51:09 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:10.357 | 2025-07-27 22:51:10 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:12.143 | 2025-07-27 22:51:12 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:12.989 | 2025-07-27 22:51:12 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:13.933 | 2025-07-27 22:51:13 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:14.747 | 2025-07-27 22:51:14 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:15.644 | 2025-07-27 22:51:15 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:16.602 | 2025-07-27 22:51:16 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:17.427 | 2025-07-27 22:51:17 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:18.307 | 2025-07-27 22:51:18 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:19.302 | 2025-07-27 22:51:19 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:20.276 | 2025-07-27 22:51:20 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:21.218 | 2025-07-27 22:51:21 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:22.213 | 2025-07-27 22:51:22 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:22.357 | 2025-07-27 22:51:22 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:23.329 | 2025-07-27 22:51:23 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:24.323 | 2025-07-27 22:51:24 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:25.177 | 2025-07-27 22:51:25 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:26.091 | 2025-07-27 22:51:26 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:27.046 | 2025-07-27 22:51:27 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:27.977 | 2025-07-27 22:51:27 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:28.928 | 2025-07-27 22:51:28 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:30.880 | 2025-07-27 22:51:30 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:31.853 | 2025-07-27 22:51:31 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:32.806 | 2025-07-27 22:51:32 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:33.798 | 2025-07-27 22:51:33 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:34.758 | 2025-07-27 22:51:34 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:35.673 | 2025-07-27 22:51:35 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:36.720 | 2025-07-27 22:51:36 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:40.063 | 2025-07-27 22:51:40 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:41.011 | 2025-07-27 22:51:41 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:42.133 | 2025-07-27 22:51:42 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:43.108 | 2025-07-27 22:51:43 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:44.080 | 2025-07-27 22:51:44 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:45.028 | 2025-07-27 22:51:45 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:45.949 | 2025-07-27 22:51:45 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:46.938 | 2025-07-27 22:51:46 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:47.902 | 2025-07-27 22:51:47 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:48.798 | 2025-07-27 22:51:48 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:49.768 | 2025-07-27 22:51:49 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:50.873 | 2025-07-27 22:51:50 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:51.520 | 2025-07-27 22:51:51 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:52.486 | 2025-07-27 22:51:52 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:53.481 | 2025-07-27 22:51:53 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:54.474 | 2025-07-27 22:51:54 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:55.466 | 2025-07-27 22:51:55 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:56.435 | 2025-07-27 22:51:56 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:57.508 | 2025-07-27 22:51:57 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:58.598 | 2025-07-27 22:51:58 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:51:59.505 | 2025-07-27 22:51:59 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:00.575 | 2025-07-27 22:52:00 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:01.643 | 2025-07-27 22:52:01 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:02.643 | 2025-07-27 22:52:02 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:03.701 | 2025-07-27 22:52:03 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:04.776 | 2025-07-27 22:52:04 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:05.869 | 2025-07-27 22:52:05 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:06.958 | 2025-07-27 22:52:06 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:08.016 | 2025-07-27 22:52:08 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:09.085 | 2025-07-27 22:52:09 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:10.163 | 2025-07-27 22:52:10 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:10.931 | 2025-07-27 22:52:10 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:11.734 | 2025-07-27 22:52:11 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:12.717 | 2025-07-27 22:52:12 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:13.543 | 2025-07-27 22:52:13 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:15.429 | 2025-07-27 22:52:15 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:16.421 | 2025-07-27 22:52:16 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:17.392 | 2025-07-27 22:52:17 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:18.346 | 2025-07-27 22:52:18 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:19.935 | 2025-07-27 22:52:19 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:20.412 | 2025-07-27 22:52:20 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:21.372 | 2025-07-27 22:52:21 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:22.161 | 2025-07-27 22:52:22 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:23.078 | 2025-07-27 22:52:23 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:24.051 | 2025-07-27 22:52:24 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:24.943 | 2025-07-27 22:52:24 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:25.778 | 2025-07-27 22:52:25 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:26.717 | 2025-07-27 22:52:26 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:27.508 | 2025-07-27 22:52:27 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:28.315 | 2025-07-27 22:52:28 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:29.269 | 2025-07-27 22:52:29 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:30.207 | 2025-07-27 22:52:30 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:31.163 | 2025-07-27 22:52:31 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:32.070 | 2025-07-27 22:52:32 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:32.976 | 2025-07-27 22:52:32 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:33.902 | 2025-07-27 22:52:33 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:34.758 | 2025-07-27 22:52:34 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:35.693 | 2025-07-27 22:52:35 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:36.613 | 2025-07-27 22:52:36 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:37.381 | 2025-07-27 22:52:37 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:38.319 | 2025-07-27 22:52:38 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:39.204 | 2025-07-27 22:52:39 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:40.970 | 2025-07-27 22:52:40 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:41.862 | 2025-07-27 22:52:41 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:43.668 | 2025-07-27 22:52:43 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:44.530 | 2025-07-27 22:52:44 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:45.314 | 2025-07-27 22:52:45 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:46.173 | 2025-07-27 22:52:46 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:47.945 | 2025-07-27 22:52:47 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:48.643 | 2025-07-27 22:52:48 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:48.747 | 2025-07-27 22:52:48 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:48.895 | 2025-07-27 22:52:48 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:49.753 | 2025-07-27 22:52:49 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:50.645 | 2025-07-27 22:52:50 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:52.342 | 2025-07-27 22:52:52 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:54.289 | 2025-07-27 22:52:54 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:55.112 | 2025-07-27 22:52:55 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:52:55.113 | 2025-07-27 22:52:55 - bot.handlers.chat - INFO - (Chat 0) LLM generation complete. Length: 5334
+2025-07-27 22:52:57.862 | 2025-07-27 22:52:57 - bot.handlers.chat - INFO - (Chat 0) History updated to 6 entries.
+2025-07-27 22:52:57.862 | 2025-07-27 22:52:57 - bot.handlers.misc_commands - INFO - (Chat 0) User 0 triggered /reroll.
+2025-07-27 22:52:57.912 | 2025-07-27 22:52:57 - bot.handlers.chat - INFO - (Chat 0) Reroll detected. Removing last assistant message from history.
+2025-07-27 22:52:57.935 | 2025-07-27 22:52:57 - bot.handlers.chat - INFO - (Chat 0) Using service: OpenAICompatibleService, Model: nvidia/llama-3.3-nemotron-super-49b-v1.5
+2025-07-27 22:52:58.753 | 2025-07-27 22:52:58 - bot.handlers.chat - INFO - (Chat 0) Starting LLM generation for thread thread_1753624986...
+2025-07-27 22:53:13.206 | 2025-07-27 22:53:13 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:13.988 | 2025-07-27 22:53:13 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:14.773 | 2025-07-27 22:53:14 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:15.554 | 2025-07-27 22:53:15 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:17.356 | 2025-07-27 22:53:17 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:17.699 | 2025-07-27 22:53:17 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:17.911 | 2025-07-27 22:53:17 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:18.858 | 2025-07-27 22:53:18 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:19.805 | 2025-07-27 22:53:19 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:20.763 | 2025-07-27 22:53:20 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:23.690 | 2025-07-27 22:53:23 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:26.160 | 2025-07-27 22:53:26 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:28.786 | 2025-07-27 22:53:28 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:31.889 | 2025-07-27 22:53:31 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:32.898 | 2025-07-27 22:53:32 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:33.812 | 2025-07-27 22:53:33 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:34.758 | 2025-07-27 22:53:34 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:35.780 | 2025-07-27 22:53:35 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:36.798 | 2025-07-27 22:53:36 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:37.905 | 2025-07-27 22:53:37 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:38.810 | 2025-07-27 22:53:38 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:39.713 | 2025-07-27 22:53:39 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:40.495 | 2025-07-27 22:53:40 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:41.367 | 2025-07-27 22:53:41 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:42.352 | 2025-07-27 22:53:42 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:43.327 | 2025-07-27 22:53:43 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:45.153 | 2025-07-27 22:53:45 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:46.574 | 2025-07-27 22:53:46 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:46.800 | 2025-07-27 22:53:46 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:47.672 | 2025-07-27 22:53:47 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:48.605 | 2025-07-27 22:53:48 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:49.489 | 2025-07-27 22:53:49 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:50.288 | 2025-07-27 22:53:50 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:51.028 | 2025-07-27 22:53:51 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:51.935 | 2025-07-27 22:53:51 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:52.962 | 2025-07-27 22:53:52 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:53.858 | 2025-07-27 22:53:53 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:54.770 | 2025-07-27 22:53:54 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:55.494 | 2025-07-27 22:53:55 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:56.340 | 2025-07-27 22:53:56 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:57.126 | 2025-07-27 22:53:57 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:57.903 | 2025-07-27 22:53:57 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:58.736 | 2025-07-27 22:53:58 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:53:59.629 | 2025-07-27 22:53:59 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:00.519 | 2025-07-27 22:54:00 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:02.204 | 2025-07-27 22:54:02 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:03.021 | 2025-07-27 22:54:03 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:04.050 | 2025-07-27 22:54:04 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:04.950 | 2025-07-27 22:54:04 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:05.769 | 2025-07-27 22:54:05 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:06.686 | 2025-07-27 22:54:06 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:07.603 | 2025-07-27 22:54:07 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:08.502 | 2025-07-27 22:54:08 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:09.449 | 2025-07-27 22:54:09 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:11.461 | 2025-07-27 22:54:11 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:12.485 | 2025-07-27 22:54:12 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:13.378 | 2025-07-27 22:54:13 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:14.164 | 2025-07-27 22:54:14 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:15.122 | 2025-07-27 22:54:15 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:15.949 | 2025-07-27 22:54:15 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:16.887 | 2025-07-27 22:54:16 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:18.769 | 2025-07-27 22:54:18 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:19.715 | 2025-07-27 22:54:19 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:20.473 | 2025-07-27 22:54:20 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:21.224 | 2025-07-27 22:54:21 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:22.291 | 2025-07-27 22:54:22 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:23.212 | 2025-07-27 22:54:23 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:24.139 | 2025-07-27 22:54:24 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:25.046 | 2025-07-27 22:54:25 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:25.979 | 2025-07-27 22:54:25 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:26.929 | 2025-07-27 22:54:26 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:27.921 | 2025-07-27 22:54:27 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:28.824 | 2025-07-27 22:54:28 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:29.730 | 2025-07-27 22:54:29 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:30.792 | 2025-07-27 22:54:30 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:32.125 | 2025-07-27 22:54:32 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:33.045 | 2025-07-27 22:54:33 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:34.001 | 2025-07-27 22:54:34 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:35.000 | 2025-07-27 22:54:35 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:35.979 | 2025-07-27 22:54:35 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:37.064 | 2025-07-27 22:54:37 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:38.132 | 2025-07-27 22:54:38 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:39.046 | 2025-07-27 22:54:39 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:40.022 | 2025-07-27 22:54:40 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:40.940 | 2025-07-27 22:54:40 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:41.846 | 2025-07-27 22:54:41 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:42.636 | 2025-07-27 22:54:42 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:43.486 | 2025-07-27 22:54:43 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:44.407 | 2025-07-27 22:54:44 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:44.222 | 2025-07-27 22:54:44 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:45.117 | 2025-07-27 22:54:45 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:46.041 | 2025-07-27 22:54:46 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:46.984 | 2025-07-27 22:54:46 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:47.987 | 2025-07-27 22:54:47 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:48.926 | 2025-07-27 22:54:48 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:49.872 | 2025-07-27 22:54:49 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:50.692 | 2025-07-27 22:54:50 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:51.633 | 2025-07-27 22:54:51 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:52.439 | 2025-07-27 22:54:52 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:53.163 | 2025-07-27 22:54:53 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:54.099 | 2025-07-27 22:54:54 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:54.998 | 2025-07-27 22:54:54 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:55.838 | 2025-07-27 22:54:55 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:56.737 | 2025-07-27 22:54:56 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:57.564 | 2025-07-27 22:54:57 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:54:58.483 | 2025-07-27 22:54:58 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:00.221 | 2025-07-27 22:55:00 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:01.176 | 2025-07-27 22:55:01 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:02.132 | 2025-07-27 22:55:02 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:02.948 | 2025-07-27 22:55:02 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:03.856 | 2025-07-27 22:55:03 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:07.628 | 2025-07-27 22:55:07 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:08.473 | 2025-07-27 22:55:08 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:09.343 | 2025-07-27 22:55:09 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:11.760 | 2025-07-27 22:55:11 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:12.590 | 2025-07-27 22:55:12 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:13.450 | 2025-07-27 22:55:13 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:12.926 | 2025-07-27 22:55:12 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:13.825 | 2025-07-27 22:55:13 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:15.819 | 2025-07-27 22:55:15 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:17.811 | 2025-07-27 22:55:17 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:18.822 | 2025-07-27 22:55:18 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:19.792 | 2025-07-27 22:55:19 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:20.766 | 2025-07-27 22:55:20 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:21.767 | 2025-07-27 22:55:21 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:22.724 | 2025-07-27 22:55:22 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:23.695 | 2025-07-27 22:55:23 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:24.675 | 2025-07-27 22:55:24 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:25.604 | 2025-07-27 22:55:25 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:26.553 | 2025-07-27 22:55:26 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:27.497 | 2025-07-27 22:55:27 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:28.579 | 2025-07-27 22:55:28 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:29.707 | 2025-07-27 22:55:29 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:30.793 | 2025-07-27 22:55:30 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:31.901 | 2025-07-27 22:55:31 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:32.988 | 2025-07-27 22:55:32 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:35.346 | 2025-07-27 22:55:35 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:37.928 | 2025-07-27 22:55:37 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:39.001 | 2025-07-27 22:55:39 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:40.145 | 2025-07-27 22:55:40 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:41.291 | 2025-07-27 22:55:41 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:41.923 | 2025-07-27 22:55:41 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:42.588 | 2025-07-27 22:55:42 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:43.684 | 2025-07-27 22:55:43 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:44.792 | 2025-07-27 22:55:44 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:45.989 | 2025-07-27 22:55:45 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:47.143 | 2025-07-27 22:55:47 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:48.293 | 2025-07-27 22:55:48 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:49.415 | 2025-07-27 22:55:49 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:50.438 | 2025-07-27 22:55:50 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:51.602 | 2025-07-27 22:55:51 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:52.761 | 2025-07-27 22:55:52 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:55.022 | 2025-07-27 22:55:55 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:56.186 | 2025-07-27 22:55:56 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:57.320 | 2025-07-27 22:55:57 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:58.468 | 2025-07-27 22:55:58 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:55:59.634 | 2025-07-27 22:55:59 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:00.904 | 2025-07-27 22:56:00 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:01.910 | 2025-07-27 22:56:01 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:03.647 | 2025-07-27 22:56:03 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:04.748 | 2025-07-27 22:56:04 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:05.998 | 2025-07-27 22:56:05 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:07.263 | 2025-07-27 22:56:07 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:08.347 | 2025-07-27 22:56:08 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:09.529 | 2025-07-27 22:56:09 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:10.816 | 2025-07-27 22:56:10 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:11.375 | 2025-07-27 22:56:11 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:11.645 | 2025-07-27 22:56:11 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:12.763 | 2025-07-27 22:56:12 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:13.927 | 2025-07-27 22:56:13 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:15.163 | 2025-07-27 22:56:15 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:16.441 | 2025-07-27 22:56:16 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:17.589 | 2025-07-27 22:56:17 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:18.743 | 2025-07-27 22:56:18 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:19.893 | 2025-07-27 22:56:19 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:21.094 | 2025-07-27 22:56:21 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:22.430 | 2025-07-27 22:56:22 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:24.464 | 2025-07-27 22:56:24 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:25.554 | 2025-07-27 22:56:25 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:26.698 | 2025-07-27 22:56:26 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:27.943 | 2025-07-27 22:56:27 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:29.194 | 2025-07-27 22:56:29 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:30.341 | 2025-07-27 22:56:30 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:31.509 | 2025-07-27 22:56:31 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:32.761 | 2025-07-27 22:56:32 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:34.030 | 2025-07-27 22:56:34 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:35.212 | 2025-07-27 22:56:35 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:36.387 | 2025-07-27 22:56:36 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:37.599 | 2025-07-27 22:56:37 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:38.644 | 2025-07-27 22:56:38 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:39.475 | 2025-07-27 22:56:39 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:40.213 | 2025-07-27 22:56:40 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:41.409 | 2025-07-27 22:56:41 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:42.625 | 2025-07-27 22:56:42 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:43.825 | 2025-07-27 22:56:43 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:44.970 | 2025-07-27 22:56:44 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:46.160 | 2025-07-27 22:56:46 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:47.380 | 2025-07-27 22:56:47 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:48.600 | 2025-07-27 22:56:48 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:49.697 | 2025-07-27 22:56:49 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:50.706 | 2025-07-27 22:56:50 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:51.926 | 2025-07-27 22:56:51 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:53.140 | 2025-07-27 22:56:53 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:54.343 | 2025-07-27 22:56:54 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:55.480 | 2025-07-27 22:56:55 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:56.729 | 2025-07-27 22:56:56 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:57.931 | 2025-07-27 22:56:57 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:56:59.161 | 2025-07-27 22:56:59 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:57:00.482 | 2025-07-27 22:57:00 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:57:01.739 | 2025-07-27 22:57:01 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:57:02.845 | 2025-07-27 22:57:02 - bot.handlers.chat - WARNING - Throttled streaming edit failed: Message_too_long
+2025-07-27 22:57:08.648 | 2025-07-27 22:57:08 - bot.handlers.chat - ERROR - (Chat 0) Critical error during LLM stream: Timed out
+2025-07-27 22:57:08.648 | Traceback (most recent call last):
+2025-07-27 22:57:08.648 |   File "/usr/local/lib/python3.11/site-packages/httpx/_transports/default.py", line 101, in map_httpcore_exceptions
+2025-07-27 22:57:08.648 |     yield
+2025-07-27 22:57:08.648 |   File "/usr/local/lib/python3.11/site-packages/httpx/_transports/default.py", line 394, in handle_async_request
+2025-07-27 22:57:08.648 |     resp = await self._pool.handle_async_request(req)
+2025-07-27 22:57:08.648 |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2025-07-27 22:57:08.648 |   File "/usr/local/lib/python3.11/site-packages/httpcore/_async/connection_pool.py", line 256, in handle_async_request
+2025-07-27 22:57:08.648 |     raise exc from None
+2025-07-27 22:57:08.648 |   File "/usr/local/lib/python3.11/site-packages/httpcore/_async/connection_pool.py", line 236, in handle_async_request
+2025-07-27 22:57:08.648 |     response = await connection.handle_async_request(
+2025-07-27 22:57:08.648 |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2025-07-27 22:57:08.648 |   File "/usr/local/lib/python3.11/site-packages/httpcore/_async/connection.py", line 101, in handle_async_request
+2025-07-27 22:57:08.648 |     raise exc
+2025-07-27 22:57:08.648 |   File "/usr/local/lib/python3.11/site-packages/httpcore/_async/connection.py", line 78, in handle_async_request
+2025-07-27 22:57:08.648 |     stream = await self._connect(request)
+2025-07-27 22:57:08.648 |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2025-07-27 22:57:08.648 |   File "/usr/local/lib/python3.11/site-packages/httpcore/_async/connection.py", line 156, in _connect
+2025-07-27 22:57:08.648 |     stream = await stream.start_tls(**kwargs)
+2025-07-27 22:57:08.648 |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2025-07-27 22:57:08.648 |   File "/usr/local/lib/python3.11/site-packages/httpcore/_backends/anyio.py", line 67, in start_tls
+2025-07-27 22:57:08.648 |     with map_exceptions(exc_map):
+2025-07-27 22:57:08.648 |   File "/usr/local/lib/python3.11/contextlib.py", line 158, in __exit__
+2025-07-27 22:57:08.648 |     self.gen.throw(typ, value, traceback)
+2025-07-27 22:57:08.648 |   File "/usr/local/lib/python3.11/site-packages/httpcore/_exceptions.py", line 14, in map_exceptions
+2025-07-27 22:57:08.648 |     raise to_exc(exc) from exc
+2025-07-27 22:57:08.648 | httpcore.ConnectTimeout
+2025-07-27 22:57:08.648 | 
+2025-07-27 22:57:08.648 | The above exception was the direct cause of the following exception:
+2025-07-27 22:57:08.648 | 
+2025-07-27 22:57:08.648 | Traceback (most recent call last):
+2025-07-27 22:57:08.648 |   File "/usr/local/lib/python3.11/site-packages/telegram/request/_httpxrequest.py", line 273, in do_request
+2025-07-27 22:57:08.648 |     res = await self._client.request(
+2025-07-27 22:57:08.648 |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2025-07-27 22:57:08.648 |   File "/usr/local/lib/python3.11/site-packages/httpx/_client.py", line 1540, in request
+2025-07-27 22:57:08.648 |     return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+2025-07-27 22:57:08.648 |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2025-07-27 22:57:08.648 |   File "/usr/local/lib/python3.11/site-packages/httpx/_client.py", line 1629, in send
+2025-07-27 22:57:08.648 |     response = await self._send_handling_auth(
+2025-07-27 22:57:08.648 |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2025-07-27 22:57:08.648 |   File "/usr/local/lib/python3.11/site-packages/httpx/_client.py", line 1657, in _send_handling_auth
+2025-07-27 22:57:08.648 |     response = await self._send_handling_redirects(
+2025-07-27 22:57:08.648 |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2025-07-27 22:57:08.648 |   File "/usr/local/lib/python3.11/site-packages/httpx/_client.py", line 1694, in _send_handling_redirects
+2025-07-27 22:57:08.648 |     response = await self._send_single_request(request)
+2025-07-27 22:57:08.648 |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2025-07-27 22:57:08.648 |   File "/usr/local/lib/python3.11/site-packages/httpx/_client.py", line 1730, in _send_single_request
+2025-07-27 22:57:08.648 |     response = await transport.handle_async_request(request)
+2025-07-27 22:57:08.648 |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2025-07-27 22:57:08.648 |   File "/usr/local/lib/python3.11/site-packages/httpx/_transports/default.py", line 393, in handle_async_request
+2025-07-27 22:57:08.648 |     with map_httpcore_exceptions():
+2025-07-27 22:57:08.648 |   File "/usr/local/lib/python3.11/contextlib.py", line 158, in __exit__
+2025-07-27 22:57:08.648 |     self.gen.throw(typ, value, traceback)
+2025-07-27 22:57:08.648 |   File "/usr/local/lib/python3.11/site-packages/httpx/_transports/default.py", line 118, in map_httpcore_exceptions
+2025-07-27 22:57:08.648 |     raise mapped_exc(message) from exc
+2025-07-27 22:57:08.648 | httpx.ConnectTimeout
+2025-07-27 22:57:08.648 | 
+2025-07-27 22:57:08.648 | The above exception was the direct cause of the following exception:
+2025-07-27 22:57:08.648 | 
+2025-07-27 22:57:08.648 | Traceback (most recent call last):
+2025-07-27 22:57:08.648 |   File "/app/bot/handlers/chat.py", line 165, in _generate_and_send_response
+2025-07-27 22:57:08.648 |     await placeholder_message.edit_text(
+2025-07-27 22:57:08.648 |   File "/usr/local/lib/python3.11/site-packages/telegram/_message.py", line 3904, in edit_text
+2025-07-27 22:57:08.648 |     return await self.get_bot().edit_message_text(
+2025-07-27 22:57:08.648 |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2025-07-27 22:57:08.648 |   File "/usr/local/lib/python3.11/site-packages/telegram/ext/_extbot.py", line 1723, in edit_message_text
+2025-07-27 22:57:08.648 |     return await super().edit_message_text(
+2025-07-27 22:57:08.648 |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2025-07-27 22:57:08.648 |   File "/usr/local/lib/python3.11/site-packages/telegram/_bot.py", line 4294, in edit_message_text
+2025-07-27 22:57:08.648 |     return await self._send_message(
+2025-07-27 22:57:08.648 |            ^^^^^^^^^^^^^^^^^^^^^^^^^
+2025-07-27 22:57:08.648 |   File "/usr/local/lib/python3.11/site-packages/telegram/ext/_extbot.py", line 630, in _send_message
+2025-07-27 22:57:08.648 |     result = await super()._send_message(
+2025-07-27 22:57:08.648 |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2025-07-27 22:57:08.648 |   File "/usr/local/lib/python3.11/site-packages/telegram/_bot.py", line 810, in _send_message
+2025-07-27 22:57:08.648 |     result = await self._post(
+2025-07-27 22:57:08.648 |              ^^^^^^^^^^^^^^^^^
+2025-07-27 22:57:08.648 |   File "/usr/local/lib/python3.11/site-packages/telegram/_bot.py", line 698, in _post
+2025-07-27 22:57:08.648 |     return await self._do_post(
+2025-07-27 22:57:08.648 |            ^^^^^^^^^^^^^^^^^^^^
+2025-07-27 22:57:08.648 |   File "/usr/local/lib/python3.11/site-packages/telegram/ext/_extbot.py", line 370, in _do_post
+2025-07-27 22:57:08.648 |     return await super()._do_post(
+2025-07-27 22:57:08.648 |            ^^^^^^^^^^^^^^^^^^^^^^^
+2025-07-27 22:57:08.648 |   File "/usr/local/lib/python3.11/site-packages/telegram/_bot.py", line 727, in _do_post
+2025-07-27 22:57:08.648 |     result = await request.post(
+2025-07-27 22:57:08.648 |              ^^^^^^^^^^^^^^^^^^^
+2025-07-27 22:57:08.648 |   File "/usr/local/lib/python3.11/site-packages/telegram/request/_baserequest.py", line 197, in post
+2025-07-27 22:57:08.648 |     result = await self._request_wrapper(
+2025-07-27 22:57:08.648 |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2025-07-27 22:57:08.648 |   File "/usr/local/lib/python3.11/site-packages/telegram/request/_baserequest.py", line 304, in _request_wrapper
+2025-07-27 22:57:08.648 |     code, payload = await self.do_request(
+2025-07-27 22:57:08.648 |                     ^^^^^^^^^^^^^^^^^^^^^^
+2025-07-27 22:57:08.648 |   File "/usr/local/lib/python3.11/site-packages/telegram/request/_httpxrequest.py", line 290, in do_request
+2025-07-27 22:57:08.648 |     raise TimedOut from err
+2025-07-27 22:57:08.648 | telegram.error.TimedOut: Timed out

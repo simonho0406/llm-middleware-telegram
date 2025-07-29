@@ -178,3 +178,11 @@ async def list_threads(chat_id: int) -> List[Dict[str, Any]]:
 
 async def rename_thread(chat_id: int, new_name: str) -> bool:
     return await set_thread_key(chat_id, "name", new_name)
+
+async def get_all_chat_ids() -> List[int]:
+    """Returns a list of all chat IDs in the database."""
+    async with aiosqlite.connect(config.DB_PATH) as db:
+        async with db.cursor() as cursor:
+            await cursor.execute("SELECT chat_id FROM chats")
+            rows = await cursor.fetchall()
+            return [row[0] for row in rows]

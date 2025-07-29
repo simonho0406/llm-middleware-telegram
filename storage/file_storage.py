@@ -313,6 +313,11 @@ async def save_message(chat_id: int, role: str, content: str, thread_id: Optiona
         session["threads"][target_thread_id]["history"].append({"role": role, "content": content})
 
     await _save_sessions_to_file()
+
+async def get_all_chat_ids() -> List[int]:
+    """Returns a list of all chat IDs in the file storage."""
+    async with _lock:
+        return list(_sessions.keys())
 # Load sessions when the module is imported
 
 # Example usage (for testing purposes) - Needs update for new structure

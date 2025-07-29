@@ -168,7 +168,7 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
                     )
                     last_edit_time = current_time
                 except BadRequest as e:
-                    if "Message is not modified" not in str(e):
+                    if "Message is not modified" not in str(e) and "Message_too_long" not in str(e):
                         logger.warning(f"Throttled streaming edit failed: {e}")
         
         if not llm_error_reported_by_model: logger.info(f"{log_prefix}LLM generation complete. Length: {len(raw_full_llm_response)}")

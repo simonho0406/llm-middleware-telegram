@@ -54,6 +54,22 @@ def main() -> None:
         await storage_manager.init()
         logger.info("Storage initialization complete.")
 
+        # --- Failsafe: Reset command scopes for all known chats ---
+        logger.info("Running startup failsafe: resetting command scopes for all known chats...")
+        try:
+            all_chat_ids = await storage_manager.get_all_chat_ids()
+            if all_chat_ids:
+                for chat_id in all_chat_ids:
+                    try:
+                        await setup_bot_commands_and_menu(application, chat_id)
+                    except Exception as e:
+                        logger.error(f"Failed to reset command scope for chat_id {chat_id} on startup: {e}")
+                logger.info(f"Completed command scope reset for {len(all_chat_ids)} chats.")
+            else:
+                logger.info("No existing chats found to reset command scopes.")
+        except Exception as e:
+            logger.error(f"An error occurred during the startup command scope reset: {e}")
+
         # Run connection checks and set up the new global commands/menu
         await run_startup_checks(application)
         await setup_bot_commands_and_menu(application) # This now includes the temporary fix
