@@ -14,6 +14,7 @@ from services.openai_compatible_service import OpenAICompatibleService
 from config import CUSTOM_PROVIDERS_CONFIG
 from storage import storage_manager
 from utils.text_processing import split_message_markdown_aware, escape_markdown_v2
+from . import misc_commands
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ async def _truncate_history_by_tokens(history: list, prompt: str, max_tokens: in
         
     return truncated_history
 
-async def _generate_and_send_response(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int, prompt: str, current_thread_id: str, is_reroll: bool = False, force_truncate: bool = False) -> None:
+async def _generate_and_send_response(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int, prompt: str, current_thread_id: str, is_reroll: bool = False, force_truncate: bool = False, placeholder_message = None) -> None:
     """
     Generates and sends an AI response, now with interactive context management.
     """
@@ -74,7 +75,7 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
         role = message.get('role')
         content = message.get('content')
         
-        if role == 'panel_discussion':
+        if role == 'panel_discussion': # Old format (summary)
             try:
                 panel_data = json.loads(content)
                 summary = (
@@ -84,6 +85,8 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
                 processed_history.append({'role': 'assistant', 'content': f"[Summary of Prior Panel Discussion]:\n{summary}"})
             except (json.JSONDecodeError, TypeError):
                 processed_history.append({'role': 'assistant', 'content': "[A complex panel discussion occurred previously.]"})
+        elif role == 'assistant:panel': # New format (full answer)
+            processed_history.append({'role': 'assistant', 'content': content})
         else:
             processed_history.append(message)
     
@@ -121,18 +124,19 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
     provider_name_display = session_provider.capitalize()
     logger.info(f"{log_prefix}Using service: {service.__class__.__name__ if hasattr(service, '__class__') else service.__name__}, Model: {model_to_use}")
 
-    placeholder_message = None
-    try:
-        placeholder_text = f"Thinking with {provider_name_display} ({model_to_use})..."
-        if is_reroll: placeholder_text = f"Rerolling with {provider_name_display} ({model_to_use})..."
-        
-        escaped_placeholder_text = escape_markdown_v2(placeholder_text)
-        
-        reply_to_msg_id = update.message.message_id if update.message else (update.callback_query.message.message_id if update.callback_query else None)
+    # If no placeholder_message was passed in, create one
+    if placeholder_message is None:
+        try:
+            placeholder_text = f"Thinking with {provider_name_display} ({model_to_use})..."
+            if is_reroll: placeholder_text = f"Rerolling with {provider_name_display} ({model_to_use})..."
+            
+            escaped_placeholder_text = escape_markdown_v2(placeholder_text)
+            
+            reply_to_msg_id = update.message.message_id if update.message else (update.callback_query.message.message_id if update.callback_query else None)
 
-        placeholder_message = await context.bot.send_message(chat_id=chat_id, text=escaped_placeholder_text, parse_mode=constants.ParseMode.MARKDOWN_V2, reply_to_message_id=reply_to_msg_id)
-    except Exception as e:
-        logger.error(f"{log_prefix}Failed to send placeholder message: {e}")
+            placeholder_message = await context.bot.send_message(chat_id=chat_id, text=escaped_placeholder_text, parse_mode=constants.ParseMode.MARKDOWN_V2, reply_to_message_id=reply_to_msg_id)
+        except Exception as e:
+            logger.error(f"{log_prefix}Failed to send placeholder message: {e}")
 
     # --- Start of response generation ---
     raw_full_llm_response = ""
@@ -149,7 +153,11 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
             output_buffer=config.CONTEXT_TOKEN_OUTPUT_BUFFER
         )
         
-        async for chunk in service.generate_response(model=model_to_use, prompt=prompt, context_history=truncated_history):
+        # Add instruction for search tag to the prompt
+        search_instruction = "If you need to perform a web search to answer the query, respond only with the search query inside <search> tags, like <search>latest news on the Artemis mission</search>."
+        augmented_prompt = f"{search_instruction}\n\n{prompt}"
+        
+        async for chunk in service.generate_response(model=model_to_use, prompt=augmented_prompt, context_history=truncated_history):
             if chunk.startswith("[Error:") or chunk.startswith("Error:"):
                 raw_full_llm_response = chunk
                 llm_error_reported_by_model = True
@@ -172,6 +180,16 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
                         logger.warning(f"Throttled streaming edit failed: {e}")
         
         if not llm_error_reported_by_model: logger.info(f"{log_prefix}LLM generation complete. Length: {len(raw_full_llm_response)}")
+        
+        # Check for search tag in the response
+        search_tag_match = re.search(r"<search>(.*?)</search>", raw_full_llm_response, re.DOTALL)
+        if search_tag_match:
+            search_query = search_tag_match.group(1).strip()
+            logger.info(f"{log_prefix}LLM requested web search: '{search_query}'")
+            # Trigger the search workflow
+            context.args = [search_query]
+            await misc_commands.search_command.callback(update, context, placeholder_message)
+            return  # End the function here
 
     except Exception as e:
         logger.exception(f"{log_prefix}Critical error during LLM stream: {e}")
@@ -236,12 +254,12 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
             logger.error(f"{log_prefix}Failed to update history: {e_hist}")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles incoming text messages, saves the prompt, and calls the response generator."""
+    """Handles incoming text messages, performs search detection, and sends a response."""
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
     message_text = update.message.text
     log_prefix = f"(Chat {chat_id}) "
-    
+
     if not message_text:
         return
 
@@ -251,11 +269,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         logger.warning(f"{log_prefix}Unauthorized chat ID. User: {user_id}.")
         return
 
+    placeholder_message = await context.bot.send_message(
+        chat_id=chat_id, text="Thinking...", parse_mode=None
+    )
+
+    # --- Normal Chat Response ---
     try:
         current_thread_id = await storage_manager.get_current_thread_id(chat_id)
         await storage_manager.set_thread_key(chat_id, 'last_user_prompt', message_text)
         logger.debug(f"{log_prefix}Saved last_user_prompt for thread {current_thread_id}.")
 
+        # Note: We now pass the placeholder_message to the main response generator
         await _generate_and_send_response(
             update=update,
             context=context,
@@ -264,10 +288,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             prompt=message_text,
             current_thread_id=current_thread_id,
             is_reroll=False,
-            force_truncate=False
+            force_truncate=False,
+            placeholder_message=placeholder_message # Pass the handle
         )
     except Exception as e:
         logger.error(f"{log_prefix}Error in handle_message: {e}", exc_info=True)
-        await update.message.reply_text("Sorry, a critical error occurred while handling your message.", parse_mode=None)
+        await placeholder_message.edit_text(
+            "Sorry, a critical error occurred while handling your message.",
+            parse_mode=None
+        )
 
 chat_handler = MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)

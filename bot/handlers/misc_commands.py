@@ -65,7 +65,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 └ /rename_thread <name> - Rename the current thread"""
     await update.message.reply_text(escape_markdown(help_text, version=2), parse_mode='MarkdownV2')
 
-async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, placeholder_message = None) -> None:
     """
     Performs a web search, gets a response from the LLM, and saves the original
     query to history, not the augmented prompt.
@@ -81,7 +81,12 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     query = " ".join(context.args)
     logger.info(f"{log_prefix}User {user_id} initiated /search with query: '{query}'")
 
-    placeholder_message = await update.message.reply_text(f"Searching the web for: \"{query}\"...", parse_mode=None)
+    # If no placeholder_message was passed in, create one
+    if placeholder_message is None:
+        placeholder_message = await update.message.reply_text(f"Searching the web for: \"{query}\"...", parse_mode=None)
+    else:
+        await placeholder_message.edit_text(f"Searching the web for: \"{query}\"...", parse_mode=None)
+        
     search_results = await web_search_service.perform_search(query)
 
     if search_results.startswith("Error:"):
