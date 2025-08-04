@@ -153,7 +153,6 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
             output_buffer=config.CONTEXT_TOKEN_OUTPUT_BUFFER
         )
         
-        # Add instruction for search tag to the prompt
         search_instruction = "If you need to perform a web search to answer the query, respond only with the search query inside <search> tags, like <search>latest news on the Artemis mission</search>."
         augmented_prompt = f"{search_instruction}\n\n{prompt}"
         
@@ -162,16 +161,13 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
                 raw_full_llm_response = chunk
                 llm_error_reported_by_model = True
                 break
-            # Append the chunk to the raw response
             raw_full_llm_response += chunk
 
-            # --- Throttled Streaming Update ---
             current_time = time.time()
             if (current_time - last_edit_time) > STREAMING_THROTTLE_SECONDS:
                 try:
-                    # Edit with parse_mode=None for intermediate updates to prevent errors
                     await placeholder_message.edit_text(
-                        text=raw_full_llm_response + " ▌",  # Add a blinking cursor effect
+                        text=raw_full_llm_response + " ▌",
                         parse_mode=None
                     )
                     last_edit_time = current_time
@@ -181,15 +177,13 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
         
         if not llm_error_reported_by_model: logger.info(f"{log_prefix}LLM generation complete. Length: {len(raw_full_llm_response)}")
         
-        # Check for search tag in the response
         search_tag_match = re.search(r"<search>(.*?)</search>", raw_full_llm_response, re.DOTALL)
         if search_tag_match:
             search_query = search_tag_match.group(1).strip()
             logger.info(f"{log_prefix}LLM requested web search: '{search_query}'")
-            # Trigger the search workflow
             context.args = [search_query]
-            await misc_commands.search_command.callback(update, context, placeholder_message)
-            return  # End the function here
+            await misc_commands.search_command(update, context, placeholder_message)
+            return
 
     except Exception as e:
         logger.exception(f"{log_prefix}Critical error during LLM stream: {e}")
@@ -203,7 +197,7 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
         )
     message_sent_or_edited_successfully = False
     
-    reply_to_msg_id = update.message.message_id if update.message else (update.callback_query.message.message_id if update.callback_query else None)
+    reply_to_msg_id = update.message.message_id if update.message else (update.callback_query.message.id if update.callback_query else None)
 
     try:
         final_content_to_send = escape_meta_tags_for_markdown_attempt(final_content_to_send)
@@ -253,8 +247,10 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
         except Exception as e_hist:
             logger.error(f"{log_prefix}Failed to update history: {e_hist}")
 
+# --- Message Handlers ---
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles incoming text messages, performs search detection, and sends a response."""
+    """Handles incoming text messages and calls the response generator."""
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
     message_text = update.message.text
@@ -269,17 +265,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         logger.warning(f"{log_prefix}Unauthorized chat ID. User: {user_id}.")
         return
 
-    placeholder_message = await context.bot.send_message(
-        chat_id=chat_id, text="Thinking...", parse_mode=None
-    )
-
-    # --- Normal Chat Response ---
     try:
         current_thread_id = await storage_manager.get_current_thread_id(chat_id)
         await storage_manager.set_thread_key(chat_id, 'last_user_prompt', message_text)
         logger.debug(f"{log_prefix}Saved last_user_prompt for thread {current_thread_id}.")
 
-        # Note: We now pass the placeholder_message to the main response generator
         await _generate_and_send_response(
             update=update,
             context=context,
@@ -287,15 +277,67 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             user_id=user_id,
             prompt=message_text,
             current_thread_id=current_thread_id,
-            is_reroll=False,
-            force_truncate=False,
-            placeholder_message=placeholder_message # Pass the handle
         )
     except Exception as e:
         logger.error(f"{log_prefix}Error in handle_message: {e}", exc_info=True)
-        await placeholder_message.edit_text(
-            "Sorry, a critical error occurred while handling your message.",
-            parse_mode=None
-        )
+        await update.message.reply_text("Sorry, a critical error occurred while handling your message.", parse_mode=None)
+
+async def handle_edited_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles edited messages, treating them as new prompts if they were the last user message."""
+    if not update.edited_message:
+        return
+
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+    edited_text = update.edited_message.text
+    log_prefix = f"(Chat {chat_id}) "
+
+    logger.info(f"{log_prefix}User {user_id} edited a message.")
+
+    history = await storage_manager.get_thread_history(chat_id)
+
+    if not history:
+        logger.info(f"{log_prefix}Ignoring edit in empty history.")
+        return
+
+    # Find the last user message in the history
+    last_user_message_index = -1
+    for i in range(len(history) - 1, -1, -1):
+        if history[i]['role'] == 'user':
+            last_user_message_index = i
+            break
+
+    # If there's no user message, we can't do anything
+    if last_user_message_index == -1:
+        logger.info(f"{log_prefix}Ignoring edit, no previous user message found.")
+        return
+
+    # Cancel any in-flight task for the previous prompt
+    if 'llm_task' in context.chat_data and not context.chat_data['llm_task'].done():
+        context.chat_data['llm_task'].cancel()
+        logger.info(f"{log_prefix}Cancelled in-flight LLM task due to message edit.")
+
+    # Remove all messages after the last user message (i.e., any assistant responses)
+    history = history[:last_user_message_index + 1]
+
+    # Update the content of the last user message
+    history[last_user_message_index]['content'] = edited_text
+
+    # Save the corrected history
+    await storage_manager.set_thread_history(chat_id, history)
+    logger.info(f"{log_prefix}Corrected history after edit.")
+
+    # Trigger a new response generation
+    current_thread_id = await storage_manager.get_current_thread_id(chat_id)
+    await _generate_and_send_response(
+        update=update,
+        context=context,
+        chat_id=chat_id,
+        user_id=user_id,
+        prompt=edited_text,
+        current_thread_id=current_thread_id,
+        is_reroll=True # Treat an edit like a reroll
+    )
 
 chat_handler = MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
+edited_message_handler = MessageHandler(filters.UpdateType.EDITED_MESSAGE, handle_edited_message)
