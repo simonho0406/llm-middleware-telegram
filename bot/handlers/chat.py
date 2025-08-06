@@ -63,6 +63,18 @@ async def _truncate_history_by_tokens(history: list, prompt: str, max_tokens: in
     return truncated_history
 
 async def _generate_and_send_response(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int, prompt: str, current_thread_id: str, is_reroll: bool = False, force_truncate: bool = False, placeholder_message = None) -> None:
+    """Wraps the response generation in a cancellable task."""
+    task = asyncio.create_task(
+        _generate_and_send_response_task(update, context, chat_id, user_id, prompt, current_thread_id, is_reroll, force_truncate, placeholder_message)
+    )
+    context.chat_data['llm_task'] = task
+    try:
+        await task
+    except asyncio.CancelledError:
+        logger.info(f"(Chat {chat_id}) LLM task was cancelled.")
+        # No need to raise again, the cancellation is the end of this workflow.
+
+async def _generate_and_send_response_task(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int, prompt: str, current_thread_id: str, is_reroll: bool = False, force_truncate: bool = False, placeholder_message = None) -> None:
     """
     Generates and sends an AI response, now with interactive context management.
     """
@@ -285,6 +297,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def handle_edited_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles edited messages, treating them as new prompts if they were the last user message."""
     if not update.edited_message:
+        return
+
+    # Check if a panel discussion is active. If so, ignore the edit.
+    if context.user_data and 'panel_state' in context.user_data:
+        chat_id = update.effective_chat.id
+        log_prefix = f"(Chat {chat_id}) "
+        logger.info(f"{log_prefix}Ignoring edit because a panel discussion is active.")
         return
 
     chat_id = update.effective_chat.id

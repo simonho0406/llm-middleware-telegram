@@ -96,16 +96,18 @@ def main() -> None:
     from bot.handlers.chat import chat_handler, edited_message_handler
     from bot.handlers.discuss_handler import discuss_conv_handler
     from bot.handlers.discuss_panel_handler import discuss_panel_conv_handler
+    from bot.handlers.config_handler import config_conv_handler
 
     # High-priority group for conversation handlers (group=0)
+    app.add_handler(config_conv_handler, group=0)
     app.add_handler(discuss_conv_handler, group=0)
     app.add_handler(discuss_panel_conv_handler, group=0)
-    app.add_handler(chat_handler, group=0) # Normal chat handler
+    app.add_handler(edited_message_handler, group=0)
+    app.add_handler(chat_handler, group=0)
     for handler in ask_selected_handlers:
         app.add_handler(handler, group=0)
     
-    # Lower-priority group for command and other handlers (group=1)
-    app.add_handler(edited_message_handler, group=1) # Move this to group 1
+    # Lower-priority group for command handlers (group=1)
     for handler in misc_handlers:
         app.add_handler(handler, group=1)
     

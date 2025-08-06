@@ -4,6 +4,8 @@ import asyncio
 import json
 from telegram import Update, BotCommand
 from telegram.error import BadRequest
+from telegram.error import TimedOut
+from httpx import ConnectTimeout
 from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, MessageHandler, filters
 from telegram import BotCommandScopeChat
 from utils.text_processing import split_message_markdown_aware, escape_markdown_v2
@@ -13,6 +15,7 @@ from bot import providers
 from services import web_search_service
 from bot.menu_setup import setup_bot_commands_and_menu
 from storage import storage_manager
+from .misc_commands import cancel_command
 
 # Define conversation states
 AWAITING_FOLLOW_UP, PANEL_IN_PROGRESS = range(2)
@@ -25,6 +28,7 @@ async def set_panel_commands(application, chat_id: int) -> None:
         BotCommand("reroll", "Rerun the last panel turn"),
         BotCommand("search", "Inject web search results into the discussion"),
         BotCommand("end_discussion", "End the current panel discussion"),
+        BotCommand("cancel", "Cancel the current operation"), # Add this line
     ]
     try:
         await application.bot.set_my_commands(
@@ -179,9 +183,11 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
 
             return response
 
+        except (TimedOut, ConnectTimeout) as e:
+            logger.warning(f"Sub-task for {role_name} ({provider_name}/{model}) timed out: {e}")
+            return f"[Error: The request for the {role_name} timed out. Please try rerolling.]"
         except Exception as e:
             logger.warning(f"Sub-task for {role_name} ({provider_name}/{model}) failed: {e}. Falling back to orchestrator.")
-            
             fallback_prompt = (
                 f"You must now take on the role of the '{role_name}'. The original agent failed. "
                 f"Analyze the following original prompt and provide a comprehensive response that fulfills the role's task.\n\n"
@@ -475,15 +481,28 @@ async def handle_follow_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     return AWAITING_FOLLOW_UP
 
 async def _cleanup_discussion_state(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
-    """Cancels any running panel task, resets commands, and clears user data."""
+    """Safely cancels any running panel task, clears user_data, and resets commands."""
     panel_task = context.user_data.get('panel_task')
     if panel_task and not panel_task.done():
         panel_task.cancel()
         logger.info(f"Cancelled in-flight panel task for chat {chat_id}.")
+        try:
+            # Await the task to allow it to process the cancellation
+            try:
+                await panel_task
+            except asyncio.CancelledError:
+                logger.info(f"Panel task for chat {chat_id} was already cancelled.")
+            except Exception as e:
+                logger.error(f"Error awaiting cancelled panel task for chat {chat_id}: {e}")
+        except asyncio.CancelledError:
+            logger.info(f"Panel task for chat {chat_id} successfully processed cancellation.")
+        except Exception as e:
+            logger.error(f"Error awaiting cancelled panel task for chat {chat_id}: {e}")
 
     context.user_data.pop('panel_task', None)
     context.user_data.pop('panel_state', None)
     
+    # Reset the command menu back to the default
     await setup_bot_commands_and_menu(context.application, chat_id)
     logger.info(f"Cleaned up panel state and reset commands for chat {chat_id}.")
 
@@ -493,20 +512,22 @@ async def end_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     panel_state = context.user_data.get('panel_state')
 
     if panel_state:
-        async with panel_state["lock"]:
-            final_answer = panel_state.get("final_answer", "No final answer was recorded.")
-            
-            await storage_manager.save_message(
-                chat_id,
-                'assistant:panel',
-                final_answer
-            )
-
-            await update.message.reply_text("✅ Panel discussion concluded and saved to thread history.", parse_mode=None)
-            await _cleanup_discussion_state(context, chat_id)
+        # Lock is not needed here as the conversation is ending, no race conditions.
+        final_answer = panel_state.get("final_answer", "No final answer was recorded.")
+        await storage_manager.save_message(chat_id, 'assistant:panel', final_answer)
+        await update.message.reply_text("✅ Panel discussion concluded and saved.", parse_mode=None)
+        await _cleanup_discussion_state(context, chat_id)
     else:
         await update.message.reply_text("⚠️ No active discussion to end.", parse_mode=None)
 
+    return ConversationHandler.END
+
+async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Cancels the active panel discussion via a command."""
+    chat_id = update.effective_chat.id
+    await update.message.reply_text("Cancelling discussion...", parse_mode=None)
+    await _cleanup_discussion_state(context, chat_id)
+    await update.message.reply_text("Panel discussion cancelled.", parse_mode=None)
     return ConversationHandler.END
 
 async def search_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -625,9 +646,8 @@ discuss_panel_conv_handler = ConversationHandler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_follow_up),
         ],
     },
-    fallbacks=[CommandHandler('end_discussion', end_discussion), CommandHandler('timeout', timeout_handler)],
+    fallbacks=[CommandHandler('end_discussion', end_discussion), CommandHandler('cancel', cancel_command), CommandHandler('timeout', timeout_handler)],
     per_user=True,
     per_chat=True,
-    conversation_timeout=1800,  # 30 minutes
     block=True,  # This is the critical addition
 )

@@ -56,6 +56,14 @@ async def init_database():
                 content TEXT NOT NULL, timestamp INTEGER NOT NULL,
                 FOREIGN KEY (thread_fk) REFERENCES threads(thread_pk) ON DELETE CASCADE
             )""")
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS user_settings (
+                chat_id INTEGER NOT NULL,
+                key TEXT NOT NULL,
+                value TEXT NOT NULL,
+                PRIMARY KEY (chat_id, key),
+                FOREIGN KEY (chat_id) REFERENCES chats(chat_id) ON DELETE CASCADE
+            )""")
         await db.commit()
         logger.info("Database initialized successfully.")
 
@@ -186,3 +194,19 @@ async def get_all_chat_ids() -> List[int]:
             await cursor.execute("SELECT chat_id FROM chats")
             rows = await cursor.fetchall()
             return [row[0] for row in rows]
+
+async def get_user_setting(chat_id: int, key: str, default: Any = None) -> Any:
+    """Retrieves a specific setting for a user."""
+    async with aiosqlite.connect(config.DB_PATH) as db:
+        await _get_or_create_chat(db, chat_id)
+        async with db.cursor() as cursor:
+            await cursor.execute("SELECT value FROM user_settings WHERE chat_id = ? AND key = ?", (chat_id, key))
+            row = await cursor.fetchone()
+            return row[0] if row else default
+
+async def set_user_setting(chat_id: int, key: str, value: Any) -> None:
+    """Sets a specific setting for a user."""
+    async with aiosqlite.connect(config.DB_PATH) as db:
+        await _get_or_create_chat(db, chat_id)
+        await db.execute("INSERT OR REPLACE INTO user_settings (chat_id, key, value) VALUES (?, ?, ?)", (chat_id, key, value))
+        await db.commit()

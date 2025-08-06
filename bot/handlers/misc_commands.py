@@ -520,6 +520,20 @@ async def shrink_and_retry_callback(update: Update, context: ContextTypes.DEFAUL
         logger.error(f"{log_prefix}Error during shrink_and_retry_callback: {e}", exc_info=True)
         await context.bot.send_message(chat_id, "An error occurred during the retry.", parse_mode=None)
 
+async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Cancels an active, non-conversation LLM task."""
+    chat_id = update.effective_chat.id
+    # This command is now only for the main chat_handler's tasks.
+    # It is blocked by the panel's ConversationHandler when a panel is active.
+    llm_task = context.chat_data.get('llm_task')
+    if llm_task and not llm_task.done():
+        llm_task.cancel()
+        logger.info(f"(Chat {chat_id}) Normal chat LLM task cancelled by user.")
+        await update.message.reply_text("The current AI response generation has been cancelled.", parse_mode=None)
+        context.chat_data.pop('llm_task', None)
+    else:
+        await update.message.reply_text("There is no active response generation to cancel.", parse_mode=None)
+
 misc_handlers = [
     CommandHandler("help", help_command),
     CommandHandler("search", search_command),
@@ -537,4 +551,5 @@ misc_handlers = [
     CommandHandler("start", start_command),
     CallbackQueryHandler(thread_callback_handler, pattern="^(switch_thread:|delete_thread:).*"),
     CommandHandler("rename_thread", rename_thread_command),
+    CommandHandler("cancel", cancel_command),
 ]

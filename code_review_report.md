@@ -1,19 +1,24 @@
 # Code Review & Strategic Roadmap
 
-**Date:** 2025-07-31
+**Date:** 2025-08-01
 **Reviewer:** Gemini-CLI & Human Supervisor
 
 ### **1. Current Roadmap**
 
-The project has reached a new level of maturity. The architecture is no longer just functional; it is resilient. With the core agentic workflow stabilized, the roadmap is now focused on user experience and deeper tool integration.
+The project has reached a new level of architectural maturity. The recent development cycle was not just about adding features; it was about hardening the very core of the application against the complex challenges of stateful, asynchronous, multi-agent workflows. The lessons learned have been directly translated into robust code.
 
-*   **Phase 2.2: "Panel Tool Integration" (✅ Complete):**  The automatic search logic has been successfully integrated into the `/discuss_panel` workflow. The Orchestrator now intelligently decides when to perform a web search and augments the Proposer's prompt with the results.
+*   **Phase 2.1: "Agentic Workshop" (✅ Complete):**  The core iterative panel is built and stable.
 
-*   **Phase 3: "UX & Quality of Life" (Immediate Next Step):** Based on a comprehensive review of the user experience, the next phase will focus on closing critical UX gaps before proceeding to new features. See the "UX Gap Analysis" section below for details.
+*   **Phase 2.2: "The Interactive Workshop" (Immediate Next Step):**
+    *   **Goal:** Give the user direct control over the composition and execution of the Expert Panel.
+    *   **Concept:**
+        1.  **Universal `/cancel`:** Implement a global `/cancel` command that can gracefully stop any long-running operation, starting with the panel discussion. This is a prerequisite for any complex UI.
+        2.  **Panel Configuration UI:** Create a new `ConversationHandler` (e.g., `/configure_panel`) that allows the user to select the specific models for the Orchestrator, Proposer, Critic, and Refiner roles. These choices will be saved to the user's thread data in the database.
+        3.  **Dynamic Panel Loading:** The `/discuss_panel` command will be updated to load the user's custom configuration for the panel, falling back to the `config.yaml` defaults if none is set.
 
-*   **Phase 4: "Smart & Controllable Chat" (Future Phase):**
+*   **Phase 3: "Smart & Controllable Chat" (Future Phase):**
     *   **Goal:** Bring optional, user-controlled intelligence to the main chat.
-    *   **Concept:** We will implement a new `/autosearch <on|off>` command. This setting will be stored per-chat in our database. The main chat handler will only perform the automatic search pre-flight check if the user has explicitly enabled it for that chat.
+    *   **Concept:** Implement an `/autosearch <on|off> [mode]` command. This will allow users to enable or disable automatic search detection for normal chat and panel discussions independently.
 
 ### **2. Key Lessons Learned from V2 Development**
 
@@ -26,6 +31,8 @@ This section preserves the most critical architectural lessons from the last dev
 3.  **Proactive Task Cancellation is Mandatory:** For any long-running asynchronous operation spawned by a stateful handler, its `asyncio.Task` handle must be stored in the conversation's context. The state cleanup function *must* explicitly find and cancel this task to prevent "zombie" processes.
 
 4.  **The "Happy Path" Fallacy:** We must design and test for "unhappy paths" (timeouts, invalid inputs, restarts) as a mandatory part of our workflow, not as an afterthought.
+
+5.  **Orchestrator-Led Tool Use:** Empowering the Orchestrator to decide when a tool (like web search) is needed, and to specify the tool's parameters as part of its plan, is a superior architectural pattern. It correctly assigns responsibility, centralizes tool control, and increases reliability by leveraging the most capable agent for planning.
 
 ### **3. UX Gap Analysis & Next Priorities**
 

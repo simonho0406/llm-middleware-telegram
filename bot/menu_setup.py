@@ -11,6 +11,7 @@ async def setup_bot_commands_and_menu(application: Application, chat_id: int | N
         BotCommand("help", "Show available commands"),
         BotCommand("new", "Start a new conversation"),
         BotCommand("reroll", "Regenerate the last AI response"),
+        BotCommand("cancel", "Cancel the current operation"),
         # Tools
         BotCommand("search", "Answer a query using web search"),
         BotCommand("ask_selected", "Query multiple models at once"),
