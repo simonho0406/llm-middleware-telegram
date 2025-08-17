@@ -444,6 +444,7 @@ ask_selected_conv_handler = ConversationHandler(
     conversation_timeout=300,
     per_user=True,
     per_chat=True,
+    per_message=False
 )
 
 # Export the single ConversationHandler

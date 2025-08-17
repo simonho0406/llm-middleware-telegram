@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "sqlite": {
+      "command": "docker",
+      "args": [
+        "run",
+        "--rm",
+        "-i",
+        "-v",
+        "mcp-sqlite:/mcp",
+        "mcp/sqlite",
+        "--db-path",
+        "data\bot_sessions.db"
+      ]
+    }
+  }
+}

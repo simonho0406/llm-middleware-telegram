@@ -309,4 +309,5 @@ discuss_conv_handler = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel_discussion), CallbackQueryHandler(cancel_discussion, pattern=f"^{CANCEL_DISCUSSION}$ ")],
     per_user=True,
     per_chat=True,
+    per_message=False
 )

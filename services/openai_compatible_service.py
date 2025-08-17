@@ -4,6 +4,8 @@ from openai import AsyncOpenAI, APIConnectionError, RateLimitError, APIStatusErr
 import config
 import asyncio
 import tiktoken
+import backoff
+from bot.errors import ProviderUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -112,12 +114,20 @@ class OpenAICompatibleService:
                     logger.error(f"[{self.provider_name}] API Error: {e}. No more retries left.")
                     yield f"[Error: Failed to connect after {retries} retries. Details: {e}]"
             except APIStatusError as e:
-                logger.error(f"[{self.provider_name}] API Status Error: {e.status_code} - {e.response}")
-                yield f"[Error: API returned an error (Status {e.status_code}). Details: {e.message}]"
+                if "EngineCore" in str(e):
+                    logger.error(f"[{self.provider_name}] NVIDIA EngineCore Error: {e}")
+                    raise ProviderUnavailableError("NVIDIA service unavailable") from e
+                else:
+                    logger.error(f"[{self.provider_name}] API Status Error: {e.status_code} - {e.response}")
+                    yield f"[Error: API returned an error (Status {e.status_code}). Details: {e.message}]"
                 return
             except Exception as e:
-                logger.exception(f"[{self.provider_name}] Unexpected error during generation: {e}")
-                yield f"[Error: An unexpected error occurred with the {self.provider_name} provider. Details: {e}]"
+                if "EngineCore" in str(e):
+                    logger.error(f"[{self.provider_name}] NVIDIA EngineCore Error: {e}")
+                    raise ProviderUnavailableError("NVIDIA service unavailable") from e
+                else:
+                    logger.exception(f"[{self.provider_name}] Unexpected error during generation: {e}")
+                    yield f"[Error: An unexpected error occurred with the {self.provider_name} provider. Details: {e}]"
                 return
 
         if not success:

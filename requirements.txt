@@ -8,3 +8,4 @@ openai>=1.0.0 # Add OpenAI library for compatible APIs
 aiofiles
 tiktoken
 aiosqlite
+backoff

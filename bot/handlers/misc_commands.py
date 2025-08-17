@@ -406,6 +406,7 @@ set_model_conv_handler = ConversationHandler(
         SET_MODEL_TYPING: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_model_typed)],
     },
     fallbacks=[CommandHandler("cancel", cancel_set_model)],
+    per_message=False
 )
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -84,6 +84,8 @@ expert_panel:
     # model: "nvidia/llama-3.1-nemotron-ultra-253b-v1" # Or another suitable Groq model
     # model: "moonshotai/kimi-k2-instruct"
     model: "nvidia/llama-3.3-nemotron-super-49b-v1.5"
+    fallback_provider: "nvidia"
+    fallback_model: "moonshotai/kimi-k2-instruct"
     # model: "openai/gpt-oss-120b"
     request_timeout_seconds: 600 # Add this line
 

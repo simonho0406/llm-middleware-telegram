@@ -119,4 +119,5 @@ config_conv_handler = ConversationHandler(
     ],
     per_user=True,
     per_chat=True,
+    per_message=False
 )

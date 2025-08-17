@@ -16,6 +16,10 @@ from services import web_search_service
 from bot.menu_setup import setup_bot_commands_and_menu
 from storage import storage_manager
 from .misc_commands import cancel_command
+from bot.errors import ProviderUnavailableError
+
+class ProviderUnavailableError(Exception):
+    pass
 
 # Define conversation states
 AWAITING_FOLLOW_UP, PANEL_IN_PROGRESS = range(2)
@@ -186,7 +190,7 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
         except (TimedOut, ConnectTimeout) as e:
             logger.warning(f"Sub-task for {role_name} ({provider_name}/{model}) timed out: {e}")
             return f"[Error: The request for the {role_name} timed out. Please try rerolling.]"
-        except Exception as e:
+        except ProviderUnavailableError as e:
             logger.warning(f"Sub-task for {role_name} ({provider_name}/{model}) failed: {e}. Falling back to orchestrator.")
             fallback_prompt = (
                 f"You must now take on the role of the '{role_name}'. The original agent failed. "
@@ -210,6 +214,12 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
             except Exception as fallback_e:
                 logger.error(f"Orchestrator fallback for {role_name} also failed: {fallback_e}")
                 return f"[Error: {role_name} failed, and Orchestrator fallback also failed.]"
+        except Exception as e:
+            logger.error(f"Unexpected error in get_full_response for {role_name}: {e}")
+            return f"[Error: {role_name} failed due to an unexpected error]"
+        except Exception as e:
+            logger.error(f"Unexpected error in get_full_response for {role_name}: {e}")
+            return f"[Error: {role_name} failed due to an unexpected error]"
 
     # --- 2. Dynamic Iteration with Quality Gate ---
     max_iterations = 3
