@@ -233,18 +233,12 @@ async def list_threads_command(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.effective_message.reply_text("Your conversation threads:", reply_markup=reply_markup)
 
 async def model_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Shows the currently selected model for the active provider."""
     chat_id = update.effective_chat.id
     provider_name = await storage_manager.get_thread_key(chat_id, 'provider', config.DEFAULT_PROVIDER)
     provider_config = providers.get_config_for_provider(provider_name)
-    if not provider_config:
-        await update.message.reply_text(f"Error: Provider '{escape_markdown(provider_name)}' not found or configured.")
-        return
-    model_session_key = 'model'
-    default_model = provider_config['default_model']
-    current_model = await storage_manager.get_thread_key(chat_id, model_session_key, default_model)
+    current_model = await storage_manager.get_thread_key(chat_id, 'model', provider_config['default_model'])
     await update.message.reply_text(
-        f"Current model for provider *{escape_markdown(provider_name)}*: `{escape_markdown(current_model)}`",
+        f"Current model for *{escape_markdown(provider_name)}*: `{escape_markdown(current_model)}`", 
         parse_mode='Markdown'
     )
 
@@ -410,11 +404,10 @@ set_model_conv_handler = ConversationHandler(
 )
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Sends a welcome message when the /start command is issued."""
     user = update.effective_user
     safe_user_name = user.mention_markdown_v2()
     await update.message.reply_markdown_v2(
-        rf'Hi {safe_user_name}\! I am your friendly LLM bot\. How can I help you today\?'
+        rf'Hi {safe_user_name}\! I am your friendly LLM bot\. Use /help to see what I can do\.'
     )
 
 async def thread_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

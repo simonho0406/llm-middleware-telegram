@@ -659,5 +659,6 @@ discuss_panel_conv_handler = ConversationHandler(
     fallbacks=[CommandHandler('end_discussion', end_discussion), CommandHandler('cancel', cancel_command), CommandHandler('timeout', timeout_handler)],
     per_user=True,
     per_chat=True,
-    block=True,  # This is the critical addition
+    block=True,
+    per_message=False
 )
