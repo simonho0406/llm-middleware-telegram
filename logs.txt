@@ -1,0 +1,782 @@
+2025-08-23 20:32:20.767 | 2025-08-23 20:32:20 - config - INFO - Configuration loaded:
+2025-08-23 20:32:20.767 | 2025-08-23 20:32:20 - config - INFO -   DEFAULT_PROVIDER: ollama
+2025-08-23 20:32:20.767 | 2025-08-23 20:32:20 - config - INFO -   DEFAULT_OLLAMA_MODEL: qwq
+2025-08-23 20:32:20.767 | 2025-08-23 20:32:20 - config - INFO -   DEFAULT_GEMINI_MODEL: gemini-1.5-pro-latest
+2025-08-23 20:32:20.767 | 2025-08-23 20:32:20 - config - INFO -   DEFAULT_OPENROUTER_MODEL: deepseek/deepseek-chat-v3-0324:free
+2025-08-23 20:32:20.767 | 2025-08-23 20:32:20 - config - INFO -   Tavily API Key Loaded: Yes
+2025-08-23 20:32:20.767 | 2025-08-23 20:32:20 - config - INFO -   GEMINI_ASK_ALL_MODELS: ['gemini-1.5-pro-latest', 'gemini-1.5-flash-latest']
+2025-08-23 20:32:20.767 | 2025-08-23 20:32:20 - config - INFO -   OPENROUTER_ALLOWED_MODELS: ['llama-2-70b', 'mistral-7b', 'stability-ai/stablelm-tuned-alpha-7b']
+2025-08-23 20:32:20.767 | 2025-08-23 20:32:20 - config - INFO -   OPENROUTER_HTTP_REFERER: YOUR_APP_URL_OR_NAME
+2025-08-23 20:32:20.767 | 2025-08-23 20:32:20 - config - INFO -   OLLAMA_HOST: http://192.168.0.158:11434
+2025-08-23 20:32:20.768 | 2025-08-23 20:32:20 - config - INFO -   SESSION_FILE_PATH: data/sessions.json
+2025-08-23 20:32:20.768 | 2025-08-23 20:32:20 - config - INFO -   ALLOWED_CHAT_IDS: None
+2025-08-23 20:32:20.768 | 2025-08-23 20:32:20 - config - INFO -   REQUEST_TIMEOUT_SECONDS: 180
+2025-08-23 20:32:20.768 | 2025-08-23 20:32:20 - config - INFO -   Number of Gemini Keys loaded: 3
+2025-08-23 20:32:20.768 | 2025-08-23 20:32:20 - config - INFO -   Number of Custom Providers loaded: 3
+2025-08-23 20:32:20.768 | 2025-08-23 20:32:20 - config - INFO -   CONTEXT_TOKEN_OUTPUT_BUFFER: 10000
+2025-08-23 20:32:20.898 | 2025-08-23 20:32:20 - services.ollama_service - INFO - Ollama client initialized for host: http://192.168.0.158:11434
+2025-08-23 20:32:21.425 | 2025-08-23 20:32:21 - storage - INFO - Initializing StorageManager with backend: database
+2025-08-23 20:32:21.425 | 2025-08-23 20:32:21 - __main__ - INFO - Starting bot initialization...
+2025-08-23 20:32:21.439 | 2025-08-23 20:32:21 - bot.application - INFO - Telegram Application created.
+2025-08-23 20:32:21.449 | /app/bot/handlers/ask_selected_handler.py:428: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-23 20:32:21.449 |   ask_selected_conv_handler = ConversationHandler(
+2025-08-23 20:32:21.451 | /app/bot/handlers/discuss_handler.py:299: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-23 20:32:21.451 |   discuss_conv_handler = ConversationHandler(
+2025-08-23 20:32:21.458 | /app/bot/handlers/config_handler.py:89: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-23 20:32:21.458 |   config_conv_handler = ConversationHandler(
+2025-08-23 20:32:21.458 | 2025-08-23 20:32:21 - __main__ - INFO - Registered handlers with priority groups
+2025-08-23 20:32:21.458 | 2025-08-23 20:32:21 - __main__ - INFO - Registered global error handler.
+2025-08-23 20:32:21.458 | 2025-08-23 20:32:21 - __main__ - INFO - Starting bot polling...
+2025-08-23 20:32:22.287 | 2025-08-23 20:32:22 - __main__ - INFO - Initializing provider details...
+2025-08-23 20:32:22.293 | 2025-08-23 20:32:22 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'groq' with base URL 'https://api.groq.com/openai/v1'
+2025-08-23 20:32:22.299 | 2025-08-23 20:32:22 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'requesty' with base URL 'https://router.requesty.ai/v1'
+2025-08-23 20:32:22.299 | 2025-08-23 20:32:22 - services.openai_compatible_service - WARNING - Allowed models not configured for provider 'nvidia'. Using default empty list.
+2025-08-23 20:32:22.305 | 2025-08-23 20:32:22 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'nvidia' with base URL 'https://integrate.api.nvidia.com/v1'
+2025-08-23 20:32:22.305 | 2025-08-23 20:32:22 - bot.providers - INFO - Initialized provider details for: ['ollama', 'gemini', 'openrouter', 'groq', 'requesty', 'nvidia']
+2025-08-23 20:32:22.305 | 2025-08-23 20:32:22 - __main__ - INFO - Provider details initialization complete.
+2025-08-23 20:32:22.305 | 2025-08-23 20:32:22 - __main__ - INFO - Initializing storage...
+2025-08-23 20:32:22.318 | 2025-08-23 20:32:22 - storage.database_storage - INFO - Database initialized successfully.
+2025-08-23 20:32:22.319 | 2025-08-23 20:32:22 - __main__ - INFO - Storage initialization complete.
+2025-08-23 20:32:22.320 | 2025-08-23 20:32:22 - __main__ - INFO - Running startup failsafe: resetting command scopes for all known chats...
+2025-08-23 20:32:22.768 | 2025-08-23 20:32:22 - bot.menu_setup - INFO - Successfully set bot command list for chat 0.
+2025-08-23 20:32:22.768 | 2025-08-23 20:32:22 - __main__ - INFO - Completed command scope reset for 1 chats.
+2025-08-23 20:32:22.768 | 2025-08-23 20:32:22 - __main__ - INFO - Performing startup checks for AI services...
+2025-08-23 20:32:22.777 | 2025-08-23 20:32:22 - services.gemini_service - INFO - Gemini connection successful (checked with Key Index: 0).
+2025-08-23 20:32:22.795 | 2025-08-23 20:32:22 - services.ollama_service - INFO - Ollama connection successful.
+2025-08-23 20:32:23.094 | 2025-08-23 20:32:23 - services.openrouter_service - INFO - OpenRouter connection check successful (fetched models).
+2025-08-23 20:32:23.095 | 2025-08-23 20:32:23 - __main__ - INFO - Ollama connection check successful.
+2025-08-23 20:32:23.095 | 2025-08-23 20:32:23 - __main__ - INFO - Gemini connection check successful.
+2025-08-23 20:32:23.095 | 2025-08-23 20:32:23 - __main__ - INFO - OpenRouter connection check successful.
+2025-08-23 20:32:23.982 | 2025-08-23 20:32:23 - bot.menu_setup - INFO - Successfully set bot command list and menu button for the default scope.
+2025-08-23 20:32:24.256 | 2025-08-23 20:32:24 - __main__ - INFO - Bot initialized: Username='SmsFowardingBot', Token='64687...D5E4'
+2025-08-23 20:32:24.522 | 2025-08-23 20:32:24 - apscheduler.scheduler - INFO - Scheduler started
+2025-08-23 20:32:24.522 | 2025-08-23 20:32:24 - telegram.ext.Application - INFO - Application started
+2025-08-23 20:32:38.826 | 2025-08-23 20:32:38 - __main__ - ERROR - Exception while handling an update:
+2025-08-23 20:32:38.827 | Traceback (most recent call last):
+2025-08-23 20:32:38.827 |   File "/usr/local/lib/python3.11/site-packages/telegram/ext/_application.py", line 1311, in process_update
+2025-08-23 20:32:38.827 |     await coroutine
+2025-08-23 20:32:38.827 |   File "/usr/local/lib/python3.11/site-packages/telegram/ext/_handlers/conversationhandler.py", line 842, in handle_update
+2025-08-23 20:32:38.827 |     new_state: object = await handler.handle_update(
+2025-08-23 20:32:38.827 |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2025-08-23 20:32:38.827 |   File "/usr/local/lib/python3.11/site-packages/telegram/ext/_handlers/basehandler.py", line 158, in handle_update
+2025-08-23 20:32:38.827 |     return await self.callback(update, context)
+2025-08-23 20:32:38.827 |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2025-08-23 20:32:38.827 |   File "/app/bot/handlers/config_handler.py", line 78, in config_done
+2025-08-23 20:32:38.827 |     await query.edit_message_text("✅ Settings saved.", parse_mode=constants.ParseMode.NONE)
+2025-08-23 20:32:38.827 |                                                                    ^^^^^^^^^
+2025-08-23 20:32:38.827 | NameError: name 'constants' is not defined
+2025-08-24 17:20:34.844 | 2025-08-24 17:20:34 - telegram.ext.Application - INFO - Application is stopping. This might take a moment.
+2025-08-24 17:20:34.848 | 2025-08-24 17:20:34 - apscheduler.scheduler - INFO - Scheduler has been shut down
+2025-08-24 17:20:34.859 | 2025-08-24 17:20:34 - telegram.ext.Application - INFO - Application.stop() complete
+2025-08-24 17:20:34.869 | 2025-08-24 17:20:34 - __main__ - INFO - Bot stopped normally.
+2025-08-24 17:20:36.718 | Error response from daemon: can not get logs from container which is dead or marked for removal
+2025-08-24 17:20:39.433 | 2025-08-24 17:20:39 - config - INFO - Configuration loaded:
+2025-08-24 17:20:39.433 | 2025-08-24 17:20:39 - config - INFO -   DEFAULT_PROVIDER: ollama
+2025-08-24 17:20:39.433 | 2025-08-24 17:20:39 - config - INFO -   DEFAULT_OLLAMA_MODEL: qwq
+2025-08-24 17:20:39.433 | 2025-08-24 17:20:39 - config - INFO -   DEFAULT_GEMINI_MODEL: gemini-1.5-pro-latest
+2025-08-24 17:20:39.434 | 2025-08-24 17:20:39 - config - INFO -   DEFAULT_OPENROUTER_MODEL: deepseek/deepseek-chat-v3-0324:free
+2025-08-24 17:20:39.434 | 2025-08-24 17:20:39 - config - INFO -   Tavily API Key Loaded: Yes
+2025-08-24 17:20:39.434 | 2025-08-24 17:20:39 - config - INFO -   GEMINI_ASK_ALL_MODELS: ['gemini-1.5-pro-latest', 'gemini-1.5-flash-latest']
+2025-08-24 17:20:39.433 | 2025-08-24 17:20:39 - config - INFO - Configuration loaded:
+2025-08-24 17:20:39.433 | 2025-08-24 17:20:39 - config - INFO -   DEFAULT_PROVIDER: ollama
+2025-08-24 17:20:39.433 | 2025-08-24 17:20:39 - config - INFO -   DEFAULT_OLLAMA_MODEL: qwq
+2025-08-24 17:20:39.433 | 2025-08-24 17:20:39 - config - INFO -   DEFAULT_GEMINI_MODEL: gemini-1.5-pro-latest
+2025-08-24 17:20:39.434 | 2025-08-24 17:20:39 - config - INFO -   DEFAULT_OPENROUTER_MODEL: deepseek/deepseek-chat-v3-0324:free
+2025-08-24 17:20:39.434 | 2025-08-24 17:20:39 - config - INFO -   Tavily API Key Loaded: Yes
+2025-08-24 17:20:39.434 | 2025-08-24 17:20:39 - config - INFO -   GEMINI_ASK_ALL_MODELS: ['gemini-1.5-pro-latest', 'gemini-1.5-flash-latest']
+2025-08-24 17:20:39.434 | 2025-08-24 17:20:39 - config - INFO -   OPENROUTER_ALLOWED_MODELS: ['llama-2-70b', 'mistral-7b', 'stability-ai/stablelm-tuned-alpha-7b']
+2025-08-24 17:20:39.434 | 2025-08-24 17:20:39 - config - INFO -   OPENROUTER_HTTP_REFERER: YOUR_APP_URL_OR_NAME
+2025-08-24 17:20:39.434 | 2025-08-24 17:20:39 - config - INFO -   OLLAMA_HOST: http://192.168.0.158:11434
+2025-08-24 17:20:39.434 | 2025-08-24 17:20:39 - config - INFO -   SESSION_FILE_PATH: data/sessions.json
+2025-08-24 17:20:39.434 | 2025-08-24 17:20:39 - config - INFO -   ALLOWED_CHAT_IDS: None
+2025-08-24 17:20:39.434 | 2025-08-24 17:20:39 - config - INFO -   REQUEST_TIMEOUT_SECONDS: 180
+2025-08-24 17:20:39.434 | 2025-08-24 17:20:39 - config - INFO -   Number of Gemini Keys loaded: 3
+2025-08-24 17:20:39.434 | 2025-08-24 17:20:39 - config - INFO -   Number of Custom Providers loaded: 3
+2025-08-24 17:20:39.434 | 2025-08-24 17:20:39 - config - INFO -   CONTEXT_TOKEN_OUTPUT_BUFFER: 10000
+2025-08-24 17:20:39.434 | 2025-08-24 17:20:39 - config - INFO -   OPENROUTER_ALLOWED_MODELS: ['llama-2-70b', 'mistral-7b', 'stability-ai/stablelm-tuned-alpha-7b']
+2025-08-24 17:20:39.434 | 2025-08-24 17:20:39 - config - INFO -   OPENROUTER_HTTP_REFERER: YOUR_APP_URL_OR_NAME
+2025-08-24 17:20:39.434 | 2025-08-24 17:20:39 - config - INFO -   OLLAMA_HOST: http://192.168.0.158:11434
+2025-08-24 17:20:39.434 | 2025-08-24 17:20:39 - config - INFO -   SESSION_FILE_PATH: data/sessions.json
+2025-08-24 17:20:39.434 | 2025-08-24 17:20:39 - config - INFO -   ALLOWED_CHAT_IDS: None
+2025-08-24 17:20:39.434 | 2025-08-24 17:20:39 - config - INFO -   REQUEST_TIMEOUT_SECONDS: 180
+2025-08-24 17:20:39.434 | 2025-08-24 17:20:39 - config - INFO -   Number of Gemini Keys loaded: 3
+2025-08-24 17:20:39.434 | 2025-08-24 17:20:39 - config - INFO -   Number of Custom Providers loaded: 3
+2025-08-24 17:20:39.434 | 2025-08-24 17:20:39 - config - INFO -   CONTEXT_TOKEN_OUTPUT_BUFFER: 10000
+2025-08-24 17:20:39.633 | 2025-08-24 17:20:39 - services.ollama_service - INFO - Ollama client initialized for host: http://192.168.0.158:11434
+2025-08-24 17:20:39.633 | 2025-08-24 17:20:39 - services.ollama_service - INFO - Ollama client initialized for host: http://192.168.0.158:11434
+2025-08-24 17:20:40.538 | 2025-08-24 17:20:40 - storage - INFO - Initializing StorageManager with backend: database
+2025-08-24 17:20:40.538 | 2025-08-24 17:20:40 - __main__ - INFO - Starting bot initialization...
+2025-08-24 17:20:40.538 | 2025-08-24 17:20:40 - storage - INFO - Initializing StorageManager with backend: database
+2025-08-24 17:20:40.538 | 2025-08-24 17:20:40 - __main__ - INFO - Starting bot initialization...
+2025-08-24 17:20:40.548 | 2025-08-24 17:20:40 - bot.application - INFO - Telegram Application created.
+2025-08-24 17:20:40.548 | 2025-08-24 17:20:40 - bot.application - INFO - Telegram Application created.
+2025-08-24 17:20:40.557 | /app/bot/handlers/ask_selected_handler.py:428: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-24 17:20:40.557 |   ask_selected_conv_handler = ConversationHandler(
+2025-08-24 17:20:40.557 | /app/bot/handlers/ask_selected_handler.py:428: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-24 17:20:40.557 |   ask_selected_conv_handler = ConversationHandler(
+2025-08-24 17:20:40.560 | /app/bot/handlers/discuss_handler.py:299: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-24 17:20:40.560 |   discuss_conv_handler = ConversationHandler(
+2025-08-24 17:20:40.560 | /app/bot/handlers/discuss_handler.py:299: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-24 17:20:40.560 |   discuss_conv_handler = ConversationHandler(
+2025-08-24 17:20:40.569 | /app/bot/handlers/config_handler.py:93: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-24 17:20:40.569 |   config_conv_handler = ConversationHandler(
+2025-08-24 17:20:40.569 | 2025-08-24 17:20:40 - __main__ - INFO - Registered handlers with priority groups
+2025-08-24 17:20:40.569 | 2025-08-24 17:20:40 - __main__ - INFO - Registered global error handler.
+2025-08-24 17:20:40.569 | 2025-08-24 17:20:40 - __main__ - INFO - Starting bot polling...
+2025-08-24 17:20:40.569 | /app/bot/handlers/config_handler.py:93: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-24 17:20:40.569 |   config_conv_handler = ConversationHandler(
+2025-08-24 17:20:40.569 | 2025-08-24 17:20:40 - __main__ - INFO - Registered handlers with priority groups
+2025-08-24 17:20:40.569 | 2025-08-24 17:20:40 - __main__ - INFO - Registered global error handler.
+2025-08-24 17:20:40.569 | 2025-08-24 17:20:40 - __main__ - INFO - Starting bot polling...
+2025-08-24 17:20:41.412 | 2025-08-24 17:20:41 - __main__ - INFO - Initializing provider details...
+2025-08-24 17:20:41.412 | 2025-08-24 17:20:41 - __main__ - INFO - Initializing provider details...
+2025-08-24 17:20:41.418 | 2025-08-24 17:20:41 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'groq' with base URL 'https://api.groq.com/openai/v1'
+2025-08-24 17:20:41.418 | 2025-08-24 17:20:41 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'groq' with base URL 'https://api.groq.com/openai/v1'
+2025-08-24 17:20:41.425 | 2025-08-24 17:20:41 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'requesty' with base URL 'https://router.requesty.ai/v1'
+2025-08-24 17:20:41.425 | 2025-08-24 17:20:41 - services.openai_compatible_service - WARNING - Allowed models not configured for provider 'nvidia'. Using default empty list.
+2025-08-24 17:20:41.425 | 2025-08-24 17:20:41 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'requesty' with base URL 'https://router.requesty.ai/v1'
+2025-08-24 17:20:41.425 | 2025-08-24 17:20:41 - services.openai_compatible_service - WARNING - Allowed models not configured for provider 'nvidia'. Using default empty list.
+2025-08-24 17:20:41.432 | 2025-08-24 17:20:41 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'nvidia' with base URL 'https://integrate.api.nvidia.com/v1'
+2025-08-24 17:20:41.432 | 2025-08-24 17:20:41 - bot.providers - INFO - Initialized provider details for: ['ollama', 'gemini', 'openrouter', 'groq', 'requesty', 'nvidia']
+2025-08-24 17:20:41.432 | 2025-08-24 17:20:41 - __main__ - INFO - Provider details initialization complete.
+2025-08-24 17:20:41.432 | 2025-08-24 17:20:41 - __main__ - INFO - Initializing storage...
+2025-08-24 17:20:41.432 | 2025-08-24 17:20:41 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'nvidia' with base URL 'https://integrate.api.nvidia.com/v1'
+2025-08-24 17:20:41.432 | 2025-08-24 17:20:41 - bot.providers - INFO - Initialized provider details for: ['ollama', 'gemini', 'openrouter', 'groq', 'requesty', 'nvidia']
+2025-08-24 17:20:41.432 | 2025-08-24 17:20:41 - __main__ - INFO - Provider details initialization complete.
+2025-08-24 17:20:41.432 | 2025-08-24 17:20:41 - __main__ - INFO - Initializing storage...
+2025-08-24 17:20:41.447 | 2025-08-24 17:20:41 - storage.database_storage - INFO - Database initialized successfully.
+2025-08-24 17:20:41.447 | 2025-08-24 17:20:41 - storage.database_storage - INFO - Database initialized successfully.
+2025-08-24 17:20:41.449 | 2025-08-24 17:20:41 - __main__ - INFO - Storage initialization complete.
+2025-08-24 17:20:41.449 | 2025-08-24 17:20:41 - __main__ - INFO - Running startup failsafe: resetting command scopes for all known chats...
+2025-08-24 17:20:41.449 | 2025-08-24 17:20:41 - __main__ - INFO - Storage initialization complete.
+2025-08-24 17:20:41.449 | 2025-08-24 17:20:41 - __main__ - INFO - Running startup failsafe: resetting command scopes for all known chats...
+2025-08-24 17:20:41.918 | 2025-08-24 17:20:41 - bot.menu_setup - INFO - Successfully set bot command list for chat 0.
+2025-08-24 17:20:41.918 | 2025-08-24 17:20:41 - __main__ - INFO - Completed command scope reset for 1 chats.
+2025-08-24 17:20:41.918 | 2025-08-24 17:20:41 - __main__ - INFO - Performing startup checks for AI services...
+2025-08-24 17:20:41.918 | 2025-08-24 17:20:41 - bot.menu_setup - INFO - Successfully set bot command list for chat 0.
+2025-08-24 17:20:41.918 | 2025-08-24 17:20:41 - __main__ - INFO - Completed command scope reset for 1 chats.
+2025-08-24 17:20:41.918 | 2025-08-24 17:20:41 - __main__ - INFO - Performing startup checks for AI services...
+2025-08-24 17:20:41.927 | 2025-08-24 17:20:41 - services.gemini_service - INFO - Gemini connection successful (checked with Key Index: 0).
+2025-08-24 17:20:41.927 | 2025-08-24 17:20:41 - services.gemini_service - INFO - Gemini connection successful (checked with Key Index: 0).
+2025-08-24 17:20:41.958 | 2025-08-24 17:20:41 - services.ollama_service - INFO - Ollama connection successful.
+2025-08-24 17:20:41.958 | 2025-08-24 17:20:41 - services.ollama_service - INFO - Ollama connection successful.
+2025-08-24 17:20:42.187 | 2025-08-24 17:20:42 - services.openrouter_service - INFO - OpenRouter connection check successful (fetched models).
+2025-08-24 17:20:42.187 | 2025-08-24 17:20:42 - __main__ - INFO - Ollama connection check successful.
+2025-08-24 17:20:42.187 | 2025-08-24 17:20:42 - __main__ - INFO - Gemini connection check successful.
+2025-08-24 17:20:42.187 | 2025-08-24 17:20:42 - services.openrouter_service - INFO - OpenRouter connection check successful (fetched models).
+2025-08-24 17:20:42.187 | 2025-08-24 17:20:42 - __main__ - INFO - Ollama connection check successful.
+2025-08-24 17:20:42.187 | 2025-08-24 17:20:42 - __main__ - INFO - Gemini connection check successful.
+2025-08-24 17:20:42.188 | 2025-08-24 17:20:42 - __main__ - INFO - OpenRouter connection check successful.
+2025-08-24 17:20:42.188 | 2025-08-24 17:20:42 - __main__ - INFO - OpenRouter connection check successful.
+2025-08-24 17:20:43.107 | 2025-08-24 17:20:43 - bot.menu_setup - INFO - Successfully set bot command list and menu button for the default scope.
+2025-08-24 17:20:43.107 | 2025-08-24 17:20:43 - bot.menu_setup - INFO - Successfully set bot command list and menu button for the default scope.
+2025-08-24 17:20:43.389 | 2025-08-24 17:20:43 - __main__ - INFO - Bot initialized: Username='SmsFowardingBot', Token='64687...D5E4'
+2025-08-24 17:20:43.389 | 2025-08-24 17:20:43 - __main__ - INFO - Bot initialized: Username='SmsFowardingBot', Token='64687...D5E4'
+2025-08-24 17:20:43.665 | 2025-08-24 17:20:43 - apscheduler.scheduler - INFO - Scheduler started
+2025-08-24 17:20:43.665 | 2025-08-24 17:20:43 - telegram.ext.Application - INFO - Application started
+2025-08-24 17:20:43.665 | 2025-08-24 17:20:43 - apscheduler.scheduler - INFO - Scheduler started
+2025-08-24 17:20:43.665 | 2025-08-24 17:20:43 - telegram.ext.Application - INFO - Application started
+2025-08-24 17:21:21.695 | 2025-08-24 17:21:21 - bot.handlers.misc_commands - INFO - Chat 0 provider set to 'openrouter'
+2025-08-24 17:21:21.695 | 2025-08-24 17:21:21 - bot.handlers.misc_commands - INFO - Chat 0 provider set to 'openrouter'
+2025-08-24 17:21:38.892 | 2025-08-24 17:21:38 - bot.handlers.chat - INFO - (Chat 0) Message from User 0: 'How the weather in Taipei now?...'
+2025-08-24 17:21:38.892 | 2025-08-24 17:21:38 - bot.handlers.chat - INFO - (Chat 0) Message from User 0: 'How the weather in Taipei now?...'
+2025-08-24 17:21:42.170 | 2025-08-24 17:21:42 - bot.handlers.chat - INFO - (Chat 0) Using service: module, Model: deepseek/deepseek-chat-v3-0324:free
+2025-08-24 17:21:42.170 | 2025-08-24 17:21:42 - bot.handlers.chat - INFO - (Chat 0) Using service: module, Model: deepseek/deepseek-chat-v3-0324:free
+2025-08-24 17:21:43.209 | 2025-08-24 17:21:43 - bot.handlers.chat - INFO - (Chat 0) Starting LLM generation for thread default...
+2025-08-24 17:21:43.209 | 2025-08-24 17:21:43 - bot.handlers.chat - INFO - (Chat 0) Starting LLM generation for thread default...
+2025-08-24 17:21:44.802 | 2025-08-24 17:21:44 - services.openrouter_service - WARNING - OpenRouter request failed (Attempt 1/3): Client error '429 Too Many Requests' for url 'https://openrouter.ai/api/v1/chat/completions'
+2025-08-24 17:21:44.802 | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429
+2025-08-24 17:21:44.802 | 2025-08-24 17:21:44 - services.openrouter_service - WARNING - OpenRouter request failed (Attempt 1/3): Client error '429 Too Many Requests' for url 'https://openrouter.ai/api/v1/chat/completions'
+2025-08-24 17:21:44.802 | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429
+2025-08-24 17:21:46.648 | 2025-08-24 17:21:46 - services.openrouter_service - WARNING - OpenRouter request failed (Attempt 2/3): Client error '429 Too Many Requests' for url 'https://openrouter.ai/api/v1/chat/completions'
+2025-08-24 17:21:46.648 | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429
+2025-08-24 17:21:46.648 | 2025-08-24 17:21:46 - services.openrouter_service - WARNING - OpenRouter request failed (Attempt 2/3): Client error '429 Too Many Requests' for url 'https://openrouter.ai/api/v1/chat/completions'
+2025-08-24 17:21:46.648 | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429
+2025-08-24 17:21:49.896 | 2025-08-24 17:21:49 - services.openrouter_service - WARNING - OpenRouter request failed (Attempt 3/3): Client error '429 Too Many Requests' for url 'https://openrouter.ai/api/v1/chat/completions'
+2025-08-24 17:21:49.896 | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429
+2025-08-24 17:21:49.896 | 2025-08-24 17:21:49 - services.openrouter_service - ERROR - OpenRouter request failed after all retries.
+2025-08-24 17:21:49.896 | 2025-08-24 17:21:49 - services.openrouter_service - WARNING - OpenRouter request failed (Attempt 3/3): Client error '429 Too Many Requests' for url 'https://openrouter.ai/api/v1/chat/completions'
+2025-08-24 17:21:49.896 | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429
+2025-08-24 17:21:49.896 | 2025-08-24 17:21:49 - services.openrouter_service - ERROR - OpenRouter request failed after all retries.
+2025-08-24 17:21:55.244 | 2025-08-24 17:21:55 - services.openrouter_service - INFO - Fetched 55 free models from OpenRouter.
+2025-08-24 17:21:55.244 | 2025-08-24 17:21:55 - services.openrouter_service - INFO - Fetched 55 free models from OpenRouter.
+2025-08-24 17:21:59.481 | 2025-08-24 17:21:59 - services.openrouter_service - INFO - Fetched 55 free models from OpenRouter.
+2025-08-24 17:21:59.481 | 2025-08-24 17:21:59 - services.openrouter_service - INFO - Fetched 55 free models from OpenRouter.
+2025-08-24 17:22:02.544 | 2025-08-24 17:22:02 - services.openrouter_service - INFO - Fetched 55 free models from OpenRouter.
+2025-08-24 17:22:02.544 | 2025-08-24 17:22:02 - services.openrouter_service - INFO - Fetched 55 free models from OpenRouter.
+2025-08-24 17:22:05.310 | 2025-08-24 17:22:05 - services.openrouter_service - INFO - Fetched 55 free models from OpenRouter.
+2025-08-24 17:22:05.310 | 2025-08-24 17:22:05 - services.openrouter_service - INFO - Fetched 55 free models from OpenRouter.
+2025-08-24 17:22:12.278 | 2025-08-24 17:22:12 - bot.handlers.chat - INFO - (Chat 0) Message from User 0: 'How the weather in Taipei now?...'
+2025-08-24 17:22:12.278 | 2025-08-24 17:22:12 - bot.handlers.chat - INFO - (Chat 0) Message from User 0: 'How the weather in Taipei now?...'
+2025-08-24 17:22:12.334 | 2025-08-24 17:22:12 - bot.handlers.chat - INFO - (Chat 0) Using service: module, Model: moonshotai/kimi-k2:free
+2025-08-24 17:22:12.334 | 2025-08-24 17:22:12 - bot.handlers.chat - INFO - (Chat 0) Using service: module, Model: moonshotai/kimi-k2:free
+2025-08-24 17:22:12.817 | 2025-08-24 17:22:12 - bot.handlers.chat - INFO - (Chat 0) Starting LLM generation for thread default...
+2025-08-24 17:22:12.817 | 2025-08-24 17:22:12 - bot.handlers.chat - INFO - (Chat 0) Starting LLM generation for thread default...
+2025-08-24 17:22:15.736 | 2025-08-24 17:22:15 - bot.handlers.chat - INFO - (Chat 0) LLM generation complete. Length: 46
+2025-08-24 17:22:15.736 | 2025-08-24 17:22:15 - bot.handlers.chat - INFO - (Chat 0) LLM generation complete. Length: 46
+2025-08-24 17:22:15.747 | 2025-08-24 17:22:15 - bot.handlers.chat - INFO - (Chat 0) Auto-search disabled. Replacing search tag with user-friendly message.
+2025-08-24 17:22:15.747 | 2025-08-24 17:22:15 - bot.handlers.chat - INFO - (Chat 0) Auto-search disabled. Replacing search tag with user-friendly message.
+2025-08-24 17:22:16.235 | 2025-08-24 17:22:16 - bot.handlers.chat - INFO - (Chat 0) History updated to 2 entries.
+2025-08-24 17:22:16.235 | 2025-08-24 17:22:16 - bot.handlers.chat - INFO - (Chat 0) History updated to 2 entries.
+2025-08-24 17:23:31.664 | 2025-08-24 17:23:31 - bot.handlers.chat - INFO - (Chat 0) Message from User 0: 'What is CC/FC when creating clock signal with oscillator?...'
+2025-08-24 17:23:31.664 | 2025-08-24 17:23:31 - bot.handlers.chat - INFO - (Chat 0) Message from User 0: 'What is CC/FC when creating clock signal with oscillator?...'
+2025-08-24 17:23:31.733 | 2025-08-24 17:23:31 - bot.handlers.chat - INFO - (Chat 0) Using service: module, Model: moonshotai/kimi-k2:free
+2025-08-24 17:23:31.733 | 2025-08-24 17:23:31 - bot.handlers.chat - INFO - (Chat 0) Using service: module, Model: moonshotai/kimi-k2:free
+2025-08-24 17:23:32.745 | 2025-08-24 17:23:32 - bot.handlers.chat - INFO - (Chat 0) Starting LLM generation for thread default...
+2025-08-24 17:23:32.745 | 2025-08-24 17:23:32 - bot.handlers.chat - INFO - (Chat 0) Starting LLM generation for thread default...
+2025-08-24 17:23:35.187 | 2025-08-24 17:23:35 - bot.handlers.chat - INFO - (Chat 0) LLM generation complete. Length: 54
+2025-08-24 17:23:35.187 | 2025-08-24 17:23:35 - bot.handlers.chat - INFO - (Chat 0) LLM generation complete. Length: 54
+2025-08-24 17:23:35.198 | 2025-08-24 17:23:35 - bot.handlers.chat - INFO - (Chat 0) Auto-search disabled. Replacing search tag with user-friendly message.
+2025-08-24 17:23:35.198 | 2025-08-24 17:23:35 - bot.handlers.chat - INFO - (Chat 0) Auto-search disabled. Replacing search tag with user-friendly message.
+2025-08-24 17:23:35.745 | 2025-08-24 17:23:35 - bot.handlers.chat - INFO - (Chat 0) History updated to 4 entries.
+2025-08-24 17:23:35.745 | 2025-08-24 17:23:35 - bot.handlers.chat - INFO - (Chat 0) History updated to 4 entries.
+2025-08-24 17:25:31.370 | 2025-08-24 17:25:31 - telegram.ext.Application - INFO - Application is stopping. This might take a moment.
+2025-08-24 17:25:31.370 | 2025-08-24 17:25:31 - telegram.ext.Application - INFO - Application is stopping. This might take a moment.
+2025-08-24 17:25:31.371 | 2025-08-24 17:25:31 - apscheduler.scheduler - INFO - Scheduler has been shut down
+2025-08-24 17:25:31.371 | 2025-08-24 17:25:31 - apscheduler.scheduler - INFO - Scheduler has been shut down
+2025-08-24 17:25:31.381 | 2025-08-24 17:25:31 - telegram.ext.Application - INFO - Application.stop() complete
+2025-08-24 17:25:31.381 | 2025-08-24 17:25:31 - telegram.ext.Application - INFO - Application.stop() complete
+2025-08-24 17:25:31.382 | 2025-08-24 17:25:31 - __main__ - INFO - Bot stopped normally.
+2025-08-24 17:25:31.382 | 2025-08-24 17:25:31 - __main__ - INFO - Bot stopped normally.
+2025-08-24 17:25:34.691 | 2025-08-24 17:25:34 - config - INFO - Configuration loaded:
+2025-08-24 17:25:34.691 | 2025-08-24 17:25:34 - config - INFO -   DEFAULT_PROVIDER: ollama
+2025-08-24 17:25:34.691 | 2025-08-24 17:25:34 - config - INFO -   DEFAULT_OLLAMA_MODEL: qwq
+2025-08-24 17:25:34.691 | 2025-08-24 17:25:34 - config - INFO -   DEFAULT_GEMINI_MODEL: gemini-1.5-pro-latest
+2025-08-24 17:25:34.691 | 2025-08-24 17:25:34 - config - INFO -   DEFAULT_OPENROUTER_MODEL: deepseek/deepseek-chat-v3-0324:free
+2025-08-24 17:25:34.691 | 2025-08-24 17:25:34 - config - INFO -   Tavily API Key Loaded: Yes
+2025-08-24 17:25:34.691 | 2025-08-24 17:25:34 - config - INFO -   GEMINI_ASK_ALL_MODELS: ['gemini-1.5-pro-latest', 'gemini-1.5-flash-latest']
+2025-08-24 17:25:34.691 | 2025-08-24 17:25:34 - config - INFO -   OPENROUTER_ALLOWED_MODELS: ['llama-2-70b', 'mistral-7b', 'stability-ai/stablelm-tuned-alpha-7b']
+2025-08-24 17:25:34.691 | 2025-08-24 17:25:34 - config - INFO -   OPENROUTER_HTTP_REFERER: YOUR_APP_URL_OR_NAME
+2025-08-24 17:25:34.691 | 2025-08-24 17:25:34 - config - INFO -   OLLAMA_HOST: http://192.168.0.158:11434
+2025-08-24 17:25:34.691 | 2025-08-24 17:25:34 - config - INFO -   SESSION_FILE_PATH: data/sessions.json
+2025-08-24 17:25:34.692 | 2025-08-24 17:25:34 - config - INFO -   ALLOWED_CHAT_IDS: None
+2025-08-24 17:25:34.692 | 2025-08-24 17:25:34 - config - INFO -   REQUEST_TIMEOUT_SECONDS: 180
+2025-08-24 17:25:34.692 | 2025-08-24 17:25:34 - config - INFO -   Number of Gemini Keys loaded: 3
+2025-08-24 17:25:34.692 | 2025-08-24 17:25:34 - config - INFO -   Number of Custom Providers loaded: 3
+2025-08-24 17:25:34.692 | 2025-08-24 17:25:34 - config - INFO -   CONTEXT_TOKEN_OUTPUT_BUFFER: 10000
+2025-08-24 17:25:34.691 | 2025-08-24 17:25:34 - config - INFO - Configuration loaded:
+2025-08-24 17:25:34.691 | 2025-08-24 17:25:34 - config - INFO -   DEFAULT_PROVIDER: ollama
+2025-08-24 17:25:34.691 | 2025-08-24 17:25:34 - config - INFO -   DEFAULT_OLLAMA_MODEL: qwq
+2025-08-24 17:25:34.691 | 2025-08-24 17:25:34 - config - INFO -   DEFAULT_GEMINI_MODEL: gemini-1.5-pro-latest
+2025-08-24 17:25:34.691 | 2025-08-24 17:25:34 - config - INFO -   DEFAULT_OPENROUTER_MODEL: deepseek/deepseek-chat-v3-0324:free
+2025-08-24 17:25:34.691 | 2025-08-24 17:25:34 - config - INFO -   Tavily API Key Loaded: Yes
+2025-08-24 17:25:34.691 | 2025-08-24 17:25:34 - config - INFO -   GEMINI_ASK_ALL_MODELS: ['gemini-1.5-pro-latest', 'gemini-1.5-flash-latest']
+2025-08-24 17:25:34.691 | 2025-08-24 17:25:34 - config - INFO -   OPENROUTER_ALLOWED_MODELS: ['llama-2-70b', 'mistral-7b', 'stability-ai/stablelm-tuned-alpha-7b']
+2025-08-24 17:25:34.691 | 2025-08-24 17:25:34 - config - INFO -   OPENROUTER_HTTP_REFERER: YOUR_APP_URL_OR_NAME
+2025-08-24 17:25:34.691 | 2025-08-24 17:25:34 - config - INFO -   OLLAMA_HOST: http://192.168.0.158:11434
+2025-08-24 17:25:34.691 | 2025-08-24 17:25:34 - config - INFO -   SESSION_FILE_PATH: data/sessions.json
+2025-08-24 17:25:34.692 | 2025-08-24 17:25:34 - config - INFO -   ALLOWED_CHAT_IDS: None
+2025-08-24 17:25:34.692 | 2025-08-24 17:25:34 - config - INFO -   REQUEST_TIMEOUT_SECONDS: 180
+2025-08-24 17:25:34.692 | 2025-08-24 17:25:34 - config - INFO -   Number of Gemini Keys loaded: 3
+2025-08-24 17:25:34.692 | 2025-08-24 17:25:34 - config - INFO -   Number of Custom Providers loaded: 3
+2025-08-24 17:25:34.692 | 2025-08-24 17:25:34 - config - INFO -   CONTEXT_TOKEN_OUTPUT_BUFFER: 10000
+2025-08-24 17:25:34.890 | 2025-08-24 17:25:34 - services.ollama_service - INFO - Ollama client initialized for host: http://192.168.0.158:11434
+2025-08-24 17:25:34.890 | 2025-08-24 17:25:34 - services.ollama_service - INFO - Ollama client initialized for host: http://192.168.0.158:11434
+2025-08-24 17:25:35.763 | 2025-08-24 17:25:35 - storage - INFO - Initializing StorageManager with backend: database
+2025-08-24 17:25:35.763 | 2025-08-24 17:25:35 - __main__ - INFO - Starting bot initialization...
+2025-08-24 17:25:35.763 | 2025-08-24 17:25:35 - storage - INFO - Initializing StorageManager with backend: database
+2025-08-24 17:25:35.763 | 2025-08-24 17:25:35 - __main__ - INFO - Starting bot initialization...
+2025-08-24 17:25:35.779 | 2025-08-24 17:25:35 - bot.application - INFO - Telegram Application created.
+2025-08-24 17:25:35.779 | 2025-08-24 17:25:35 - bot.application - INFO - Telegram Application created.
+2025-08-24 17:25:35.816 | /app/bot/handlers/ask_selected_handler.py:428: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-24 17:25:35.816 |   ask_selected_conv_handler = ConversationHandler(
+2025-08-24 17:25:35.816 | /app/bot/handlers/ask_selected_handler.py:428: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-24 17:25:35.816 |   ask_selected_conv_handler = ConversationHandler(
+2025-08-24 17:25:35.819 | /app/bot/handlers/discuss_handler.py:299: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-24 17:25:35.819 |   discuss_conv_handler = ConversationHandler(
+2025-08-24 17:25:35.819 | /app/bot/handlers/discuss_handler.py:299: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-24 17:25:35.819 |   discuss_conv_handler = ConversationHandler(
+2025-08-24 17:25:35.829 | /app/bot/handlers/config_handler.py:93: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-24 17:25:35.829 |   config_conv_handler = ConversationHandler(
+2025-08-24 17:25:35.829 | 2025-08-24 17:25:35 - __main__ - INFO - Registered handlers with priority groups
+2025-08-24 17:25:35.829 | 2025-08-24 17:25:35 - __main__ - INFO - Registered global error handler.
+2025-08-24 17:25:35.829 | 2025-08-24 17:25:35 - __main__ - INFO - Starting bot polling...
+2025-08-24 17:25:35.829 | /app/bot/handlers/config_handler.py:93: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-24 17:25:35.829 |   config_conv_handler = ConversationHandler(
+2025-08-24 17:25:35.829 | 2025-08-24 17:25:35 - __main__ - INFO - Registered handlers with priority groups
+2025-08-24 17:25:35.829 | 2025-08-24 17:25:35 - __main__ - INFO - Registered global error handler.
+2025-08-24 17:25:35.829 | 2025-08-24 17:25:35 - __main__ - INFO - Starting bot polling...
+2025-08-24 17:25:36.684 | 2025-08-24 17:25:36 - __main__ - INFO - Initializing provider details...
+2025-08-24 17:25:36.684 | 2025-08-24 17:25:36 - __main__ - INFO - Initializing provider details...
+2025-08-24 17:25:36.690 | 2025-08-24 17:25:36 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'groq' with base URL 'https://api.groq.com/openai/v1'
+2025-08-24 17:25:36.690 | 2025-08-24 17:25:36 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'groq' with base URL 'https://api.groq.com/openai/v1'
+2025-08-24 17:25:36.695 | 2025-08-24 17:25:36 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'requesty' with base URL 'https://router.requesty.ai/v1'
+2025-08-24 17:25:36.695 | 2025-08-24 17:25:36 - services.openai_compatible_service - WARNING - Allowed models not configured for provider 'nvidia'. Using default empty list.
+2025-08-24 17:25:36.695 | 2025-08-24 17:25:36 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'requesty' with base URL 'https://router.requesty.ai/v1'
+2025-08-24 17:25:36.695 | 2025-08-24 17:25:36 - services.openai_compatible_service - WARNING - Allowed models not configured for provider 'nvidia'. Using default empty list.
+2025-08-24 17:25:36.702 | 2025-08-24 17:25:36 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'nvidia' with base URL 'https://integrate.api.nvidia.com/v1'
+2025-08-24 17:25:36.702 | 2025-08-24 17:25:36 - bot.providers - INFO - Initialized provider details for: ['ollama', 'gemini', 'openrouter', 'groq', 'requesty', 'nvidia']
+2025-08-24 17:25:36.702 | 2025-08-24 17:25:36 - __main__ - INFO - Provider details initialization complete.
+2025-08-24 17:25:36.702 | 2025-08-24 17:25:36 - __main__ - INFO - Initializing storage...
+2025-08-24 17:25:36.702 | 2025-08-24 17:25:36 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'nvidia' with base URL 'https://integrate.api.nvidia.com/v1'
+2025-08-24 17:25:36.702 | 2025-08-24 17:25:36 - bot.providers - INFO - Initialized provider details for: ['ollama', 'gemini', 'openrouter', 'groq', 'requesty', 'nvidia']
+2025-08-24 17:25:36.702 | 2025-08-24 17:25:36 - __main__ - INFO - Provider details initialization complete.
+2025-08-24 17:25:36.702 | 2025-08-24 17:25:36 - __main__ - INFO - Initializing storage...
+2025-08-24 17:25:36.714 | 2025-08-24 17:25:36 - storage.database_storage - INFO - Database initialized successfully.
+2025-08-24 17:25:36.714 | 2025-08-24 17:25:36 - storage.database_storage - INFO - Database initialized successfully.
+2025-08-24 17:25:36.715 | 2025-08-24 17:25:36 - __main__ - INFO - Storage initialization complete.
+2025-08-24 17:25:36.715 | 2025-08-24 17:25:36 - __main__ - INFO - Running startup failsafe: resetting command scopes for all known chats...
+2025-08-24 17:25:36.715 | 2025-08-24 17:25:36 - __main__ - INFO - Storage initialization complete.
+2025-08-24 17:25:36.715 | 2025-08-24 17:25:36 - __main__ - INFO - Running startup failsafe: resetting command scopes for all known chats...
+2025-08-24 17:25:37.195 | 2025-08-24 17:25:37 - bot.menu_setup - INFO - Successfully set bot command list for chat 0.
+2025-08-24 17:25:37.195 | 2025-08-24 17:25:37 - __main__ - INFO - Completed command scope reset for 1 chats.
+2025-08-24 17:25:37.195 | 2025-08-24 17:25:37 - __main__ - INFO - Performing startup checks for AI services...
+2025-08-24 17:25:37.195 | 2025-08-24 17:25:37 - bot.menu_setup - INFO - Successfully set bot command list for chat 0.
+2025-08-24 17:25:37.195 | 2025-08-24 17:25:37 - __main__ - INFO - Completed command scope reset for 1 chats.
+2025-08-24 17:25:37.195 | 2025-08-24 17:25:37 - __main__ - INFO - Performing startup checks for AI services...
+2025-08-24 17:25:37.202 | 2025-08-24 17:25:37 - services.gemini_service - INFO - Gemini connection successful (checked with Key Index: 0).
+2025-08-24 17:25:37.202 | 2025-08-24 17:25:37 - services.gemini_service - INFO - Gemini connection successful (checked with Key Index: 0).
+2025-08-24 17:25:37.216 | 2025-08-24 17:25:37 - services.ollama_service - INFO - Ollama connection successful.
+2025-08-24 17:25:37.216 | 2025-08-24 17:25:37 - services.ollama_service - INFO - Ollama connection successful.
+2025-08-24 17:25:37.629 | 2025-08-24 17:25:37 - services.openrouter_service - INFO - OpenRouter connection check successful (fetched models).
+2025-08-24 17:25:37.629 | 2025-08-24 17:25:37 - __main__ - INFO - Ollama connection check successful.
+2025-08-24 17:25:37.629 | 2025-08-24 17:25:37 - __main__ - INFO - Gemini connection check successful.
+2025-08-24 17:25:37.629 | 2025-08-24 17:25:37 - __main__ - INFO - OpenRouter connection check successful.
+2025-08-24 17:25:37.629 | 2025-08-24 17:25:37 - services.openrouter_service - INFO - OpenRouter connection check successful (fetched models).
+2025-08-24 17:25:37.629 | 2025-08-24 17:25:37 - __main__ - INFO - Ollama connection check successful.
+2025-08-24 17:25:37.629 | 2025-08-24 17:25:37 - __main__ - INFO - Gemini connection check successful.
+2025-08-24 17:25:37.629 | 2025-08-24 17:25:37 - __main__ - INFO - OpenRouter connection check successful.
+2025-08-24 17:25:38.566 | 2025-08-24 17:25:38 - bot.menu_setup - INFO - Successfully set bot command list and menu button for the default scope.
+2025-08-24 17:25:38.566 | 2025-08-24 17:25:38 - bot.menu_setup - INFO - Successfully set bot command list and menu button for the default scope.
+2025-08-24 17:25:38.841 | 2025-08-24 17:25:38 - __main__ - INFO - Bot initialized: Username='SmsFowardingBot', Token='64687...D5E4'
+2025-08-24 17:25:38.841 | 2025-08-24 17:25:38 - __main__ - INFO - Bot initialized: Username='SmsFowardingBot', Token='64687...D5E4'
+2025-08-24 17:25:39.119 | 2025-08-24 17:25:39 - apscheduler.scheduler - INFO - Scheduler started
+2025-08-24 17:25:39.119 | 2025-08-24 17:25:39 - telegram.ext.Application - INFO - Application started
+2025-08-24 17:25:39.119 | 2025-08-24 17:25:39 - apscheduler.scheduler - INFO - Scheduler started
+2025-08-24 17:25:39.119 | 2025-08-24 17:25:39 - telegram.ext.Application - INFO - Application started
+2025-08-24 17:25:58.397 | 2025-08-24 17:25:58 - services.openrouter_service - INFO - Fetched 55 free models from OpenRouter.
+2025-08-24 17:25:58.397 | 2025-08-24 17:25:58 - services.openrouter_service - INFO - Fetched 55 free models from OpenRouter.
+2025-08-24 17:26:09.893 | 2025-08-24 17:26:09 - bot.handlers.chat - INFO - (Chat 0) Message from User 0: 'What is CC/FC when creating clock signal with oscillator?...'
+2025-08-24 17:26:09.893 | 2025-08-24 17:26:09 - bot.handlers.chat - INFO - (Chat 0) Message from User 0: 'What is CC/FC when creating clock signal with oscillator?...'
+2025-08-24 17:26:10.084 | 2025-08-24 17:26:10 - bot.handlers.chat - INFO - (Chat 0) Using service: module, Model: moonshotai/kimi-k2:free
+2025-08-24 17:26:10.084 | 2025-08-24 17:26:10 - bot.handlers.chat - INFO - (Chat 0) Using service: module, Model: moonshotai/kimi-k2:free
+2025-08-24 17:26:10.569 | 2025-08-24 17:26:10 - bot.handlers.chat - INFO - (Chat 0) Starting LLM generation for thread default...
+2025-08-24 17:26:10.569 | 2025-08-24 17:26:10 - bot.handlers.chat - INFO - (Chat 0) Starting LLM generation for thread default...
+2025-08-24 17:26:13.404 | 2025-08-24 17:26:13 - bot.handlers.chat - INFO - (Chat 0) LLM generation complete. Length: 54
+2025-08-24 17:26:13.404 | 2025-08-24 17:26:13 - bot.handlers.chat - INFO - (Chat 0) LLM generation complete. Length: 54
+2025-08-24 17:26:13.415 | 2025-08-24 17:26:13 - bot.handlers.chat - INFO - (Chat 0) Auto-search disabled. Replacing search tag with user-friendly message.
+2025-08-24 17:26:13.415 | 2025-08-24 17:26:13 - bot.handlers.chat - INFO - (Chat 0) Auto-search disabled. Replacing search tag with user-friendly message.
+2025-08-24 17:26:13.909 | 2025-08-24 17:26:13 - bot.handlers.chat - INFO - (Chat 0) History updated to 6 entries.
+2025-08-24 17:26:13.909 | 2025-08-24 17:26:13 - bot.handlers.chat - INFO - (Chat 0) History updated to 6 entries.
+2025-08-24 17:26:18.158 | 2025-08-24 17:26:18 - bot.handlers.chat - INFO - (Chat 0) Message from User 0: 'How the weather in Taipei now?...'
+2025-08-24 17:26:18.158 | 2025-08-24 17:26:18 - bot.handlers.chat - INFO - (Chat 0) Message from User 0: 'How the weather in Taipei now?...'
+2025-08-24 17:26:18.226 | 2025-08-24 17:26:18 - bot.handlers.chat - INFO - (Chat 0) Using service: module, Model: moonshotai/kimi-k2:free
+2025-08-24 17:26:18.226 | 2025-08-24 17:26:18 - bot.handlers.chat - INFO - (Chat 0) Using service: module, Model: moonshotai/kimi-k2:free
+2025-08-24 17:26:18.708 | 2025-08-24 17:26:18 - bot.handlers.chat - INFO - (Chat 0) Starting LLM generation for thread default...
+2025-08-24 17:26:18.708 | 2025-08-24 17:26:18 - bot.handlers.chat - INFO - (Chat 0) Starting LLM generation for thread default...
+2025-08-24 17:26:20.693 | 2025-08-24 17:26:20 - bot.handlers.chat - INFO - (Chat 0) LLM generation complete. Length: 46
+2025-08-24 17:26:20.693 | 2025-08-24 17:26:20 - bot.handlers.chat - INFO - (Chat 0) LLM generation complete. Length: 46
+2025-08-24 17:26:20.703 | 2025-08-24 17:26:20 - bot.handlers.chat - INFO - (Chat 0) Auto-search disabled. Replacing search tag with user-friendly message.
+2025-08-24 17:26:20.703 | 2025-08-24 17:26:20 - bot.handlers.chat - INFO - (Chat 0) Auto-search disabled. Replacing search tag with user-friendly message.
+2025-08-24 17:26:21.200 | 2025-08-24 17:26:21 - bot.handlers.chat - INFO - (Chat 0) History updated to 8 entries.
+2025-08-24 17:26:21.200 | 2025-08-24 17:26:21 - bot.handlers.chat - INFO - (Chat 0) History updated to 8 entries.
+2025-08-24 17:26:39.456 | 2025-08-24 17:26:39 - telegram.ext.Application - INFO - Application is stopping. This might take a moment.
+2025-08-24 17:26:39.456 | 2025-08-24 17:26:39 - apscheduler.scheduler - INFO - Scheduler has been shut down
+2025-08-24 17:26:39.456 | 2025-08-24 17:26:39 - telegram.ext.Application - INFO - Application is stopping. This might take a moment.
+2025-08-24 17:26:39.456 | 2025-08-24 17:26:39 - apscheduler.scheduler - INFO - Scheduler has been shut down
+2025-08-24 17:26:39.467 | 2025-08-24 17:26:39 - telegram.ext.Application - INFO - Application.stop() complete
+2025-08-24 17:26:39.467 | 2025-08-24 17:26:39 - telegram.ext.Application - INFO - Application.stop() complete
+2025-08-24 17:26:39.468 | 2025-08-24 17:26:39 - __main__ - INFO - Bot stopped normally.
+2025-08-24 17:26:39.468 | 2025-08-24 17:26:39 - __main__ - INFO - Bot stopped normally.
+2025-08-24 17:26:40.155 | Error response from daemon: can not get logs from container which is dead or marked for removal
+2025-08-24 17:26:40.166 | Error response from daemon: can not get logs from container which is dead or marked for removal
+2025-08-24 17:26:42.774 | 2025-08-24 17:26:42 - config - INFO - Configuration loaded:
+2025-08-24 17:26:42.774 | 2025-08-24 17:26:42 - config - INFO -   DEFAULT_PROVIDER: ollama
+2025-08-24 17:26:42.774 | 2025-08-24 17:26:42 - config - INFO -   DEFAULT_OLLAMA_MODEL: qwq
+2025-08-24 17:26:42.774 | 2025-08-24 17:26:42 - config - INFO -   DEFAULT_GEMINI_MODEL: gemini-1.5-pro-latest
+2025-08-24 17:26:42.775 | 2025-08-24 17:26:42 - config - INFO -   DEFAULT_OPENROUTER_MODEL: deepseek/deepseek-chat-v3-0324:free
+2025-08-24 17:26:42.775 | 2025-08-24 17:26:42 - config - INFO -   Tavily API Key Loaded: Yes
+2025-08-24 17:26:42.775 | 2025-08-24 17:26:42 - config - INFO -   GEMINI_ASK_ALL_MODELS: ['gemini-1.5-pro-latest', 'gemini-1.5-flash-latest']
+2025-08-24 17:26:42.775 | 2025-08-24 17:26:42 - config - INFO -   OPENROUTER_ALLOWED_MODELS: ['llama-2-70b', 'mistral-7b', 'stability-ai/stablelm-tuned-alpha-7b']
+2025-08-24 17:26:42.775 | 2025-08-24 17:26:42 - config - INFO -   OPENROUTER_HTTP_REFERER: YOUR_APP_URL_OR_NAME
+2025-08-24 17:26:42.775 | 2025-08-24 17:26:42 - config - INFO -   OLLAMA_HOST: http://192.168.0.158:11434
+2025-08-24 17:26:42.775 | 2025-08-24 17:26:42 - config - INFO -   SESSION_FILE_PATH: data/sessions.json
+2025-08-24 17:26:42.775 | 2025-08-24 17:26:42 - config - INFO -   ALLOWED_CHAT_IDS: None
+2025-08-24 17:26:42.775 | 2025-08-24 17:26:42 - config - INFO -   REQUEST_TIMEOUT_SECONDS: 180
+2025-08-24 17:26:42.775 | 2025-08-24 17:26:42 - config - INFO -   Number of Gemini Keys loaded: 3
+2025-08-24 17:26:42.775 | 2025-08-24 17:26:42 - config - INFO -   Number of Custom Providers loaded: 3
+2025-08-24 17:26:42.775 | 2025-08-24 17:26:42 - config - INFO -   CONTEXT_TOKEN_OUTPUT_BUFFER: 10000
+2025-08-24 17:26:42.774 | 2025-08-24 17:26:42 - config - INFO - Configuration loaded:
+2025-08-24 17:26:42.774 | 2025-08-24 17:26:42 - config - INFO -   DEFAULT_PROVIDER: ollama
+2025-08-24 17:26:42.774 | 2025-08-24 17:26:42 - config - INFO -   DEFAULT_OLLAMA_MODEL: qwq
+2025-08-24 17:26:42.774 | 2025-08-24 17:26:42 - config - INFO -   DEFAULT_GEMINI_MODEL: gemini-1.5-pro-latest
+2025-08-24 17:26:42.775 | 2025-08-24 17:26:42 - config - INFO -   DEFAULT_OPENROUTER_MODEL: deepseek/deepseek-chat-v3-0324:free
+2025-08-24 17:26:42.775 | 2025-08-24 17:26:42 - config - INFO -   Tavily API Key Loaded: Yes
+2025-08-24 17:26:42.775 | 2025-08-24 17:26:42 - config - INFO -   GEMINI_ASK_ALL_MODELS: ['gemini-1.5-pro-latest', 'gemini-1.5-flash-latest']
+2025-08-24 17:26:42.775 | 2025-08-24 17:26:42 - config - INFO -   OPENROUTER_ALLOWED_MODELS: ['llama-2-70b', 'mistral-7b', 'stability-ai/stablelm-tuned-alpha-7b']
+2025-08-24 17:26:42.775 | 2025-08-24 17:26:42 - config - INFO -   OPENROUTER_HTTP_REFERER: YOUR_APP_URL_OR_NAME
+2025-08-24 17:26:42.775 | 2025-08-24 17:26:42 - config - INFO -   OLLAMA_HOST: http://192.168.0.158:11434
+2025-08-24 17:26:42.775 | 2025-08-24 17:26:42 - config - INFO -   SESSION_FILE_PATH: data/sessions.json
+2025-08-24 17:26:42.775 | 2025-08-24 17:26:42 - config - INFO -   ALLOWED_CHAT_IDS: None
+2025-08-24 17:26:42.775 | 2025-08-24 17:26:42 - config - INFO -   REQUEST_TIMEOUT_SECONDS: 180
+2025-08-24 17:26:42.775 | 2025-08-24 17:26:42 - config - INFO -   Number of Gemini Keys loaded: 3
+2025-08-24 17:26:42.775 | 2025-08-24 17:26:42 - config - INFO -   Number of Custom Providers loaded: 3
+2025-08-24 17:26:42.775 | 2025-08-24 17:26:42 - config - INFO -   CONTEXT_TOKEN_OUTPUT_BUFFER: 10000
+2025-08-24 17:26:42.902 | 2025-08-24 17:26:42 - services.ollama_service - INFO - Ollama client initialized for host: http://192.168.0.158:11434
+2025-08-24 17:26:42.902 | 2025-08-24 17:26:42 - services.ollama_service - INFO - Ollama client initialized for host: http://192.168.0.158:11434
+2025-08-24 17:26:43.388 | 2025-08-24 17:26:43 - storage - INFO - Initializing StorageManager with backend: database
+2025-08-24 17:26:43.388 | 2025-08-24 17:26:43 - __main__ - INFO - Starting bot initialization...
+2025-08-24 17:26:43.388 | 2025-08-24 17:26:43 - storage - INFO - Initializing StorageManager with backend: database
+2025-08-24 17:26:43.388 | 2025-08-24 17:26:43 - __main__ - INFO - Starting bot initialization...
+2025-08-24 17:26:43.404 | 2025-08-24 17:26:43 - bot.application - INFO - Telegram Application created.
+2025-08-24 17:26:43.404 | 2025-08-24 17:26:43 - bot.application - INFO - Telegram Application created.
+2025-08-24 17:26:43.414 | /app/bot/handlers/ask_selected_handler.py:428: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-24 17:26:43.414 |   ask_selected_conv_handler = ConversationHandler(
+2025-08-24 17:26:43.414 | /app/bot/handlers/ask_selected_handler.py:428: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-24 17:26:43.414 |   ask_selected_conv_handler = ConversationHandler(
+2025-08-24 17:26:43.417 | /app/bot/handlers/discuss_handler.py:299: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-24 17:26:43.417 |   discuss_conv_handler = ConversationHandler(
+2025-08-24 17:26:43.417 | /app/bot/handlers/discuss_handler.py:299: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-24 17:26:43.417 |   discuss_conv_handler = ConversationHandler(
+2025-08-24 17:26:43.425 | /app/bot/handlers/config_handler.py:93: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-24 17:26:43.425 |   config_conv_handler = ConversationHandler(
+2025-08-24 17:26:43.425 | 2025-08-24 17:26:43 - __main__ - INFO - Registered handlers with priority groups
+2025-08-24 17:26:43.425 | 2025-08-24 17:26:43 - __main__ - INFO - Registered global error handler.
+2025-08-24 17:26:43.425 | /app/bot/handlers/config_handler.py:93: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-24 17:26:43.425 |   config_conv_handler = ConversationHandler(
+2025-08-24 17:26:43.425 | 2025-08-24 17:26:43 - __main__ - INFO - Registered handlers with priority groups
+2025-08-24 17:26:43.425 | 2025-08-24 17:26:43 - __main__ - INFO - Registered global error handler.
+2025-08-24 17:26:43.425 | 2025-08-24 17:26:43 - __main__ - INFO - Starting bot polling...
+2025-08-24 17:26:43.425 | 2025-08-24 17:26:43 - __main__ - INFO - Starting bot polling...
+2025-08-24 17:26:44.268 | 2025-08-24 17:26:44 - __main__ - INFO - Initializing provider details...
+2025-08-24 17:26:44.268 | 2025-08-24 17:26:44 - __main__ - INFO - Initializing provider details...
+2025-08-24 17:26:44.274 | 2025-08-24 17:26:44 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'groq' with base URL 'https://api.groq.com/openai/v1'
+2025-08-24 17:26:44.274 | 2025-08-24 17:26:44 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'groq' with base URL 'https://api.groq.com/openai/v1'
+2025-08-24 17:26:44.280 | 2025-08-24 17:26:44 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'requesty' with base URL 'https://router.requesty.ai/v1'
+2025-08-24 17:26:44.280 | 2025-08-24 17:26:44 - services.openai_compatible_service - WARNING - Allowed models not configured for provider 'nvidia'. Using default empty list.
+2025-08-24 17:26:44.280 | 2025-08-24 17:26:44 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'requesty' with base URL 'https://router.requesty.ai/v1'
+2025-08-24 17:26:44.280 | 2025-08-24 17:26:44 - services.openai_compatible_service - WARNING - Allowed models not configured for provider 'nvidia'. Using default empty list.
+2025-08-24 17:26:44.286 | 2025-08-24 17:26:44 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'nvidia' with base URL 'https://integrate.api.nvidia.com/v1'
+2025-08-24 17:26:44.286 | 2025-08-24 17:26:44 - bot.providers - INFO - Initialized provider details for: ['ollama', 'gemini', 'openrouter', 'groq', 'requesty', 'nvidia']
+2025-08-24 17:26:44.286 | 2025-08-24 17:26:44 - __main__ - INFO - Provider details initialization complete.
+2025-08-24 17:26:44.286 | 2025-08-24 17:26:44 - __main__ - INFO - Initializing storage...
+2025-08-24 17:26:44.286 | 2025-08-24 17:26:44 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'nvidia' with base URL 'https://integrate.api.nvidia.com/v1'
+2025-08-24 17:26:44.286 | 2025-08-24 17:26:44 - bot.providers - INFO - Initialized provider details for: ['ollama', 'gemini', 'openrouter', 'groq', 'requesty', 'nvidia']
+2025-08-24 17:26:44.286 | 2025-08-24 17:26:44 - __main__ - INFO - Provider details initialization complete.
+2025-08-24 17:26:44.286 | 2025-08-24 17:26:44 - __main__ - INFO - Initializing storage...
+2025-08-24 17:26:44.299 | 2025-08-24 17:26:44 - storage.database_storage - INFO - Database initialized successfully.
+2025-08-24 17:26:44.299 | 2025-08-24 17:26:44 - storage.database_storage - INFO - Database initialized successfully.
+2025-08-24 17:26:44.300 | 2025-08-24 17:26:44 - __main__ - INFO - Storage initialization complete.
+2025-08-24 17:26:44.301 | 2025-08-24 17:26:44 - __main__ - INFO - Running startup failsafe: resetting command scopes for all known chats...
+2025-08-24 17:26:44.300 | 2025-08-24 17:26:44 - __main__ - INFO - Storage initialization complete.
+2025-08-24 17:26:44.301 | 2025-08-24 17:26:44 - __main__ - INFO - Running startup failsafe: resetting command scopes for all known chats...
+2025-08-24 17:26:44.771 | 2025-08-24 17:26:44 - bot.menu_setup - INFO - Successfully set bot command list for chat 0.
+2025-08-24 17:26:44.771 | 2025-08-24 17:26:44 - __main__ - INFO - Completed command scope reset for 1 chats.
+2025-08-24 17:26:44.771 | 2025-08-24 17:26:44 - __main__ - INFO - Performing startup checks for AI services...
+2025-08-24 17:26:44.771 | 2025-08-24 17:26:44 - bot.menu_setup - INFO - Successfully set bot command list for chat 0.
+2025-08-24 17:26:44.771 | 2025-08-24 17:26:44 - __main__ - INFO - Completed command scope reset for 1 chats.
+2025-08-24 17:26:44.771 | 2025-08-24 17:26:44 - __main__ - INFO - Performing startup checks for AI services...
+2025-08-24 17:26:44.779 | 2025-08-24 17:26:44 - services.gemini_service - INFO - Gemini connection successful (checked with Key Index: 0).
+2025-08-24 17:26:44.779 | 2025-08-24 17:26:44 - services.gemini_service - INFO - Gemini connection successful (checked with Key Index: 0).
+2025-08-24 17:26:44.855 | 2025-08-24 17:26:44 - services.ollama_service - INFO - Ollama connection successful.
+2025-08-24 17:26:44.855 | 2025-08-24 17:26:44 - services.ollama_service - INFO - Ollama connection successful.
+2025-08-24 17:26:45.064 | 2025-08-24 17:26:45 - services.openrouter_service - INFO - OpenRouter connection check successful (fetched models).
+2025-08-24 17:26:45.064 | 2025-08-24 17:26:45 - services.openrouter_service - INFO - OpenRouter connection check successful (fetched models).
+2025-08-24 17:26:45.064 | 2025-08-24 17:26:45 - __main__ - INFO - Ollama connection check successful.
+2025-08-24 17:26:45.064 | 2025-08-24 17:26:45 - __main__ - INFO - Gemini connection check successful.
+2025-08-24 17:26:45.065 | 2025-08-24 17:26:45 - __main__ - INFO - OpenRouter connection check successful.
+2025-08-24 17:26:45.064 | 2025-08-24 17:26:45 - __main__ - INFO - Ollama connection check successful.
+2025-08-24 17:26:45.064 | 2025-08-24 17:26:45 - __main__ - INFO - Gemini connection check successful.
+2025-08-24 17:26:45.065 | 2025-08-24 17:26:45 - __main__ - INFO - OpenRouter connection check successful.
+2025-08-24 17:26:46.161 | 2025-08-24 17:26:46 - bot.menu_setup - INFO - Successfully set bot command list and menu button for the default scope.
+2025-08-24 17:26:46.161 | 2025-08-24 17:26:46 - bot.menu_setup - INFO - Successfully set bot command list and menu button for the default scope.
+2025-08-24 17:26:46.439 | 2025-08-24 17:26:46 - __main__ - INFO - Bot initialized: Username='SmsFowardingBot', Token='64687...D5E4'
+2025-08-24 17:26:46.439 | 2025-08-24 17:26:46 - __main__ - INFO - Bot initialized: Username='SmsFowardingBot', Token='64687...D5E4'
+2025-08-24 17:26:46.711 | 2025-08-24 17:26:46 - apscheduler.scheduler - INFO - Scheduler started
+2025-08-24 17:26:46.711 | 2025-08-24 17:26:46 - telegram.ext.Application - INFO - Application started
+2025-08-24 17:26:46.711 | 2025-08-24 17:26:46 - apscheduler.scheduler - INFO - Scheduler started
+2025-08-24 17:26:46.711 | 2025-08-24 17:26:46 - telegram.ext.Application - INFO - Application started
+2025-08-24 17:26:47.513 | 2025-08-24 17:26:47 - bot.handlers.chat - INFO - (Chat 0) Message from User 0: 'How the weather in Taipei now?...'
+2025-08-24 17:26:47.513 | 2025-08-24 17:26:47 - bot.handlers.chat - INFO - (Chat 0) Message from User 0: 'How the weather in Taipei now?...'
+2025-08-24 17:26:50.053 | 2025-08-24 17:26:50 - bot.handlers.chat - INFO - (Chat 0) Using service: module, Model: moonshotai/kimi-k2:free
+2025-08-24 17:26:50.053 | 2025-08-24 17:26:50 - bot.handlers.chat - INFO - (Chat 0) Using service: module, Model: moonshotai/kimi-k2:free
+2025-08-24 17:26:50.548 | 2025-08-24 17:26:50 - bot.handlers.chat - INFO - (Chat 0) Starting LLM generation for thread default...
+2025-08-24 17:26:50.548 | 2025-08-24 17:26:50 - bot.handlers.chat - INFO - (Chat 0) Starting LLM generation for thread default...
+2025-08-24 17:26:55.459 | 2025-08-24 17:26:55 - bot.handlers.chat - INFO - (Chat 0) LLM generation complete. Length: 505
+2025-08-24 17:26:55.459 | 2025-08-24 17:26:55 - bot.handlers.chat - INFO - (Chat 0) LLM generation complete. Length: 505
+2025-08-24 17:26:55.468 | 2025-08-24 17:26:55 - bot.handlers.chat - INFO - (Chat 0) Auto-search disabled. Removing search tag and providing fallback answer.
+2025-08-24 17:26:55.468 | 2025-08-24 17:26:55 - bot.handlers.chat - INFO - (Chat 0) Auto-search disabled. Removing search tag and providing fallback answer.
+2025-08-24 17:26:55.963 | 2025-08-24 17:26:55 - bot.handlers.chat - INFO - (Chat 0) History updated to 10 entries.
+2025-08-24 17:26:55.963 | 2025-08-24 17:26:55 - bot.handlers.chat - INFO - (Chat 0) History updated to 10 entries.
+2025-08-24 17:32:01.111 | 2025-08-24 17:32:01 - telegram.ext.Application - INFO - Application is stopping. This might take a moment.
+2025-08-24 17:32:01.111 | 2025-08-24 17:32:01 - telegram.ext.Application - INFO - Application is stopping. This might take a moment.
+2025-08-24 17:32:01.112 | 2025-08-24 17:32:01 - apscheduler.scheduler - INFO - Scheduler has been shut down
+2025-08-24 17:32:01.112 | 2025-08-24 17:32:01 - apscheduler.scheduler - INFO - Scheduler has been shut down
+2025-08-24 17:32:01.123 | 2025-08-24 17:32:01 - telegram.ext.Application - INFO - Application.stop() complete
+2025-08-24 17:32:01.123 | 2025-08-24 17:32:01 - telegram.ext.Application - INFO - Application.stop() complete
+2025-08-24 17:32:01.126 | 2025-08-24 17:32:01 - __main__ - INFO - Bot stopped normally.
+2025-08-24 17:32:01.126 | 2025-08-24 17:32:01 - __main__ - INFO - Bot stopped normally.
+2025-08-24 17:32:02.113 | Error response from daemon: can not get logs from container which is dead or marked for removal
+2025-08-24 17:32:02.122 | Error response from daemon: can not get logs from container which is dead or marked for removal
+2025-08-24 17:32:05.225 | 2025-08-24 17:32:05 - config - INFO - Configuration loaded:
+2025-08-24 17:32:05.225 | 2025-08-24 17:32:05 - config - INFO -   DEFAULT_PROVIDER: ollama
+2025-08-24 17:32:05.225 | 2025-08-24 17:32:05 - config - INFO -   DEFAULT_OLLAMA_MODEL: qwq
+2025-08-24 17:32:05.225 | 2025-08-24 17:32:05 - config - INFO -   DEFAULT_GEMINI_MODEL: gemini-1.5-pro-latest
+2025-08-24 17:32:05.225 | 2025-08-24 17:32:05 - config - INFO -   DEFAULT_OPENROUTER_MODEL: deepseek/deepseek-chat-v3-0324:free
+2025-08-24 17:32:05.226 | 2025-08-24 17:32:05 - config - INFO -   Tavily API Key Loaded: Yes
+2025-08-24 17:32:05.226 | 2025-08-24 17:32:05 - config - INFO -   GEMINI_ASK_ALL_MODELS: ['gemini-1.5-pro-latest', 'gemini-1.5-flash-latest']
+2025-08-24 17:32:05.226 | 2025-08-24 17:32:05 - config - INFO -   OPENROUTER_ALLOWED_MODELS: ['llama-2-70b', 'mistral-7b', 'stability-ai/stablelm-tuned-alpha-7b']
+2025-08-24 17:32:05.226 | 2025-08-24 17:32:05 - config - INFO -   OPENROUTER_HTTP_REFERER: YOUR_APP_URL_OR_NAME
+2025-08-24 17:32:05.226 | 2025-08-24 17:32:05 - config - INFO -   OLLAMA_HOST: http://192.168.0.158:11434
+2025-08-24 17:32:05.226 | 2025-08-24 17:32:05 - config - INFO -   SESSION_FILE_PATH: data/sessions.json
+2025-08-24 17:32:05.226 | 2025-08-24 17:32:05 - config - INFO -   ALLOWED_CHAT_IDS: None
+2025-08-24 17:32:05.226 | 2025-08-24 17:32:05 - config - INFO -   REQUEST_TIMEOUT_SECONDS: 180
+2025-08-24 17:32:05.226 | 2025-08-24 17:32:05 - config - INFO -   Number of Gemini Keys loaded: 3
+2025-08-24 17:32:05.226 | 2025-08-24 17:32:05 - config - INFO -   Number of Custom Providers loaded: 3
+2025-08-24 17:32:05.226 | 2025-08-24 17:32:05 - config - INFO -   CONTEXT_TOKEN_OUTPUT_BUFFER: 10000
+2025-08-24 17:32:05.225 | 2025-08-24 17:32:05 - config - INFO - Configuration loaded:
+2025-08-24 17:32:05.225 | 2025-08-24 17:32:05 - config - INFO -   DEFAULT_PROVIDER: ollama
+2025-08-24 17:32:05.225 | 2025-08-24 17:32:05 - config - INFO -   DEFAULT_OLLAMA_MODEL: qwq
+2025-08-24 17:32:05.225 | 2025-08-24 17:32:05 - config - INFO -   DEFAULT_GEMINI_MODEL: gemini-1.5-pro-latest
+2025-08-24 17:32:05.225 | 2025-08-24 17:32:05 - config - INFO -   DEFAULT_OPENROUTER_MODEL: deepseek/deepseek-chat-v3-0324:free
+2025-08-24 17:32:05.226 | 2025-08-24 17:32:05 - config - INFO -   Tavily API Key Loaded: Yes
+2025-08-24 17:32:05.226 | 2025-08-24 17:32:05 - config - INFO -   GEMINI_ASK_ALL_MODELS: ['gemini-1.5-pro-latest', 'gemini-1.5-flash-latest']
+2025-08-24 17:32:05.226 | 2025-08-24 17:32:05 - config - INFO -   OPENROUTER_ALLOWED_MODELS: ['llama-2-70b', 'mistral-7b', 'stability-ai/stablelm-tuned-alpha-7b']
+2025-08-24 17:32:05.226 | 2025-08-24 17:32:05 - config - INFO -   OPENROUTER_HTTP_REFERER: YOUR_APP_URL_OR_NAME
+2025-08-24 17:32:05.226 | 2025-08-24 17:32:05 - config - INFO -   OLLAMA_HOST: http://192.168.0.158:11434
+2025-08-24 17:32:05.226 | 2025-08-24 17:32:05 - config - INFO -   SESSION_FILE_PATH: data/sessions.json
+2025-08-24 17:32:05.226 | 2025-08-24 17:32:05 - config - INFO -   ALLOWED_CHAT_IDS: None
+2025-08-24 17:32:05.226 | 2025-08-24 17:32:05 - config - INFO -   REQUEST_TIMEOUT_SECONDS: 180
+2025-08-24 17:32:05.226 | 2025-08-24 17:32:05 - config - INFO -   Number of Gemini Keys loaded: 3
+2025-08-24 17:32:05.226 | 2025-08-24 17:32:05 - config - INFO -   Number of Custom Providers loaded: 3
+2025-08-24 17:32:05.226 | 2025-08-24 17:32:05 - config - INFO -   CONTEXT_TOKEN_OUTPUT_BUFFER: 10000
+2025-08-24 17:32:05.449 | 2025-08-24 17:32:05 - services.ollama_service - INFO - Ollama client initialized for host: http://192.168.0.158:11434
+2025-08-24 17:32:05.449 | 2025-08-24 17:32:05 - services.ollama_service - INFO - Ollama client initialized for host: http://192.168.0.158:11434
+2025-08-24 17:32:06.288 | 2025-08-24 17:32:06 - storage - INFO - Initializing StorageManager with backend: database
+2025-08-24 17:32:06.288 | 2025-08-24 17:32:06 - __main__ - INFO - Starting bot initialization...
+2025-08-24 17:32:06.288 | 2025-08-24 17:32:06 - storage - INFO - Initializing StorageManager with backend: database
+2025-08-24 17:32:06.288 | 2025-08-24 17:32:06 - __main__ - INFO - Starting bot initialization...
+2025-08-24 17:32:06.303 | 2025-08-24 17:32:06 - bot.application - INFO - Telegram Application created.
+2025-08-24 17:32:06.303 | 2025-08-24 17:32:06 - bot.application - INFO - Telegram Application created.
+2025-08-24 17:32:06.313 | /app/bot/handlers/ask_selected_handler.py:428: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-24 17:32:06.313 |   ask_selected_conv_handler = ConversationHandler(
+2025-08-24 17:32:06.313 | /app/bot/handlers/ask_selected_handler.py:428: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-24 17:32:06.313 |   ask_selected_conv_handler = ConversationHandler(
+2025-08-24 17:32:06.315 | /app/bot/handlers/discuss_handler.py:299: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-24 17:32:06.315 |   discuss_conv_handler = ConversationHandler(
+2025-08-24 17:32:06.315 | /app/bot/handlers/discuss_handler.py:299: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-24 17:32:06.315 |   discuss_conv_handler = ConversationHandler(
+2025-08-24 17:32:06.325 | /app/bot/handlers/config_handler.py:93: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-24 17:32:06.325 |   config_conv_handler = ConversationHandler(
+2025-08-24 17:32:06.325 | 2025-08-24 17:32:06 - __main__ - INFO - Registered handlers with priority groups
+2025-08-24 17:32:06.325 | 2025-08-24 17:32:06 - __main__ - INFO - Registered global error handler.
+2025-08-24 17:32:06.325 | 2025-08-24 17:32:06 - __main__ - INFO - Starting bot polling...
+2025-08-24 17:32:06.325 | /app/bot/handlers/config_handler.py:93: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-24 17:32:06.325 |   config_conv_handler = ConversationHandler(
+2025-08-24 17:32:06.325 | 2025-08-24 17:32:06 - __main__ - INFO - Registered handlers with priority groups
+2025-08-24 17:32:06.325 | 2025-08-24 17:32:06 - __main__ - INFO - Registered global error handler.
+2025-08-24 17:32:06.325 | 2025-08-24 17:32:06 - __main__ - INFO - Starting bot polling...
+2025-08-24 17:32:07.183 | 2025-08-24 17:32:07 - __main__ - INFO - Initializing provider details...
+2025-08-24 17:32:07.183 | 2025-08-24 17:32:07 - __main__ - INFO - Initializing provider details...
+2025-08-24 17:32:07.189 | 2025-08-24 17:32:07 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'groq' with base URL 'https://api.groq.com/openai/v1'
+2025-08-24 17:32:07.189 | 2025-08-24 17:32:07 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'groq' with base URL 'https://api.groq.com/openai/v1'
+2025-08-24 17:32:07.195 | 2025-08-24 17:32:07 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'requesty' with base URL 'https://router.requesty.ai/v1'
+2025-08-24 17:32:07.195 | 2025-08-24 17:32:07 - services.openai_compatible_service - WARNING - Allowed models not configured for provider 'nvidia'. Using default empty list.
+2025-08-24 17:32:07.195 | 2025-08-24 17:32:07 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'requesty' with base URL 'https://router.requesty.ai/v1'
+2025-08-24 17:32:07.195 | 2025-08-24 17:32:07 - services.openai_compatible_service - WARNING - Allowed models not configured for provider 'nvidia'. Using default empty list.
+2025-08-24 17:32:07.201 | 2025-08-24 17:32:07 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'nvidia' with base URL 'https://integrate.api.nvidia.com/v1'
+2025-08-24 17:32:07.201 | 2025-08-24 17:32:07 - bot.providers - INFO - Initialized provider details for: ['ollama', 'gemini', 'openrouter', 'groq', 'requesty', 'nvidia']
+2025-08-24 17:32:07.201 | 2025-08-24 17:32:07 - __main__ - INFO - Provider details initialization complete.
+2025-08-24 17:32:07.201 | 2025-08-24 17:32:07 - __main__ - INFO - Initializing storage...
+2025-08-24 17:32:07.201 | 2025-08-24 17:32:07 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'nvidia' with base URL 'https://integrate.api.nvidia.com/v1'
+2025-08-24 17:32:07.201 | 2025-08-24 17:32:07 - bot.providers - INFO - Initialized provider details for: ['ollama', 'gemini', 'openrouter', 'groq', 'requesty', 'nvidia']
+2025-08-24 17:32:07.201 | 2025-08-24 17:32:07 - __main__ - INFO - Provider details initialization complete.
+2025-08-24 17:32:07.201 | 2025-08-24 17:32:07 - __main__ - INFO - Initializing storage...
+2025-08-24 17:32:07.216 | 2025-08-24 17:32:07 - storage.database_storage - INFO - Database initialized successfully.
+2025-08-24 17:32:07.216 | 2025-08-24 17:32:07 - storage.database_storage - INFO - Database initialized successfully.
+2025-08-24 17:32:07.217 | 2025-08-24 17:32:07 - __main__ - INFO - Storage initialization complete.
+2025-08-24 17:32:07.217 | 2025-08-24 17:32:07 - __main__ - INFO - Running startup failsafe: resetting command scopes for all known chats...
+2025-08-24 17:32:07.217 | 2025-08-24 17:32:07 - __main__ - INFO - Storage initialization complete.
+2025-08-24 17:32:07.217 | 2025-08-24 17:32:07 - __main__ - INFO - Running startup failsafe: resetting command scopes for all known chats...
+2025-08-24 17:32:07.696 | 2025-08-24 17:32:07 - bot.menu_setup - INFO - Successfully set bot command list for chat 0.
+2025-08-24 17:32:07.696 | 2025-08-24 17:32:07 - __main__ - INFO - Completed command scope reset for 1 chats.
+2025-08-24 17:32:07.696 | 2025-08-24 17:32:07 - __main__ - INFO - Performing startup checks for AI services...
+2025-08-24 17:32:07.696 | 2025-08-24 17:32:07 - bot.menu_setup - INFO - Successfully set bot command list for chat 0.
+2025-08-24 17:32:07.696 | 2025-08-24 17:32:07 - __main__ - INFO - Completed command scope reset for 1 chats.
+2025-08-24 17:32:07.696 | 2025-08-24 17:32:07 - __main__ - INFO - Performing startup checks for AI services...
+2025-08-24 17:32:07.707 | 2025-08-24 17:32:07 - services.gemini_service - INFO - Gemini connection successful (checked with Key Index: 0).
+2025-08-24 17:32:07.707 | 2025-08-24 17:32:07 - services.gemini_service - INFO - Gemini connection successful (checked with Key Index: 0).
+2025-08-24 17:32:07.724 | 2025-08-24 17:32:07 - services.ollama_service - INFO - Ollama connection successful.
+2025-08-24 17:32:07.724 | 2025-08-24 17:32:07 - services.ollama_service - INFO - Ollama connection successful.
+2025-08-24 17:32:08.397 | 2025-08-24 17:32:08 - services.openrouter_service - INFO - OpenRouter connection check successful (fetched models).
+2025-08-24 17:32:08.397 | 2025-08-24 17:32:08 - __main__ - INFO - Ollama connection check successful.
+2025-08-24 17:32:08.397 | 2025-08-24 17:32:08 - __main__ - INFO - Gemini connection check successful.
+2025-08-24 17:32:08.397 | 2025-08-24 17:32:08 - __main__ - INFO - OpenRouter connection check successful.
+2025-08-24 17:32:08.397 | 2025-08-24 17:32:08 - services.openrouter_service - INFO - OpenRouter connection check successful (fetched models).
+2025-08-24 17:32:08.397 | 2025-08-24 17:32:08 - __main__ - INFO - Ollama connection check successful.
+2025-08-24 17:32:08.397 | 2025-08-24 17:32:08 - __main__ - INFO - Gemini connection check successful.
+2025-08-24 17:32:08.397 | 2025-08-24 17:32:08 - __main__ - INFO - OpenRouter connection check successful.
+2025-08-24 17:32:09.302 | 2025-08-24 17:32:09 - bot.menu_setup - INFO - Successfully set bot command list and menu button for the default scope.
+2025-08-24 17:32:09.302 | 2025-08-24 17:32:09 - bot.menu_setup - INFO - Successfully set bot command list and menu button for the default scope.
+2025-08-24 17:32:09.572 | 2025-08-24 17:32:09 - __main__ - INFO - Bot initialized: Username='SmsFowardingBot', Token='64687...D5E4'
+2025-08-24 17:32:09.572 | 2025-08-24 17:32:09 - __main__ - INFO - Bot initialized: Username='SmsFowardingBot', Token='64687...D5E4'
+2025-08-24 17:32:09.842 | 2025-08-24 17:32:09 - apscheduler.scheduler - INFO - Scheduler started
+2025-08-24 17:32:09.842 | 2025-08-24 17:32:09 - telegram.ext.Application - INFO - Application started
+2025-08-24 17:32:09.842 | 2025-08-24 17:32:09 - apscheduler.scheduler - INFO - Scheduler started
+2025-08-24 17:32:09.842 | 2025-08-24 17:32:09 - telegram.ext.Application - INFO - Application started
+2025-08-24 17:33:21.252 | 2025-08-24 17:33:21 - bot.handlers.discuss_panel_handler - INFO - Set panel-specific commands for chat 0
+2025-08-24 17:33:21.252 | 2025-08-24 17:33:21 - bot.handlers.discuss_panel_handler - INFO - Set panel-specific commands for chat 0
+2025-08-24 17:33:31.400 | 2025-08-24 17:33:31 - bot.handlers.discuss_panel_handler - INFO - Successfully parsed orchestrator's plan. Search required: True, Tasks: 3
+2025-08-24 17:33:31.400 | 2025-08-24 17:33:31 - bot.handlers.discuss_panel_handler - INFO - Successfully parsed orchestrator's plan. Search required: True, Tasks: 3
+2025-08-24 17:33:31.410 | 2025-08-24 17:33:31 - bot.handlers.discuss_panel_handler - INFO - Auto-search disabled for panel discussion. Skipping search for: 'mainstream clock signal generation methods for 3nm or smaller semiconductor CPU cores'
+2025-08-24 17:33:31.410 | 2025-08-24 17:33:31 - bot.handlers.discuss_panel_handler - INFO - Auto-search disabled for panel discussion. Skipping search for: 'mainstream clock signal generation methods for 3nm or smaller semiconductor CPU cores'
+2025-08-24 17:33:32.442 | 2025-08-24 17:33:32 - bot.handlers.discuss_panel_handler - INFO - Informed Proposer about disabled search.
+2025-08-24 17:33:32.442 | 2025-08-24 17:33:32 - bot.handlers.discuss_panel_handler - INFO - Informed Proposer about disabled search.
+2025-08-24 17:36:37.164 | 2025-08-24 17:36:37 - bot.handlers.discuss_panel_handler - INFO - Invoking Refiner agent...
+2025-08-24 17:36:37.164 | 2025-08-24 17:36:37 - bot.handlers.discuss_panel_handler - INFO - Invoking Refiner agent...
+2025-08-24 17:36:54.447 | 2025-08-24 17:36:54 - bot.handlers.discuss_panel_handler - INFO - Refinement task completed successfully.
+2025-08-24 17:36:54.447 | 2025-08-24 17:36:54 - bot.handlers.discuss_panel_handler - INFO - Refinement task completed successfully.
+2025-08-24 18:23:41.101 | 2025-08-24 18:23:41 - telegram.ext.Application - INFO - Application is stopping. This might take a moment.
+2025-08-24 18:23:41.101 | 2025-08-24 18:23:41 - telegram.ext.Application - INFO - Application is stopping. This might take a moment.
+2025-08-24 18:23:41.102 | 2025-08-24 18:23:41 - apscheduler.scheduler - INFO - Scheduler has been shut down
+2025-08-24 18:23:41.102 | 2025-08-24 18:23:41 - apscheduler.scheduler - INFO - Scheduler has been shut down
+2025-08-24 18:23:41.112 | 2025-08-24 18:23:41 - telegram.ext.Application - INFO - Application.stop() complete
+2025-08-24 18:23:41.112 | 2025-08-24 18:23:41 - telegram.ext.Application - INFO - Application.stop() complete
+2025-08-24 18:23:41.114 | 2025-08-24 18:23:41 - __main__ - INFO - Bot stopped normally.
+2025-08-24 18:23:41.114 | 2025-08-24 18:23:41 - __main__ - INFO - Bot stopped normally.
+2025-08-24 18:23:41.906 | Error response from daemon: can not get logs from container which is dead or marked for removal
+2025-08-24 18:23:41.916 | Error response from daemon: can not get logs from container which is dead or marked for removal
+2025-08-24 18:23:43.257 | 2025-08-24 18:23:43 - config - INFO - Configuration loaded:
+2025-08-24 18:23:43.257 | 2025-08-24 18:23:43 - config - INFO -   DEFAULT_PROVIDER: ollama
+2025-08-24 18:23:43.257 | 2025-08-24 18:23:43 - config - INFO -   DEFAULT_OLLAMA_MODEL: qwq
+2025-08-24 18:23:43.257 | 2025-08-24 18:23:43 - config - INFO -   DEFAULT_GEMINI_MODEL: gemini-1.5-pro-latest
+2025-08-24 18:23:43.257 | 2025-08-24 18:23:43 - config - INFO -   DEFAULT_OPENROUTER_MODEL: deepseek/deepseek-chat-v3-0324:free
+2025-08-24 18:23:43.257 | 2025-08-24 18:23:43 - config - INFO -   Tavily API Key Loaded: Yes
+2025-08-24 18:23:43.258 | 2025-08-24 18:23:43 - config - INFO -   GEMINI_ASK_ALL_MODELS: ['gemini-1.5-pro-latest', 'gemini-1.5-flash-latest']
+2025-08-24 18:23:43.258 | 2025-08-24 18:23:43 - config - INFO -   OPENROUTER_ALLOWED_MODELS: ['llama-2-70b', 'mistral-7b', 'stability-ai/stablelm-tuned-alpha-7b']
+2025-08-24 18:23:43.258 | 2025-08-24 18:23:43 - config - INFO -   OPENROUTER_HTTP_REFERER: YOUR_APP_URL_OR_NAME
+2025-08-24 18:23:43.258 | 2025-08-24 18:23:43 - config - INFO -   OLLAMA_HOST: http://192.168.0.158:11434
+2025-08-24 18:23:43.258 | 2025-08-24 18:23:43 - config - INFO -   SESSION_FILE_PATH: data/sessions.json
+2025-08-24 18:23:43.258 | 2025-08-24 18:23:43 - config - INFO -   ALLOWED_CHAT_IDS: None
+2025-08-24 18:23:43.257 | 2025-08-24 18:23:43 - config - INFO - Configuration loaded:
+2025-08-24 18:23:43.257 | 2025-08-24 18:23:43 - config - INFO -   DEFAULT_PROVIDER: ollama
+2025-08-24 18:23:43.257 | 2025-08-24 18:23:43 - config - INFO -   DEFAULT_OLLAMA_MODEL: qwq
+2025-08-24 18:23:43.257 | 2025-08-24 18:23:43 - config - INFO -   DEFAULT_GEMINI_MODEL: gemini-1.5-pro-latest
+2025-08-24 18:23:43.257 | 2025-08-24 18:23:43 - config - INFO -   DEFAULT_OPENROUTER_MODEL: deepseek/deepseek-chat-v3-0324:free
+2025-08-24 18:23:43.257 | 2025-08-24 18:23:43 - config - INFO -   Tavily API Key Loaded: Yes
+2025-08-24 18:23:43.258 | 2025-08-24 18:23:43 - config - INFO -   GEMINI_ASK_ALL_MODELS: ['gemini-1.5-pro-latest', 'gemini-1.5-flash-latest']
+2025-08-24 18:23:43.258 | 2025-08-24 18:23:43 - config - INFO -   OPENROUTER_ALLOWED_MODELS: ['llama-2-70b', 'mistral-7b', 'stability-ai/stablelm-tuned-alpha-7b']
+2025-08-24 18:23:43.258 | 2025-08-24 18:23:43 - config - INFO -   OPENROUTER_HTTP_REFERER: YOUR_APP_URL_OR_NAME
+2025-08-24 18:23:43.258 | 2025-08-24 18:23:43 - config - INFO -   OLLAMA_HOST: http://192.168.0.158:11434
+2025-08-24 18:23:43.258 | 2025-08-24 18:23:43 - config - INFO -   SESSION_FILE_PATH: data/sessions.json
+2025-08-24 18:23:43.258 | 2025-08-24 18:23:43 - config - INFO -   ALLOWED_CHAT_IDS: None
+2025-08-24 18:23:43.258 | 2025-08-24 18:23:43 - config - INFO -   REQUEST_TIMEOUT_SECONDS: 180
+2025-08-24 18:23:43.258 | 2025-08-24 18:23:43 - config - INFO -   REQUEST_TIMEOUT_SECONDS: 180
+2025-08-24 18:23:43.259 | 2025-08-24 18:23:43 - config - INFO -   Number of Gemini Keys loaded: 3
+2025-08-24 18:23:43.260 | 2025-08-24 18:23:43 - config - INFO -   Number of Custom Providers loaded: 3
+2025-08-24 18:23:43.260 | 2025-08-24 18:23:43 - config - INFO -   CONTEXT_TOKEN_OUTPUT_BUFFER: 10000
+2025-08-24 18:23:43.259 | 2025-08-24 18:23:43 - config - INFO -   Number of Gemini Keys loaded: 3
+2025-08-24 18:23:43.260 | 2025-08-24 18:23:43 - config - INFO -   Number of Custom Providers loaded: 3
+2025-08-24 18:23:43.260 | 2025-08-24 18:23:43 - config - INFO -   CONTEXT_TOKEN_OUTPUT_BUFFER: 10000
+2025-08-24 18:23:43.395 | 2025-08-24 18:23:43 - services.ollama_service - INFO - Ollama client initialized for host: http://192.168.0.158:11434
+2025-08-24 18:23:43.395 | 2025-08-24 18:23:43 - services.ollama_service - INFO - Ollama client initialized for host: http://192.168.0.158:11434
+2025-08-24 18:23:43.923 | 2025-08-24 18:23:43 - storage - INFO - Initializing StorageManager with backend: database
+2025-08-24 18:23:43.923 | 2025-08-24 18:23:43 - __main__ - INFO - Starting bot initialization...
+2025-08-24 18:23:43.923 | 2025-08-24 18:23:43 - storage - INFO - Initializing StorageManager with backend: database
+2025-08-24 18:23:43.923 | 2025-08-24 18:23:43 - __main__ - INFO - Starting bot initialization...
+2025-08-24 18:23:43.936 | 2025-08-24 18:23:43 - bot.application - INFO - Telegram Application created.
+2025-08-24 18:23:43.936 | 2025-08-24 18:23:43 - bot.application - INFO - Telegram Application created.
+2025-08-24 18:23:43.945 | /app/bot/handlers/ask_selected_handler.py:428: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-24 18:23:43.945 |   ask_selected_conv_handler = ConversationHandler(
+2025-08-24 18:23:43.945 | /app/bot/handlers/ask_selected_handler.py:428: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-24 18:23:43.945 |   ask_selected_conv_handler = ConversationHandler(
+2025-08-24 18:23:43.948 | /app/bot/handlers/discuss_handler.py:299: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-24 18:23:43.948 |   discuss_conv_handler = ConversationHandler(
+2025-08-24 18:23:43.948 | /app/bot/handlers/discuss_handler.py:299: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-24 18:23:43.948 |   discuss_conv_handler = ConversationHandler(
+2025-08-24 18:23:43.955 | /app/bot/handlers/config_handler.py:93: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-24 18:23:43.955 |   config_conv_handler = ConversationHandler(
+2025-08-24 18:23:43.955 | 2025-08-24 18:23:43 - __main__ - INFO - Registered handlers with priority groups
+2025-08-24 18:23:43.955 | 2025-08-24 18:23:43 - __main__ - INFO - Registered global error handler.
+2025-08-24 18:23:43.955 | 2025-08-24 18:23:43 - __main__ - INFO - Starting bot polling...
+2025-08-24 18:23:43.955 | /app/bot/handlers/config_handler.py:93: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+2025-08-24 18:23:43.955 |   config_conv_handler = ConversationHandler(
+2025-08-24 18:23:43.955 | 2025-08-24 18:23:43 - __main__ - INFO - Registered handlers with priority groups
+2025-08-24 18:23:43.955 | 2025-08-24 18:23:43 - __main__ - INFO - Registered global error handler.
+2025-08-24 18:23:43.955 | 2025-08-24 18:23:43 - __main__ - INFO - Starting bot polling...
+2025-08-24 18:23:44.803 | 2025-08-24 18:23:44 - __main__ - INFO - Initializing provider details...
+2025-08-24 18:23:44.803 | 2025-08-24 18:23:44 - __main__ - INFO - Initializing provider details...
+2025-08-24 18:23:44.808 | 2025-08-24 18:23:44 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'groq' with base URL 'https://api.groq.com/openai/v1'
+2025-08-24 18:23:44.808 | 2025-08-24 18:23:44 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'groq' with base URL 'https://api.groq.com/openai/v1'
+2025-08-24 18:23:44.814 | 2025-08-24 18:23:44 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'requesty' with base URL 'https://router.requesty.ai/v1'
+2025-08-24 18:23:44.814 | 2025-08-24 18:23:44 - services.openai_compatible_service - WARNING - Allowed models not configured for provider 'nvidia'. Using default empty list.
+2025-08-24 18:23:44.814 | 2025-08-24 18:23:44 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'requesty' with base URL 'https://router.requesty.ai/v1'
+2025-08-24 18:23:44.814 | 2025-08-24 18:23:44 - services.openai_compatible_service - WARNING - Allowed models not configured for provider 'nvidia'. Using default empty list.
+2025-08-24 18:23:44.820 | 2025-08-24 18:23:44 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'nvidia' with base URL 'https://integrate.api.nvidia.com/v1'
+2025-08-24 18:23:44.820 | 2025-08-24 18:23:44 - bot.providers - INFO - Initialized provider details for: ['ollama', 'gemini', 'openrouter', 'groq', 'requesty', 'nvidia']
+2025-08-24 18:23:44.820 | 2025-08-24 18:23:44 - __main__ - INFO - Provider details initialization complete.
+2025-08-24 18:23:44.820 | 2025-08-24 18:23:44 - __main__ - INFO - Initializing storage...
+2025-08-24 18:23:44.820 | 2025-08-24 18:23:44 - services.openai_compatible_service - INFO - OpenAICompatibleService initialized for provider 'nvidia' with base URL 'https://integrate.api.nvidia.com/v1'
+2025-08-24 18:23:44.820 | 2025-08-24 18:23:44 - bot.providers - INFO - Initialized provider details for: ['ollama', 'gemini', 'openrouter', 'groq', 'requesty', 'nvidia']
+2025-08-24 18:23:44.820 | 2025-08-24 18:23:44 - __main__ - INFO - Provider details initialization complete.
+2025-08-24 18:23:44.820 | 2025-08-24 18:23:44 - __main__ - INFO - Initializing storage...
+2025-08-24 18:23:44.834 | 2025-08-24 18:23:44 - storage.database_storage - INFO - Database initialized successfully.
+2025-08-24 18:23:44.834 | 2025-08-24 18:23:44 - storage.database_storage - INFO - Database initialized successfully.
+2025-08-24 18:23:44.835 | 2025-08-24 18:23:44 - __main__ - INFO - Storage initialization complete.
+2025-08-24 18:23:44.835 | 2025-08-24 18:23:44 - __main__ - INFO - Running startup failsafe: resetting command scopes for all known chats...
+2025-08-24 18:23:44.835 | 2025-08-24 18:23:44 - __main__ - INFO - Storage initialization complete.
+2025-08-24 18:23:44.835 | 2025-08-24 18:23:44 - __main__ - INFO - Running startup failsafe: resetting command scopes for all known chats...
+2025-08-24 18:23:45.295 | 2025-08-24 18:23:45 - bot.menu_setup - INFO - Successfully set bot command list for chat 0.
+2025-08-24 18:23:45.295 | 2025-08-24 18:23:45 - __main__ - INFO - Completed command scope reset for 1 chats.
+2025-08-24 18:23:45.295 | 2025-08-24 18:23:45 - __main__ - INFO - Performing startup checks for AI services...
+2025-08-24 18:23:45.295 | 2025-08-24 18:23:45 - bot.menu_setup - INFO - Successfully set bot command list for chat 0.
+2025-08-24 18:23:45.295 | 2025-08-24 18:23:45 - __main__ - INFO - Completed command scope reset for 1 chats.
+2025-08-24 18:23:45.295 | 2025-08-24 18:23:45 - __main__ - INFO - Performing startup checks for AI services...
+2025-08-24 18:23:45.303 | 2025-08-24 18:23:45 - services.gemini_service - INFO - Gemini connection successful (checked with Key Index: 0).
+2025-08-24 18:23:45.303 | 2025-08-24 18:23:45 - services.gemini_service - INFO - Gemini connection successful (checked with Key Index: 0).
+2025-08-24 18:23:45.330 | 2025-08-24 18:23:45 - services.ollama_service - INFO - Ollama connection successful.
+2025-08-24 18:23:45.330 | 2025-08-24 18:23:45 - services.ollama_service - INFO - Ollama connection successful.
+2025-08-24 18:23:45.575 | 2025-08-24 18:23:45 - services.openrouter_service - INFO - OpenRouter connection check successful (fetched models).
+2025-08-24 18:23:45.575 | 2025-08-24 18:23:45 - __main__ - INFO - Ollama connection check successful.
+2025-08-24 18:23:45.575 | 2025-08-24 18:23:45 - __main__ - INFO - Gemini connection check successful.
+2025-08-24 18:23:45.575 | 2025-08-24 18:23:45 - __main__ - INFO - OpenRouter connection check successful.
+2025-08-24 18:23:45.575 | 2025-08-24 18:23:45 - services.openrouter_service - INFO - OpenRouter connection check successful (fetched models).
+2025-08-24 18:23:45.575 | 2025-08-24 18:23:45 - __main__ - INFO - Ollama connection check successful.
+2025-08-24 18:23:45.575 | 2025-08-24 18:23:45 - __main__ - INFO - Gemini connection check successful.
+2025-08-24 18:23:45.575 | 2025-08-24 18:23:45 - __main__ - INFO - OpenRouter connection check successful.
+2025-08-24 18:23:46.501 | 2025-08-24 18:23:46 - bot.menu_setup - INFO - Successfully set bot command list and menu button for the default scope.
+2025-08-24 18:23:46.501 | 2025-08-24 18:23:46 - bot.menu_setup - INFO - Successfully set bot command list and menu button for the default scope.
+2025-08-24 18:23:46.782 | 2025-08-24 18:23:46 - __main__ - INFO - Bot initialized: Username='SmsFowardingBot', Token='64687...D5E4'
+2025-08-24 18:23:46.782 | 2025-08-24 18:23:46 - __main__ - INFO - Bot initialized: Username='SmsFowardingBot', Token='64687...D5E4'
+2025-08-24 18:23:47.050 | 2025-08-24 18:23:47 - apscheduler.scheduler - INFO - Scheduler started
+2025-08-24 18:23:47.050 | 2025-08-24 18:23:47 - telegram.ext.Application - INFO - Application started
+2025-08-24 18:23:47.050 | 2025-08-24 18:23:47 - apscheduler.scheduler - INFO - Scheduler started
+2025-08-24 18:23:47.050 | 2025-08-24 18:23:47 - telegram.ext.Application - INFO - Application started
+2025-08-24 18:24:18.605 | 2025-08-24 18:24:18 - bot.handlers.discuss_panel_handler - INFO - Set panel-specific commands for chat 0
+2025-08-24 18:24:18.605 | 2025-08-24 18:24:18 - bot.handlers.discuss_panel_handler - INFO - Set panel-specific commands for chat 0
+2025-08-24 18:24:30.720 | 2025-08-24 18:24:30 - bot.handlers.discuss_panel_handler - INFO - Successfully parsed orchestrator's plan. Search required: True, Tasks: 3
+2025-08-24 18:24:30.720 | 2025-08-24 18:24:30 - bot.handlers.discuss_panel_handler - INFO - Successfully parsed orchestrator's plan. Search required: True, Tasks: 3
+2025-08-24 18:24:34.641 | 2025-08-24 18:24:34 - bot.handlers.discuss_panel_handler - INFO - Augmented Proposer's prompt with web search results.
+2025-08-24 18:24:34.641 | 2025-08-24 18:24:34 - bot.handlers.discuss_panel_handler - INFO - Augmented Proposer's prompt with web search results.
+2025-08-24 18:26:53.915 | 2025-08-24 18:26:53 - bot.handlers.discuss_panel_handler - INFO - Invoking Refiner agent...
+2025-08-24 18:26:53.915 | 2025-08-24 18:26:53 - bot.handlers.discuss_panel_handler - INFO - Invoking Refiner agent...
+2025-08-24 18:27:03.733 | 2025-08-24 18:27:03 - bot.handlers.discuss_panel_handler - INFO - Refinement task completed successfully.
+2025-08-24 18:27:03.733 | 2025-08-24 18:27:03 - bot.handlers.discuss_panel_handler - INFO - Refinement task completed successfully.
+2025-08-24 18:28:51.002 | 2025-08-24 18:28:51 - bot.handlers.discuss_panel_handler - INFO - [0] Handling follow-up: 'You're using too much glossary. Explain it concept-wise.'
+2025-08-24 18:28:51.002 | 2025-08-24 18:28:51 - bot.handlers.discuss_panel_handler - INFO - [0] Handling follow-up: 'You're using too much glossary. Explain it concept-wise.'
+2025-08-24 18:29:01.131 | 2025-08-24 18:29:01 - bot.handlers.discuss_panel_handler - INFO - Successfully parsed orchestrator's plan. Search required: False, Tasks: 3
+2025-08-24 18:29:01.131 | 2025-08-24 18:29:01 - bot.handlers.discuss_panel_handler - INFO - Successfully parsed orchestrator's plan. Search required: False, Tasks: 3
+2025-08-24 18:30:59.779 | 2025-08-24 18:30:59 - bot.handlers.discuss_panel_handler - INFO - Invoking Refiner agent...
+2025-08-24 18:30:59.779 | 2025-08-24 18:30:59 - bot.handlers.discuss_panel_handler - INFO - Invoking Refiner agent...
+2025-08-24 18:33:04.655 | 2025-08-24 18:33:04 - bot.handlers.discuss_panel_handler - INFO - Refinement task completed successfully.
+2025-08-24 18:33:04.655 | 2025-08-24 18:33:04 - bot.handlers.discuss_panel_handler - INFO - Refinement task completed successfully.
+2025-08-24 18:50:49.978 | 2025-08-24 18:50:49 - storage.database_storage - INFO - Saved single message with role 'assistant:panel' to thread_pk 1 for chat 0
+2025-08-24 18:50:49.978 | 2025-08-24 18:50:49 - storage.database_storage - INFO - Saved single message with role 'assistant:panel' to thread_pk 1 for chat 0
+2025-08-24 18:50:51.465 | 2025-08-24 18:50:51 - bot.menu_setup - INFO - Successfully set bot command list for chat 0.
+2025-08-24 18:50:51.465 | 2025-08-24 18:50:51 - bot.handlers.discuss_panel_handler - INFO - Cleaned up panel state and reset commands for chat 0.
+2025-08-24 18:50:51.465 | 2025-08-24 18:50:51 - bot.menu_setup - INFO - Successfully set bot command list for chat 0.
+2025-08-24 18:50:51.465 | 2025-08-24 18:50:51 - bot.handlers.discuss_panel_handler - INFO - Cleaned up panel state and reset commands for chat 0.
+2025-08-24 19:01:52.062 | 2025-08-24 19:01:52 - bot.handlers.discuss_panel_handler - INFO - Set panel-specific commands for chat 0
+2025-08-24 19:01:52.062 | 2025-08-24 19:01:52 - bot.handlers.discuss_panel_handler - INFO - Set panel-specific commands for chat 0
+2025-08-24 19:02:02.269 | 2025-08-24 19:02:02 - bot.handlers.discuss_panel_handler - INFO - Successfully parsed orchestrator's plan. Search required: False, Tasks: 3
+2025-08-24 19:02:02.269 | 2025-08-24 19:02:02 - bot.handlers.discuss_panel_handler - INFO - Successfully parsed orchestrator's plan. Search required: False, Tasks: 3
+2025-08-24 19:03:52.780 | 2025-08-24 19:03:52 - bot.handlers.discuss_panel_handler - INFO - Invoking Refiner agent...
+2025-08-24 19:03:52.780 | 2025-08-24 19:03:52 - bot.handlers.discuss_panel_handler - INFO - Invoking Refiner agent...
+2025-08-24 19:04:15.409 | 2025-08-24 19:04:15 - bot.handlers.discuss_panel_handler - INFO - Refinement task completed successfully.
+2025-08-24 19:04:15.409 | 2025-08-24 19:04:15 - bot.handlers.discuss_panel_handler - INFO - Refinement task completed successfully.
+2025-08-24 19:23:32.844 | 2025-08-24 19:23:32 - storage.database_storage - INFO - Saved single message with role 'assistant:panel' to thread_pk 1 for chat 0
+2025-08-24 19:23:32.844 | 2025-08-24 19:23:32 - storage.database_storage - INFO - Saved single message with role 'assistant:panel' to thread_pk 1 for chat 0
+2025-08-24 19:23:34.329 | 2025-08-24 19:23:34 - bot.menu_setup - INFO - Successfully set bot command list for chat 0.
+2025-08-24 19:23:34.330 | 2025-08-24 19:23:34 - bot.handlers.discuss_panel_handler - INFO - Cleaned up panel state and reset commands for chat 0.
+2025-08-24 19:23:34.329 | 2025-08-24 19:23:34 - bot.menu_setup - INFO - Successfully set bot command list for chat 0.
+2025-08-24 19:23:34.330 | 2025-08-24 19:23:34 - bot.handlers.discuss_panel_handler - INFO - Cleaned up panel state and reset commands for chat 0.

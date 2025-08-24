@@ -18,16 +18,17 @@ class TaipeiTZFormatter(logging.Formatter):
             s = ct.isoformat()
         return s
 
-# Configure logging with Asia/Taipei timezone
-handler = logging.StreamHandler()
-formatter = TaipeiTZFormatter(
-    fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
-handler.setFormatter(formatter)
-root_logger = logging.getLogger()
-root_logger.setLevel(logging.INFO)
-root_logger.handlers = [handler]  # Ensure only our handler is used
+# Configure logging with Asia/Taipei timezone (only once)
+if not logging.getLogger().handlers:
+    handler = logging.StreamHandler()
+    formatter = TaipeiTZFormatter(
+        fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    handler.setFormatter(formatter)
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    root_logger.addHandler(handler)
 
 logging.getLogger("httpx").setLevel(logging.WARNING) # Reduce httpx verbosity
 logger = logging.getLogger(__name__)

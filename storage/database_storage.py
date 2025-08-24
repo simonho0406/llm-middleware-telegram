@@ -60,7 +60,7 @@ async def init_database():
             CREATE TABLE IF NOT EXISTS user_settings (
                 chat_id INTEGER NOT NULL,
                 key TEXT NOT NULL,
-                value TEXT NOT NULL,
+                value INTEGER NOT NULL,  -- Booleans stored as 0 or 1
                 PRIMARY KEY (chat_id, key),
                 FOREIGN KEY (chat_id) REFERENCES chats(chat_id) ON DELETE CASCADE
             )""")
@@ -196,16 +196,27 @@ async def get_all_chat_ids() -> List[int]:
             return [row[0] for row in rows]
 
 async def get_user_setting(chat_id: int, key: str, default: Any = None) -> Any:
-    """Retrieves a specific setting for a user."""
+    """Retrieves a setting value with proper boolean conversion"""
+    from bot.settings import USER_SETTINGS
     async with aiosqlite.connect(config.DB_PATH) as db:
         await _get_or_create_chat(db, chat_id)
         async with db.cursor() as cursor:
             await cursor.execute("SELECT value FROM user_settings WHERE chat_id = ? AND key = ?", (chat_id, key))
             row = await cursor.fetchone()
-            return row[0] if row else default
+            if row:
+                value = row[0]
+                # Convert integer to boolean for bool settings
+                if key in USER_SETTINGS and USER_SETTINGS[key]['type'] == bool:
+                    return bool(value)
+                return value
+            return default
 
 async def set_user_setting(chat_id: int, key: str, value: Any) -> None:
-    """Sets a specific setting for a user."""
+    """Stores setting value with proper boolean conversion"""
+    from bot.settings import USER_SETTINGS
+    # Convert Python bool to SQLite integer
+    if key in USER_SETTINGS and USER_SETTINGS[key]['type'] == bool:
+        value = 1 if value else 0
     async with aiosqlite.connect(config.DB_PATH) as db:
         await _get_or_create_chat(db, chat_id)
         await db.execute("INSERT OR REPLACE INTO user_settings (chat_id, key, value) VALUES (?, ?, ?)", (chat_id, key, value))

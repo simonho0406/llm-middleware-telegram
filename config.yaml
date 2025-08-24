@@ -85,7 +85,7 @@ expert_panel:
     # model: "moonshotai/kimi-k2-instruct"
     model: "nvidia/llama-3.3-nemotron-super-49b-v1.5"
     fallback_provider: "nvidia"
-    fallback_model: "moonshotai/kimi-k2-instruct"
+    fallback_model: "openai/gpt-oss-20b"
     # model: "openai/gpt-oss-120b"
     request_timeout_seconds: 600 # Add this line
 
@@ -93,10 +93,10 @@ expert_panel:
   # The keys (e.g., "Proposer", "Critic") must match the roles the orchestrator uses
   roles:
     Proposer:
-      provider: "nvidia"
+      provider: "openrouter"
       # model: "deepseek/deepseek-chat-v3-0324:free" # Or another suitable OpenRouter model
-      # model: "z-ai/glm-4.5-air:free" # Or another suitable model
-      model: "openai/gpt-oss-120b"
+      model: "z-ai/glm-4.5-air:free" # Or another suitable model
+      # model: "openai/gpt-oss-120b"
       request_timeout_seconds: 600
     Critic:
       provider: "openrouter"
@@ -104,8 +104,8 @@ expert_panel:
       # model: "qwen/qwen3-235b-a22b:free" # Or another suitable Nvidia model
       request_timeout_seconds: 600
     Refiner:
-      provider: "openrouter"
+      provider: "nvidia"
       # model: "deepseek/deepseek-r1-0528:free" # Or another suitable model
-      # model: "moonshotai/kimi-k2:free" # Or another suitable model
-      model: "qwen/qwen3-235b-a22b:free" # Or another suitable Nvidia model
+      model: "moonshotai/kimi-k2-instruct" # Or another suitable model
+      # model: "qwen/qwen3-235b-a22b:free" # Or another suitable Nvidia model
       request_timeout_seconds: 600

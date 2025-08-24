@@ -1,122 +1,104 @@
+# File: bot/handlers/config_handler.py
+# This is the canonical, correct implementation.
+
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, constants
+from telegram.error import BadRequest
 from telegram.ext import (
-    ContextTypes,
-    ConversationHandler,
     CommandHandler,
     CallbackQueryHandler,
-    MessageHandler,
-    filters
+    ConversationHandler,
+    ContextTypes,
 )
+
 from storage import storage_manager
-from bot.handlers.misc_commands import cancel_command
+from bot.settings import USER_SETTINGS
 
 logger = logging.getLogger(__name__)
 
-# Conversation states
-MAIN_MENU, = range(1)
+# --- Constants ---
+CONFIG_MENU, = range(1)
+CALLBACK_SETTING_PREFIX = "config_toggle_"
 
-# Helper function for robust boolean conversion
-def _to_bool(value: str) -> bool:
-    """Converts string to boolean using common truthy values."""
-    return value.lower() in ['true', '1', 't', 'y', 'yes']
+# --- Helper Functions ---
 
-# Setting class to encapsulate configuration properties
-class Setting:
-    def __init__(self, key, name, setting_type, default):
-        self.key = key
-        self.name = name
-        self.type = setting_type
-        self.default = str(default)
+async def build_settings_keyboard(chat_id: int) -> InlineKeyboardMarkup:
+    """Dynamically builds the settings keyboard based on the registry."""
+    buttons = []
+    for key, details in USER_SETTINGS.items():
+        current_value = await storage_manager.get_user_setting(
+            chat_id, key, details['default']
+        )
+        status_emoji = "✅" if current_value else "❌"
+        button_text = f"{status_emoji} {details['display_name']}"
+        buttons.append([
+            InlineKeyboardButton(button_text, callback_data=f"{CALLBACK_SETTING_PREFIX}{key}")
+        ])
+    buttons.append([InlineKeyboardButton("Done", callback_data="config_done")])
+    return InlineKeyboardMarkup(buttons)
 
-# Centralized list of settings
-SETTINGS = [
-    Setting("autosearch_enabled", "Auto-Search", bool, True)
-]
-
-async def _get_config_menu(chat_id: int) -> InlineKeyboardMarkup:
-    """Dynamically generates the configuration menu based on defined settings."""
-    keyboard = []
-    
-    for setting in SETTINGS:
-        # Get current setting value with proper type conversion
-        value_str = await storage_manager.get_user_setting(chat_id, setting.key, setting.default)
-        if setting.type == bool:
-            value = _to_bool(value_str)
-            status = "✅ Enabled" if value else "❌ Disabled"
-        else:
-            status = value_str
-            
-        keyboard.append([InlineKeyboardButton(f"{setting.name}: {status}", callback_data=setting.key)])
-    
-    keyboard.append([InlineKeyboardButton("Done", callback_data="done")])
-    return InlineKeyboardMarkup(keyboard)
+# --- Conversation Handlers ---
 
 async def config_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Starts the user configuration conversation."""
+    """Entry point for the /config command."""
     chat_id = update.effective_chat.id
-    reply_markup = await _get_config_menu(chat_id)
-    await update.message.reply_text("User Configuration", reply_markup=reply_markup)
-    return MAIN_MENU
+    keyboard = await build_settings_keyboard(chat_id)
+    await update.message.reply_text("User Settings:", reply_markup=keyboard, parse_mode=None)
+    return CONFIG_MENU
 
 async def handle_setting_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handles toggling of any setting."""
+    """Generic handler to toggle a boolean setting and refresh the menu in-place."""
     query = update.callback_query
     await query.answer()
-    chat_id = query.effective_chat.id
-    setting_key = query.data
+    chat_id = update.effective_chat.id
+    key = query.data[len(CALLBACK_SETTING_PREFIX):]
+    
+    if key not in USER_SETTINGS:
+        logger.warning(f"Received callback for unknown setting '{key}'")
+        return CONFIG_MENU
 
-    # Find the setting by key
-    setting = next((s for s in SETTINGS if s.key == setting_key), None)
-    if not setting:
-        logger.error(f"Unknown setting key: {setting_key}")
-        await query.edit_message_text("Error: Unknown setting. Please try again.")
-        return MAIN_MENU
+    details = USER_SETTINGS[key]
+    current_value = await storage_manager.get_user_setting(chat_id, key, details['default'])
+    new_value = not current_value
+    await storage_manager.set_user_setting(chat_id, key, new_value)
+    
+    keyboard = await build_settings_keyboard(chat_id)
+    try:
+        await query.edit_message_reply_markup(reply_markup=keyboard)
+    except BadRequest as e:
+        if "Message is not modified" in str(e).lower():
+            logger.debug("Ignoring redundant message update in config menu.")
+        else:
+            raise
+    return CONFIG_MENU
 
-    # Toggle or update the setting based on its type
-    if setting.type == bool:
-        current_value_str = await storage_manager.get_user_setting(chat_id, setting.key, setting.default)
-        current_value = _to_bool(current_value_str)
-        new_value = not current_value
-        await storage_manager.set_user_setting(chat_id, setting.key, str(new_value))
-    else:
-        # For non-boolean settings, we'd implement different update logic
-        # Currently only boolean is supported
-        pass
-
-    # Update the menu with new values
-    reply_markup = await _get_config_menu(chat_id)
-    await query.edit_message_text("User Configuration", reply_markup=reply_markup)
-    return MAIN_MENU
-
-async def done_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Ends the configuration conversation."""
+async def config_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Ends the configuration conversation successfully."""
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("Configuration saved.")
+    await query.edit_message_text("✅ Settings saved.", parse_mode=None)
     return ConversationHandler.END
 
-async def handle_config_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handles text messages during configuration by reminding users to use buttons."""
-    await update.message.reply_text("Please use the buttons to configure settings. Type /cancel to exit configuration.")
-    return MAIN_MENU
+async def cancel_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Cancels the configuration conversation."""
+    query = update.callback_query
+    if query:
+        await query.answer()
+        await query.edit_message_text("❌ Configuration cancelled.", parse_mode=None)
+    else:
+        await update.message.reply_text("❌ Configuration cancelled.", parse_mode=None)
+    return ConversationHandler.END
 
-# Create pattern for all setting callbacks
-setting_patterns = "|".join(f"^{s.key}$" for s in SETTINGS)
-
+# --- Handler Export ---
 config_conv_handler = ConversationHandler(
     entry_points=[CommandHandler("config", config_command)],
     states={
-        MAIN_MENU: [
-            CallbackQueryHandler(handle_setting_toggle, pattern=setting_patterns),
-            CallbackQueryHandler(done_command, pattern="^done$"),
-            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_config_text),
+        CONFIG_MENU: [
+            CallbackQueryHandler(handle_setting_toggle, pattern=f"^{CALLBACK_SETTING_PREFIX}"),
+            CallbackQueryHandler(config_done, pattern="^config_done$"),
         ],
     },
-    fallbacks=[
-        CommandHandler("config", config_command),
-        CommandHandler("cancel", cancel_command)
-    ],
+    fallbacks=[CommandHandler("cancel", cancel_config)],
     per_user=True,
     per_chat=True,
     per_message=False

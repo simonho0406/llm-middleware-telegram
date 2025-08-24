@@ -165,7 +165,7 @@ async def _generate_and_send_response_task(update: Update, context: ContextTypes
             output_buffer=config.CONTEXT_TOKEN_OUTPUT_BUFFER
         )
         
-        search_instruction = "If you need to perform a web search to answer the query, respond only with the search query inside <search> tags, like <search>latest news on the Artemis mission</search>."
+        search_instruction = "If you need to perform a web search for current information, include the search query inside <search> tags like <search>latest news on the Artemis mission</search>, but ALWAYS also provide your best answer based on your existing knowledge after the search tags."
         augmented_prompt = f"{search_instruction}\n\n{prompt}"
         
         async for chunk in service.generate_response(model=model_to_use, prompt=augmented_prompt, context_history=truncated_history):
@@ -189,13 +189,31 @@ async def _generate_and_send_response_task(update: Update, context: ContextTypes
         
         if not llm_error_reported_by_model: logger.info(f"{log_prefix}LLM generation complete. Length: {len(raw_full_llm_response)}")
         
+        # Check if auto-search is enabled for normal chat
+        from bot.settings import USER_SETTINGS
+        autosearch_enabled = await storage_manager.get_user_setting(
+            chat_id, 
+            'autosearch_normal_chat', 
+            USER_SETTINGS['autosearch_normal_chat']['default']
+        )
+        
         search_tag_match = re.search(r"<search>(.*?)</search>", raw_full_llm_response, re.DOTALL)
-        if search_tag_match:
+        if search_tag_match and autosearch_enabled:
             search_query = search_tag_match.group(1).strip()
-            logger.info(f"{log_prefix}LLM requested web search: '{search_query}'")
+            logger.info(f"{log_prefix}Auto-search enabled. Delegating to search_command: '{search_query}'")
             context.args = [search_query]
             await misc_commands.search_command(update, context, placeholder_message)
             return
+        elif search_tag_match and not autosearch_enabled:
+            logger.info(f"{log_prefix}Auto-search disabled. Removing search tag and providing fallback answer.")
+            search_query = search_tag_match.group(1).strip()
+            # Remove the search tag entirely, but keep any additional content the LLM provided
+            raw_full_llm_response = raw_full_llm_response.replace(search_tag_match.group(0), "").strip()
+            
+            # If there's still content after removing the search tag, keep it
+            # If not, provide a helpful message
+            if not raw_full_llm_response:
+                raw_full_llm_response = f"I'd need to search for current information about '{search_query}' to give you an accurate answer. Auto-search is disabled - you can enable it in /config or try the /search command directly."
 
     except Exception as e:
         logger.exception(f"{log_prefix}Critical error during LLM stream: {e}")

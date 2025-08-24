@@ -45,7 +45,18 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 ├ /start - Initialize the bot
 ├ /help - Show this menu
 ├ /new - Start a new conversation thread
-└ /reroll - Regenerate the last AI response
+├ /reroll - Regenerate the last AI response
+└ /cancel - Cancel the current operation
+
+*Configuration*:
+└ /config - Manage bot settings (auto-search, preferences)
+
+*AI Tools & Search*:
+├ /search <query> - Answer a query using web search
+├ /ask_selected <prompt> - Query multiple selected models at once
+├ /discuss <prompt> - Start a multi-model, multi-provider discussion
+├ /discuss_panel - Orchestrate an expert AI panel
+└ /end_discussion - Conclude an ongoing panel discussion
 
 *Provider & Model Management*:
 ├ /provider - Show/switch AI provider
@@ -53,16 +64,13 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 ├ /list_models - List available models for the provider
 └ /set_model `<model_name>` - Set a new model
 
-    *Advanced Tools*:
-    ├ /search <query> - Answer a query using web search
-    ├ /ask_selected <prompt> - Query multiple selected models at once
-    ├ /discuss <prompt> - Start a multi-model, multi-provider discussion
-    ├ /discuss_panel - Orchestrate an expert AI panel
-    └ /end_discussion - Conclude an ongoing panel discussion
-
 *Thread Management*:
 ├ /threads - List and manage conversation threads
-└ /rename_thread <name> - Rename the current thread"""
+└ /rename_thread <name> - Rename the current thread
+
+*💡 Smart Features*:
+• Auto-search: I can automatically web search when needed
+• Configure in /config → Auto-Search settings"""
     await update.message.reply_text(escape_markdown(help_text, version=2), parse_mode='MarkdownV2')
 
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, placeholder_message = None) -> None:

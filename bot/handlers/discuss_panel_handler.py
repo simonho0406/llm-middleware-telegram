@@ -15,6 +15,8 @@ from bot import providers
 from services import web_search_service
 from bot.menu_setup import setup_bot_commands_and_menu
 from storage import storage_manager
+from bot.settings import USER_SETTINGS  # Added for settings access
+from bot.settings import USER_SETTINGS  # Added for settings access
 from .misc_commands import cancel_command
 from bot.errors import ProviderUnavailableError
 
@@ -45,15 +47,19 @@ async def set_panel_commands(application, chat_id: int) -> None:
 
 def _format_panel_summary(panel_results: dict) -> str:
     """Formats the results of the panel execution into a markdown string."""
+    from utils.text_processing import escape_markdown_v2
     summary_parts = ["*Panel Execution Summary:*"]
     for role, result in panel_results.items():
         status_icon = "✅" if result.get('status') == 'Success' else "⚠️"
-        model_info = f"`{result.get('provider')}/{result.get('model')}`"
+        # Escape only dynamic parts
+        provider = escape_markdown_v2(result.get('provider', 'Unknown'))
+        model = escape_markdown_v2(result.get('model', 'Unknown'))
+        status = escape_markdown_v2(result.get('status', 'Unknown'))
         fallback_note = escape_markdown_v2(" (Fallback)") if result.get('fallback') else ""
-        summary_parts.append(f"{status_icon} *{role}:* {model_info} ({result.get('status')}){fallback_note}")
+        summary_parts.append(f"{status_icon} *{role}:* `{provider}/{model}` ({status}){fallback_note}")
     return "\n".join(summary_parts)
 
-async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: str, full_history: list, placeholder_msg) -> tuple:
+async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: str, full_history: list, placeholder_msg, chat_id: int) -> tuple:
     """Runs the full panel workflow, updating a placeholder message, and returns a dictionary of results and the final answer."""
     panel_results = {}
 
@@ -132,28 +138,53 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
             
             logger.info(f"Successfully parsed orchestrator's plan. Search required: {requires_search}, Tasks: {len(tasks_list)}")
             
-            # If search is required, perform it and augment the Proposer's prompt
+            # If search is required, check user setting and conditionally perform it
             if requires_search and search_query:
-                await placeholder_msg.edit_text(f"Orchestrator requested web search: \"{search_query}\"...", parse_mode=None)
-                search_results = await web_search_service.perform_search(search_query)
+                # Check if auto-search is enabled for panel discussions
+                autosearch_enabled = await storage_manager.get_user_setting(
+                    chat_id, 
+                    'autosearch_panel_discussion', 
+                    USER_SETTINGS['autosearch_panel_discussion']['default']
+                )
                 
-                if search_results.startswith("Error:"):
-                    await placeholder_msg.edit_text(f"⚠️ Web search failed: {search_results}", parse_mode=None)
-                    await asyncio.sleep(2)
+                if autosearch_enabled:
+                    await placeholder_msg.edit_text(f"Orchestrator requested web search: \"{search_query}\"...", parse_mode=None)
+                    search_results = await web_search_service.perform_search(search_query)
+                    
+                    if search_results.startswith("Error:"):
+                        await placeholder_msg.edit_text(f"⚠️ Web search failed: {search_results}", parse_mode=None)
+                        await asyncio.sleep(2)
+                    else:
+                        # Find the Proposer's task and augment its prompt with search results
+                        proposer_task = next((task for task in tasks_list if task.get("role") == "Proposer"), None)
+                        if proposer_task:
+                            original_prompt = proposer_task.get("prompt", "")
+                            augmented_prompt = (
+                                f"Based on the following fresh web search results, please address the user's original query.\n\n"
+                                f"--- WEB SEARCH RESULTS ---\n{search_results}\n\n"
+                                f"--- ORIGINAL TASK ---\n{original_prompt}"
+                            )
+                            proposer_task["prompt"] = augmented_prompt
+                            logger.info("Augmented Proposer's prompt with web search results.")
+                        else:
+                            logger.warning("Could not find Proposer task to augment with search results.")
                 else:
-                    # Find the Proposer's task and augment its prompt with search results
+                    # Auto-search is disabled - inform the Proposer but don't perform search
+                    logger.info(f"Auto-search disabled for panel discussion. Skipping search for: '{search_query}'")
+                    await placeholder_msg.edit_text(f"Auto-search disabled. Proceeding without web search...", parse_mode=None)
+                    
+                    # Find the Proposer's task and inform them about the disabled search
                     proposer_task = next((task for task in tasks_list if task.get("role") == "Proposer"), None)
                     if proposer_task:
                         original_prompt = proposer_task.get("prompt", "")
-                        augmented_prompt = (
-                            f"Based on the following fresh web search results, please address the user's original query.\n\n"
-                            f"--- WEB SEARCH RESULTS ---\n{search_results}\n\n"
+                        informed_prompt = (
+                            f"Note: The orchestrator suggested searching for '{search_query}' but auto-search is disabled. "
+                            f"Please provide your best answer based on existing knowledge.\n\n"
                             f"--- ORIGINAL TASK ---\n{original_prompt}"
                         )
-                        proposer_task["prompt"] = augmented_prompt
-                        logger.info("Augmented Proposer's prompt with web search results.")
-                    else:
-                        logger.warning("Could not find Proposer task to augment with search results.")
+                        proposer_task["prompt"] = informed_prompt
+                        logger.info("Informed Proposer about disabled search.")
+                    await asyncio.sleep(1)  # Brief pause for user feedback
 
             break # Break out of retry loop on success
         except (json.JSONDecodeError, ValueError, Exception) as e:
@@ -399,7 +430,7 @@ async def start_panel_discussion(update: Update, context: ContextTypes.DEFAULT_T
 
     try:
         panel_task = asyncio.create_task(
-            _run_panel_workflow(context, user_prompt, [], assembling_msg)
+            _run_panel_workflow(context, user_prompt, [], assembling_msg, chat_id)
         )
         context.user_data['panel_task'] = panel_task
         panel_results, final_answer = await panel_task
@@ -459,7 +490,8 @@ async def handle_follow_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                     context, 
                     follow_up_prompt, 
                     panel_state['full_transcript'],
-                    placeholder
+                    placeholder,
+                    chat_id
                 )
             )
             context.user_data['panel_task'] = panel_task
@@ -594,7 +626,7 @@ async def reroll_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
         try:
             panel_task = asyncio.create_task(
-                _run_panel_workflow(context, last_user_prompt, history_for_reroll, placeholder_msg)
+                _run_panel_workflow(context, last_user_prompt, history_for_reroll, placeholder_msg, chat_id)
             )
             context.user_data['panel_task'] = panel_task
             panel_results, final_answer = await panel_task
