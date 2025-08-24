@@ -64,8 +64,66 @@ async def init_database():
                 PRIMARY KEY (chat_id, key),
                 FOREIGN KEY (chat_id) REFERENCES chats(chat_id) ON DELETE CASCADE
             )""")
+        
+        # Check and migrate existing user_settings table if it has wrong data type
+        await _migrate_user_settings_table(db)
+        
         await db.commit()
         logger.info("Database initialized successfully.")
+
+async def _migrate_user_settings_table(db: aiosqlite.Connection):
+    """Migrates user_settings table from TEXT to INTEGER values if needed."""
+    try:
+        # Check current schema
+        async with db.cursor() as cursor:
+            await cursor.execute("PRAGMA table_info(user_settings)")
+            columns = await cursor.fetchall()
+            
+            # Find the value column and check its type
+            value_column = None
+            for col in columns:
+                if col[1] == 'value':  # col[1] is column name
+                    value_column = col[2]  # col[2] is data type
+                    break
+            
+            if value_column and value_column.upper() == 'TEXT':
+                logger.info("Migrating user_settings table from TEXT to INTEGER values...")
+                
+                # Read existing data
+                await cursor.execute("SELECT chat_id, key, value FROM user_settings")
+                existing_data = await cursor.fetchall()
+                
+                # Drop and recreate table with correct schema
+                await db.execute("DROP TABLE user_settings")
+                await db.execute("""
+                    CREATE TABLE user_settings (
+                        chat_id INTEGER NOT NULL,
+                        key TEXT NOT NULL,
+                        value INTEGER NOT NULL,  -- Booleans stored as 0 or 1
+                        PRIMARY KEY (chat_id, key),
+                        FOREIGN KEY (chat_id) REFERENCES chats(chat_id) ON DELETE CASCADE
+                    )""")
+                
+                # Convert and restore data
+                for chat_id, key, old_value in existing_data:
+                    # Convert text boolean values to integers
+                    if isinstance(old_value, str):
+                        if old_value.lower() in ('true', '1', 'yes', 'on'):
+                            new_value = 1
+                        else:
+                            new_value = 0
+                    else:
+                        new_value = int(bool(old_value))
+                    
+                    await db.execute(
+                        "INSERT INTO user_settings (chat_id, key, value) VALUES (?, ?, ?)",
+                        (chat_id, key, new_value)
+                    )
+                
+                logger.info(f"Successfully migrated {len(existing_data)} user settings records.")
+                
+    except Exception as e:
+        logger.warning(f"Failed to migrate user_settings table: {e}")
 
 async def get_current_thread_id(chat_id: int) -> str:
     async with aiosqlite.connect(config.DB_PATH) as db:

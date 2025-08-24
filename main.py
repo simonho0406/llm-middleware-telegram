@@ -53,6 +53,38 @@ def main() -> None:
         logger.info("Initializing storage...")
         await storage_manager.init()
         logger.info("Storage initialization complete.")
+        
+        # Clean up any lingering conversation states that might interfere with ConversationHandlers
+        logger.info("Cleaning up persistent conversation states...")
+        try:
+            # PTB stores conversation states in memory but can have stale states after restarts
+            # Clear all user_data that might contain persistent panel_state or other conversation remnants
+            # This is critical for resolving callback query routing failures
+            
+            # Get all active chats to clean their user_data
+            all_chat_ids = await storage_manager.get_all_chat_ids()
+            if all_chat_ids:
+                for chat_id in all_chat_ids:
+                    # Clear any persistent user_data that might interfere with ConversationHandlers
+                    # This includes panel_state, conversation states, and other cached data
+                    if chat_id in application.user_data:
+                        old_data = application.user_data[chat_id].copy()
+                        application.user_data[chat_id].clear()
+                        if old_data:
+                            logger.info(f"Cleared persistent user_data for chat {chat_id}: {list(old_data.keys())}")
+                    
+                    # Also clear any chat_data that might contain stale states
+                    if chat_id in application.chat_data:
+                        old_chat_data = application.chat_data[chat_id].copy()
+                        application.chat_data[chat_id].clear()
+                        if old_chat_data:
+                            logger.info(f"Cleared persistent chat_data for chat {chat_id}: {list(old_chat_data.keys())}")
+                
+                logger.info(f"Conversation state cleanup completed for {len(all_chat_ids)} chats.")
+            else:
+                logger.info("No existing chats found for conversation state cleanup.")
+        except Exception as e:
+            logger.warning(f"Conversation state cleanup failed: {e}")
 
         # --- Failsafe: Reset command scopes for all known chats ---
         logger.info("Running startup failsafe: resetting command scopes for all known chats...")
