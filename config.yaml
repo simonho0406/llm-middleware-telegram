@@ -79,6 +79,10 @@ custom_openai_providers:
 
 # --- Expert Panel Configuration ---
 expert_panel:
+  # Master & Apprentice Architecture Quality Settings
+  quality_threshold: 85  # Minimum score (1-100) required to pass quality gate
+  max_refinement_iterations: 3  # Maximum number of refinement loops
+  
   orchestrator:
     provider: "nvidia"
     # model: "nvidia/llama-3.1-nemotron-ultra-253b-v1" # Or another suitable Groq model
@@ -93,10 +97,10 @@ expert_panel:
   # The keys (e.g., "Proposer", "Critic") must match the roles the orchestrator uses
   roles:
     Proposer:
-      provider: "openrouter"
+      provider: "nvidia"
       # model: "deepseek/deepseek-chat-v3-0324:free" # Or another suitable OpenRouter model
-      model: "z-ai/glm-4.5-air:free" # Or another suitable model
-      # model: "openai/gpt-oss-120b"
+      # model: "z-ai/glm-4.5-air:free" # Or another suitable model
+      model: "deepseek-ai/deepseek-v3.1"
       request_timeout_seconds: 600
     Critic:
       provider: "openrouter"
