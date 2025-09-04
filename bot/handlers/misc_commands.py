@@ -56,6 +56,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 ├ /ask_selected <prompt> - Query multiple selected models at once
 ├ /discuss <prompt> - Start a multi-model, multi-provider discussion
 ├ /discuss_panel - Orchestrate an expert AI panel
+├ /configure_panel - Customize your Expert Panel agents
 └ /end_discussion - Conclude an ongoing panel discussion
 
 *Provider & Model Management*:

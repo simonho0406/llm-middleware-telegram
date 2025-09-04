@@ -10,6 +10,216 @@ def escape_markdown_v2(text: str) -> str:
     escape_chars = r'\_*[]()~`>#+-=|{}.!'
     return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', text)
 
+
+def pure_markdown_to_telegram_v2(text: str) -> str:
+    """
+    Line-aware parser that converts pure Markdown to Telegram MarkdownV2 format.
+    
+    This function processes text line by line, preserving list markers, blockquotes,
+    and headers while intelligently escaping special characters only in plain text.
+    It handles nested formatting and malformed input gracefully.
+    
+    Args:
+        text: Pure Markdown text from the Refiner agent
+        
+    Returns:
+        Telegram MarkdownV2-safe text with proper escaping
+    """
+    if not text:
+        return ""
+    
+    # Characters that need escaping in MarkdownV2 when not part of formatting
+    escape_chars = r'()#+-=|{}.!'
+    
+    lines = text.split('\n')
+    processed_lines = []
+    in_code_block = False
+    
+    for line in lines:
+        if in_code_block:
+            # Inside code block - preserve everything as-is until we find closing ```
+            if line.strip() == '```' or line.strip().startswith('```'):
+                in_code_block = False
+            processed_lines.append(line)
+            continue
+        
+        # Check for code block start
+        if line.strip().startswith('```'):
+            in_code_block = True
+            processed_lines.append(line)
+            continue
+        
+        # Process this line with line-aware formatting preservation
+        processed_line = _process_line_with_formatting_preservation(line, escape_chars)
+        processed_lines.append(processed_line)
+    
+    return '\n'.join(processed_lines)
+
+
+def _process_line_with_formatting_preservation(line: str, escape_chars: str) -> str:
+    """
+    Process a single line, preserving markdown list markers, blockquotes, and headers
+    while escaping special characters in plain text portions.
+    """
+    if not line:
+        return line
+    
+    # Detect line-level markdown structures that should be preserved
+    stripped = line.lstrip()
+    
+    # Preserve list markers (-, *, +, 1., 2., etc.)
+    if re.match(r'^[-*+]\s', stripped) or re.match(r'^\d+\.\s', stripped):
+        # Find where the list content starts after the marker
+        marker_match = re.match(r'^([-*+]|\d+\.)\s*', stripped)
+        if marker_match:
+            indent = line[:len(line) - len(stripped)]  # Preserve indentation
+            marker = marker_match.group(0)
+            content = stripped[len(marker):]
+            processed_content = _process_text_with_inline_formatting(content, escape_chars)
+            return indent + marker + processed_content
+    
+    # Preserve blockquotes
+    if stripped.startswith('> '):
+        indent = line[:len(line) - len(stripped)]
+        content = stripped[2:]  # Remove "> "
+        processed_content = _process_text_with_inline_formatting(content, escape_chars)
+        return indent + '> ' + processed_content
+    
+    # Preserve headers
+    if stripped.startswith('#'):
+        header_match = re.match(r'^(#+)\s*', stripped)
+        if header_match:
+            indent = line[:len(line) - len(stripped)]
+            header_prefix = header_match.group(0)
+            content = stripped[len(header_prefix):]
+            processed_content = _process_text_with_inline_formatting(content, escape_chars)
+            return indent + header_prefix + processed_content
+    
+    # Regular line - process with full formatting
+    return _process_text_with_inline_formatting(line, escape_chars)
+
+
+def _process_text_with_inline_formatting(text: str, escape_chars: str) -> str:
+    """
+    Process text for inline formatting like *bold*, _italic_, `code`, handling nesting gracefully.
+    Uses a more robust approach than simple find() to handle complex cases.
+    """
+    if not text:
+        return ""
+    
+    result = []
+    i = 0
+    length = len(text)
+    
+    while i < length:
+        char = text[i]
+        
+        # Handle single backtick code spans first (highest precedence)
+        if char == '`':
+            code_span, new_i = _extract_code_span(text, i)
+            if code_span:
+                result.append(code_span)
+                i = new_i
+                continue
+            else:
+                # Unclosed backtick - pass through (backticks don't need escaping)
+                result.append(char)
+                i += 1
+                continue
+        
+        # Handle bold formatting (**text** or __text__)
+        elif char == '*' and i < length - 1 and text[i + 1] == '*':
+            bold_text, new_i = _extract_formatting_span(text, i, '**')
+            if bold_text:
+                result.append(bold_text)
+                i = new_i
+                continue
+            else:
+                # Unclosed ** - escape the first *
+                result.append('\\*')
+                i += 1
+                continue
+                
+        elif char == '_' and i < length - 1 and text[i + 1] == '_':
+            bold_text, new_i = _extract_formatting_span(text, i, '__')
+            if bold_text:
+                result.append(bold_text)
+                i = new_i
+                continue
+            else:
+                # Unclosed __ - escape the first _
+                result.append('\\_')
+                i += 1
+                continue
+        
+        # Handle italic formatting (*text* or _text_)
+        elif char == '*':
+            italic_text, new_i = _extract_formatting_span(text, i, '*')
+            if italic_text:
+                result.append(italic_text)
+                i = new_i
+                continue
+            else:
+                # Unclosed * - escape it
+                result.append('\\*')
+                i += 1
+                continue
+                
+        elif char == '_':
+            italic_text, new_i = _extract_formatting_span(text, i, '_')
+            if italic_text:
+                result.append(italic_text)
+                i = new_i
+                continue
+            else:
+                # Unclosed _ - escape it
+                result.append('\\_')
+                i += 1
+                continue
+        
+        # Handle characters that need escaping in plain text
+        elif char in escape_chars:
+            result.append('\\' + char)
+            i += 1
+        
+        # Regular characters - pass through unchanged
+        else:
+            result.append(char)
+            i += 1
+    
+    return ''.join(result)
+
+
+def _extract_code_span(text: str, start_pos: int) -> tuple[str, int]:
+    """Extract a code span (`...`) if properly closed, handling nesting gracefully."""
+    if text[start_pos] != '`':
+        return None, start_pos
+    
+    # Find the matching closing backtick
+    end_pos = text.find('`', start_pos + 1)
+    if end_pos != -1:
+        return text[start_pos:end_pos + 1], end_pos + 1
+    else:
+        return None, start_pos
+
+
+def _extract_formatting_span(text: str, start_pos: int, delimiter: str) -> tuple[str, int]:
+    """Extract a formatting span (like **bold** or *italic*) if properly closed."""
+    if not text[start_pos:].startswith(delimiter):
+        return None, start_pos
+    
+    # Look for matching closing delimiter, but be smarter about nesting
+    search_start = start_pos + len(delimiter)
+    end_pos = text.find(delimiter, search_start)
+    
+    if end_pos != -1:
+        # Basic validation: ensure the content between delimiters isn't empty
+        content = text[search_start:end_pos]
+        if content.strip():  # Non-empty content
+            return text[start_pos:end_pos + len(delimiter)], end_pos + len(delimiter)
+    
+    return None, start_pos
+
 TELEGRAM_MAX_LEN = 4096 # Default, can be overridden
 
 def split_message_markdown_aware(text: str, max_len: int = TELEGRAM_MAX_LEN) -> list[str]:

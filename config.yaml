@@ -100,7 +100,8 @@ expert_panel:
       provider: "nvidia"
       # model: "deepseek/deepseek-chat-v3-0324:free" # Or another suitable OpenRouter model
       # model: "z-ai/glm-4.5-air:free" # Or another suitable model
-      model: "deepseek-ai/deepseek-v3.1"
+      # model: "deepseek-ai/deepseek-v3.1"
+      model: "openai/gpt-oss-120b"
       request_timeout_seconds: 600
     Critic:
       provider: "openrouter"
@@ -110,6 +111,7 @@ expert_panel:
     Refiner:
       provider: "nvidia"
       # model: "deepseek/deepseek-r1-0528:free" # Or another suitable model
-      model: "moonshotai/kimi-k2-instruct" # Or another suitable model
+      # model: "moonshotai/kimi-k2-instruct" # Or another suitable model
+      model: "qwen/qwen3-coder-480b-a35b-instruct" # Or another suitable model
       # model: "qwen/qwen3-235b-a22b:free" # Or another suitable Nvidia model
       request_timeout_seconds: 600

@@ -8,7 +8,7 @@ from telegram.error import TimedOut
 from httpx import ConnectTimeout
 from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, MessageHandler, filters
 from telegram import BotCommandScopeChat
-from utils.text_processing import split_message_markdown_aware, escape_markdown_v2
+from utils.text_processing import split_message_markdown_aware, escape_markdown_v2, pure_markdown_to_telegram_v2
 from utils.llm_utilities import get_robust_llm_response, get_expert_panel_fallback_config
 from telegram import constants
 import config
@@ -271,6 +271,7 @@ async def set_panel_commands(application, chat_id: int) -> None:
     except Exception as e:
         logger.error(f"Failed to set panel-specific commands for chat {chat_id}: {e}")
 
+
 def _format_panel_summary(panel_results: dict) -> str:
     """Formats the results of the panel execution into a markdown string with quality metrics."""
     from utils.text_processing import escape_markdown_v2
@@ -321,39 +322,51 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
     
     # Validate expert panel configuration
     try:
-        # Load configuration needed for the workflow
-        quality_threshold = config.EXPERT_PANEL_CONFIG.get('quality_threshold', 85)
-        max_iterations = config.EXPERT_PANEL_CONFIG.get('max_refinement_iterations', 3)
+        # Load user's custom configuration or fall back to defaults
+        custom_config = await storage_manager.get_user_setting(chat_id, 'panel_config', None)
         
-        orchestrator_config = config.EXPERT_PANEL_CONFIG.get('orchestrator', {})
+        if custom_config:
+            # Use custom user configuration
+            panel_config = custom_config
+            logger.info(f"Using custom panel configuration for chat {chat_id}")
+        else:
+            # Fall back to default configuration from config.yaml
+            panel_config = config.EXPERT_PANEL_CONFIG
+            logger.debug(f"Using default panel configuration for chat {chat_id}")
+        
+        # Load configuration needed for the workflow
+        quality_threshold = panel_config.get('quality_threshold', 85)
+        max_iterations = panel_config.get('max_refinement_iterations', 3)
+        
+        orchestrator_config = panel_config.get('orchestrator', {})
         orchestrator_provider = orchestrator_config.get('provider')
         orchestrator_model = orchestrator_config.get('model')
         orchestrator_timeout = orchestrator_config.get('request_timeout_seconds', 600)  # Default 10 minutes
         
         if not orchestrator_config:
-            raise ValueError("Configuration Error: The 'orchestrator' section is missing from expert_panel in config.yaml.")
+            raise ValueError("Configuration Error: The 'orchestrator' section is missing from your panel configuration. Use /configure_panel to set up your Expert Panel.")
         if not orchestrator_provider:
-            raise ValueError("Configuration Error: The 'provider' field is missing from orchestrator in expert_panel config.")
+            raise ValueError("Configuration Error: The 'provider' field is missing from orchestrator configuration. Use /configure_panel to fix this.")
         if not orchestrator_model:
-            raise ValueError("Configuration Error: The 'model' field is missing from orchestrator in expert_panel config.")
+            raise ValueError("Configuration Error: The 'model' field is missing from orchestrator configuration. Use /configure_panel to fix this.")
         
         # Validate role configurations
-        role_configs = config.EXPERT_PANEL_CONFIG.get('roles', {})
+        role_configs = panel_config.get('roles', {})
         required_roles = ['Proposer', 'Critic']
         
         for role in required_roles:
             role_config = role_configs.get(role, {})
             if not role_config:
-                raise ValueError(f"Configuration Error: The '{role}' role is missing from expert_panel roles in config.yaml.")
+                raise ValueError(f"Configuration Error: The '{role}' role is missing from your panel configuration. Use /configure_panel to configure this role.")
             if not role_config.get('provider'):
-                raise ValueError(f"Configuration Error: The 'provider' field is missing for {role} role in expert_panel config.")
+                raise ValueError(f"Configuration Error: The 'provider' field is missing for {role} role. Use /configure_panel to fix this.")
             if not role_config.get('model'):
-                raise ValueError(f"Configuration Error: The 'model' field is missing for {role} role in expert_panel config.")
+                raise ValueError(f"Configuration Error: The 'model' field is missing for {role} role. Use /configure_panel to fix this.")
         
         # Validate Refiner role if present
         refiner_config = role_configs.get('Refiner', {})
         if refiner_config and (not refiner_config.get('provider') or not refiner_config.get('model')):
-            raise ValueError("Configuration Error: The 'Refiner' role is incomplete - missing provider or model in expert_panel config.")
+            raise ValueError("Configuration Error: The 'Refiner' role is incomplete - missing provider or model. Use /configure_panel to fix this.")
             
     except ValueError as config_error:
         # Return user-friendly configuration error
@@ -607,11 +620,27 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
     refiner_model = refiner_role_config.get('model') if refiner_task else None
     
     if refiner_task and refiner_provider and refiner_model:
-        # Refiner is configured - polish the final proposer_response
-        refiner_prompt = refiner_task.get('prompt', 'Polish and refine the following response for clarity and style.')
-        full_refiner_prompt = f"{refiner_prompt}\n\n--- DOCUMENT TO REFINE ---\n{proposer_response}"
+        # Refiner is configured - polish the final proposer_response AND format for Telegram
+        base_refiner_prompt = refiner_task.get('prompt', 'Polish and refine the following response for clarity and style.')
         
-        final_answer = await get_robust_llm_response(
+        # Clean Refiner prompt focused on content and standard Markdown
+        full_refiner_prompt = f"""{base_refiner_prompt}
+
+**Instructions: Polish and refine the response below for clarity, style, and readability. Use standard Markdown formatting:**
+
+**Standard Markdown Guidelines:**
+• Use **bold text** or *italic text* for emphasis
+• Use `code snippets` for technical terms and ```code blocks``` for longer code
+• Use proper headings (## Heading), lists (- item), and quotes (> quote)
+• Write clearly and concisely while maintaining technical accuracy
+• Structure the content logically with appropriate formatting
+
+**Output only your polished response using clean, standard Markdown:**
+
+--- DOCUMENT TO REFINE ---
+{proposer_response}"""
+        
+        refiner_response = await get_robust_llm_response(
             provider_name=refiner_provider,
             model=refiner_model,
             prompt=full_refiner_prompt,
@@ -621,13 +650,22 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
             fallback_provider=fallback_provider,
             fallback_model=fallback_model
         )
-        refiner_fallback = "[Fallback by Orchestrator" in final_answer
+        refiner_fallback = "[Fallback by Orchestrator" in refiner_response
+        
+        # Challenge C: Check if Refiner failed and gracefully fall back to proposer_response
+        if refiner_response.startswith("[Error:"):
+            logger.warning(f"Refiner failed: {refiner_response}. Using proposer response as final answer.")
+            final_answer = proposer_response
+            refiner_status = 'Failure'
+        else:
+            final_answer = refiner_response
+            refiner_status = 'Success'
         
         panel_results['Refiner'] = {
             'provider': refiner_provider,
             'model': refiner_model,
-            'status': 'Success' if "[Error:" not in final_answer else 'Failure',
-            'response': final_answer,
+            'status': refiner_status,
+            'response': refiner_response,
             'fallback': refiner_fallback
         }
         logger.info("Master & Apprentice workflow completed with Refiner polish.")
@@ -644,7 +682,7 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
         'max_iterations': max_iterations
     }
     
-    return panel_results, final_answer
+    return panel_results, final_answer, proposer_response
 
 async def start_panel_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Entry point for the /discuss_panel command."""
@@ -666,7 +704,7 @@ async def start_panel_discussion(update: Update, context: ContextTypes.DEFAULT_T
             _run_panel_workflow(context, user_prompt, [], assembling_msg, chat_id)
         )
         context.user_data['panel_task'] = panel_task
-        panel_results, final_answer = await panel_task
+        panel_results, final_answer, proposer_response = await panel_task
     except asyncio.CancelledError:
         logger.warning(f"Panel workflow in start_panel_discussion for chat {chat_id} was cancelled.")
         await _cleanup_discussion_state(context, chat_id, assembling_msg)
@@ -689,18 +727,66 @@ async def start_panel_discussion(update: Update, context: ContextTypes.DEFAULT_T
     }
 
     await assembling_msg.delete()
-    summary_text = _format_panel_summary(panel_results)
-    final_text = f"{summary_text}\n\n---\n\n{final_answer}"
-    message_parts = split_message_markdown_aware(final_text)
-    for part in message_parts:
+    
+    # Step 1: Generate MarkdownV2-safe summary (presentation chrome)
+    formatted_summary_text = _format_panel_summary(panel_results)
+    
+    # Step 2: Generate & Format Content - process ONLY the final answer with Smart Escaper
+    try:
+        telegram_safe_final_answer = pure_markdown_to_telegram_v2(final_answer)
+        escaper_success = True
+    except Exception as parser_error:
+        logger.error(f"Smart Escaper failed on final_answer: {parser_error}. Using pure Markdown fallback.")
+        telegram_safe_final_answer = final_answer
+        escaper_success = False
+    
+    # Step 3: Combine Safely - both parts are now in their proper formats
+    # Only add separator and content if final_answer has substance (Challenge B fix)
+    if telegram_safe_final_answer.strip():
+        final_text = f"{formatted_summary_text}\n\n---\n\n{telegram_safe_final_answer}"
+    else:
+        final_text = formatted_summary_text  # Summary only, no dangling separator
+    
+    # Step 4: Split and Send with MarkdownV2
+    content_parts = split_message_markdown_aware(final_text)
+    
+    for i, part in enumerate(content_parts):
         try:
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=part,
-                parse_mode=constants.ParseMode.MARKDOWN_V2
-            )
-        except BadRequest:
-            await context.bot.send_message(chat_id, text=part, parse_mode=None)
+            # Send with MarkdownV2 since both summary and content are properly formatted
+            await context.bot.send_message(chat_id=chat_id, text=part, parse_mode=constants.ParseMode.MARKDOWN_V2)
+        except BadRequest as e:
+            logger.warning(f"Part {i+1} MarkdownV2 failed: {e}. Using separate message fallback.")
+            
+            # Step 5: Enhanced Fallback - send summary and content as separate messages
+            # First, send the summary with proper splitting to handle long summaries
+            summary_parts = split_message_markdown_aware(formatted_summary_text)
+            for summary_part in summary_parts:
+                try:
+                    # Send summary parts (already MarkdownV2-safe)
+                    await context.bot.send_message(chat_id=chat_id, text=summary_part, parse_mode=constants.ParseMode.MARKDOWN_V2)
+                except BadRequest as summary_error:
+                    logger.warning(f"Summary part MarkdownV2 failed: {summary_error}. Using plain text.")
+                    # Summary part fallback to plain text
+                    try:
+                        await context.bot.send_message(chat_id=chat_id, text=summary_part, parse_mode=None)
+                    except BadRequest as plain_summary_error:
+                        logger.error(f"Even summary part plain text failed: {plain_summary_error}")
+                        # Last resort: send fallback message
+                        try:
+                            await context.bot.send_message(chat_id=chat_id, text="⚠️ Panel Summary (display failed)", parse_mode=None)
+                        except BadRequest:
+                            pass  # Give up on this summary part
+                        
+            # Then send the final answer, also with proper splitting
+            if final_answer.strip():  # Only send if not empty (Challenge B fix)
+                answer_parts = split_message_markdown_aware(final_answer)
+                for answer_part in answer_parts:
+                    try:
+                        await context.bot.send_message(chat_id=chat_id, text=answer_part, parse_mode=None)
+                    except BadRequest as answer_error:
+                        logger.error(f"Final answer part failed: {answer_error}. Skipping this part.")
+            
+            break  # Exit the loop after fallback attempt
 
     return AWAITING_FOLLOW_UP
 
@@ -729,7 +815,7 @@ async def handle_follow_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 )
             )
             context.user_data['panel_task'] = panel_task
-            new_panel_results, new_final_answer = await panel_task
+            new_panel_results, new_final_answer, new_proposer_response = await panel_task
         except asyncio.CancelledError:
             logger.warning(f"Panel workflow in handle_follow_up for chat {chat_id} was cancelled.")
             await _cleanup_discussion_state(context, chat_id, placeholder)
@@ -746,14 +832,66 @@ async def handle_follow_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         panel_state['final_answer'] = new_final_answer
 
         await placeholder.delete()
-        summary_text = _format_panel_summary(new_panel_results)
-        final_text = f"{summary_text}\n\n---\n\n{new_final_answer}"
-        message_parts = split_message_markdown_aware(final_text)
-        for part in message_parts:
+        
+        # Step 1: Generate MarkdownV2-safe summary (presentation chrome)
+        formatted_summary_text = _format_panel_summary(new_panel_results)
+        
+        # Step 2: Generate & Format Content - process ONLY the final answer with Smart Escaper
+        try:
+            telegram_safe_final_answer = pure_markdown_to_telegram_v2(new_final_answer)
+            escaper_success = True
+        except Exception as parser_error:
+            logger.error(f"Smart Escaper failed on new_final_answer: {parser_error}. Using pure Markdown fallback.")
+            telegram_safe_final_answer = new_final_answer
+            escaper_success = False
+        
+        # Step 3: Combine Safely - both parts are now in their proper formats
+        # Only add separator and content if final_answer has substance (Challenge B fix)
+        if telegram_safe_final_answer.strip():
+            final_text = f"{formatted_summary_text}\n\n---\n\n{telegram_safe_final_answer}"
+        else:
+            final_text = formatted_summary_text  # Summary only, no dangling separator
+        
+        # Step 4: Split and Send with MarkdownV2
+        content_parts = split_message_markdown_aware(final_text)
+        
+        for i, part in enumerate(content_parts):
             try:
-                await context.bot.send_message(chat_id, text=part, parse_mode=constants.ParseMode.MARKDOWN_V2)
-            except BadRequest:
-                await context.bot.send_message(chat_id, text=part, parse_mode=None)
+                # Send with MarkdownV2 since both summary and content are properly formatted
+                await context.bot.send_message(chat_id=chat_id, text=part, parse_mode=constants.ParseMode.MARKDOWN_V2)
+            except BadRequest as e:
+                logger.warning(f"Part {i+1} MarkdownV2 failed: {e}. Using separate message fallback.")
+                
+                # Step 5: Enhanced Fallback - send summary and content as separate messages
+                # First, send the summary with proper splitting to handle long summaries
+                summary_parts = split_message_markdown_aware(formatted_summary_text)
+                for summary_part in summary_parts:
+                    try:
+                        # Send summary parts (already MarkdownV2-safe)
+                        await context.bot.send_message(chat_id=chat_id, text=summary_part, parse_mode=constants.ParseMode.MARKDOWN_V2)
+                    except BadRequest as summary_error:
+                        logger.warning(f"Summary part MarkdownV2 failed: {summary_error}. Using plain text.")
+                        # Summary part fallback to plain text
+                        try:
+                            await context.bot.send_message(chat_id=chat_id, text=summary_part, parse_mode=None)
+                        except BadRequest as plain_summary_error:
+                            logger.error(f"Even summary part plain text failed: {plain_summary_error}")
+                            # Last resort: send fallback message
+                            try:
+                                await context.bot.send_message(chat_id=chat_id, text="⚠️ Panel Summary (display failed)", parse_mode=None)
+                            except BadRequest:
+                                pass  # Give up on this summary part
+                                
+                # Then send the final answer, also with proper splitting
+                if new_final_answer.strip():  # Only send if not empty (Challenge B fix)
+                    answer_parts = split_message_markdown_aware(new_final_answer)
+                    for answer_part in answer_parts:
+                        try:
+                            await context.bot.send_message(chat_id=chat_id, text=answer_part, parse_mode=None)
+                        except BadRequest as answer_error:
+                            logger.error(f"Final answer part failed: {answer_error}. Skipping this part.")
+                
+                break  # Exit the loop after fallback attempt
 
     return AWAITING_FOLLOW_UP
 
@@ -878,7 +1016,7 @@ async def reroll_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 _run_panel_workflow(context, last_user_prompt, history_for_reroll, placeholder_msg, chat_id)
             )
             context.user_data['panel_task'] = panel_task
-            panel_results, final_answer = await panel_task
+            panel_results, final_answer, proposer_response = await panel_task
         except asyncio.CancelledError:
             logger.warning(f"Panel workflow in reroll_discussion for chat {chat_id} was cancelled.")
             return ConversationHandler.END
@@ -904,18 +1042,66 @@ async def reroll_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         panel_state['final_answer'] = final_answer
 
         await placeholder_msg.delete()
-        summary_text = _format_panel_summary(panel_results)
-        final_text = f"{summary_text}\n\n---\n\n{final_answer}"
-        message_parts = split_message_markdown_aware(final_text)
-        for part in message_parts:
+        
+        # Step 1: Generate MarkdownV2-safe summary (presentation chrome)
+        formatted_summary_text = _format_panel_summary(panel_results)
+        
+        # Step 2: Generate & Format Content - process ONLY the final answer with Smart Escaper
+        try:
+            telegram_safe_final_answer = pure_markdown_to_telegram_v2(final_answer)
+            escaper_success = True
+        except Exception as parser_error:
+            logger.error(f"Smart Escaper failed on final_answer: {parser_error}. Using pure Markdown fallback.")
+            telegram_safe_final_answer = final_answer
+            escaper_success = False
+        
+        # Step 3: Combine Safely - both parts are now in their proper formats
+        # Only add separator and content if final_answer has substance (Challenge B fix)
+        if telegram_safe_final_answer.strip():
+            final_text = f"{formatted_summary_text}\n\n---\n\n{telegram_safe_final_answer}"
+        else:
+            final_text = formatted_summary_text  # Summary only, no dangling separator
+        
+        # Step 4: Split and Send with MarkdownV2
+        content_parts = split_message_markdown_aware(final_text)
+        
+        for i, part in enumerate(content_parts):
             try:
-                await context.bot.send_message(chat_id, text=part, parse_mode=constants.ParseMode.MARKDOWN_V2)
+                # Send with MarkdownV2 since both summary and content are properly formatted
+                await context.bot.send_message(chat_id=chat_id, text=part, parse_mode=constants.ParseMode.MARKDOWN_V2)
             except BadRequest as e:
-                if "Can't parse entities" in str(e):
-                    logger.warning(f"MarkdownV2 parsing failed for a message part. Sending as plain text. Error: {e}")
-                    await context.bot.send_message(chat_id, text=part, parse_mode=None)
-                else:
-                    raise
+                logger.warning(f"Part {i+1} MarkdownV2 failed: {e}. Using separate message fallback.")
+                
+                # Step 5: Enhanced Fallback - send summary and content as separate messages
+                # First, send the summary with proper splitting to handle long summaries
+                summary_parts = split_message_markdown_aware(formatted_summary_text)
+                for summary_part in summary_parts:
+                    try:
+                        # Send summary parts (already MarkdownV2-safe)
+                        await context.bot.send_message(chat_id=chat_id, text=summary_part, parse_mode=constants.ParseMode.MARKDOWN_V2)
+                    except BadRequest as summary_error:
+                        logger.warning(f"Summary part MarkdownV2 failed: {summary_error}. Using plain text.")
+                        # Summary part fallback to plain text
+                        try:
+                            await context.bot.send_message(chat_id=chat_id, text=summary_part, parse_mode=None)
+                        except BadRequest as plain_summary_error:
+                            logger.error(f"Even summary part plain text failed: {plain_summary_error}")
+                            # Last resort: send fallback message
+                            try:
+                                await context.bot.send_message(chat_id=chat_id, text="⚠️ Panel Summary (display failed)", parse_mode=None)
+                            except BadRequest:
+                                pass  # Give up on this summary part
+                                
+                # Then send the final answer, also with proper splitting
+                if final_answer.strip():  # Only send if not empty (Challenge B fix)
+                    answer_parts = split_message_markdown_aware(final_answer)
+                    for answer_part in answer_parts:
+                        try:
+                            await context.bot.send_message(chat_id=chat_id, text=answer_part, parse_mode=None)
+                        except BadRequest as answer_error:
+                            logger.error(f"Final answer part failed: {answer_error}. Skipping this part.")
+                
+                break  # Exit the loop after fallback attempt
 
     return AWAITING_FOLLOW_UP
 

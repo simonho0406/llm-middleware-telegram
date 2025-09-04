@@ -12,4 +12,9 @@ USER_SETTINGS = {
         'type': bool,
         'default': True,
     },
+    'panel_config': {
+        'display_name': "Expert Panel Configuration",
+        'type': dict,
+        'default': None,
+    },
 }

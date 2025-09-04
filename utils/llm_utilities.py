@@ -184,3 +184,89 @@ def get_expert_panel_fallback_config() -> tuple[Optional[str], Optional[str]]:
     fallback_model = orchestrator_config.get('fallback_model')
     
     return fallback_provider, fallback_model
+
+
+async def format_text_for_telegram(raw_text: str) -> tuple[str, bool]:
+    """
+    Agentic Markdown Formatter - Converts raw text to Telegram MarkdownV2 format.
+    
+    This function implements a "Two-Pass Agentic" architecture where a dedicated,
+    high-speed Formatter Agent converts raw text into 100% compliant MarkdownV2
+    for Telegram, avoiding conflicts with primary agents' internal reasoning tags.
+    
+    Args:
+        raw_text: The raw, unformatted text to be converted
+        
+    Returns:
+        tuple[str, bool]: (formatted_text, agent_success)
+        - formatted_text: MarkdownV2 formatted text, escaped fallback, or raw text
+        - agent_success: True if Formatter Agent succeeded, False if fallback was used
+    """
+    if not raw_text.strip():
+        return raw_text, True  # Empty text is always "successfully" formatted
+    
+    # Use precise, reliable model for formatting (prioritize accuracy over speed)
+    formatter_provider = "groq"  # Fast and reliable for formatting tasks
+    formatter_model = "llama-3.1-70b-versatile"  # More precise model for formatting accuracy
+    
+    # Dynamic timeout based on text length (Challenge B fix)
+    base_timeout = 30
+    dynamic_timeout = base_timeout + (len(raw_text) // 1000) * 5  # +5s per 1000 chars
+    
+    # Precise MarkdownV2 formatting prompt with examples
+    formatter_prompt = f"""You are a Telegram MarkdownV2 formatter. Convert the text between XML tags to valid MarkdownV2.
+
+**CRITICAL**: You must escape these characters when they appear in regular text: ( ) . ! - + = | {{ }} # 
+
+**Examples of proper escaping**:
+- Regular text: "Score (85/100)" → "Score \\(85/100\\)"
+- Regular text: "Quality: 72/85" → "Quality: 72/85" 
+- Regular text: "test.example.com" → "test\\.example\\.com"
+- Keep markdown: "*bold text*" → "*bold text*"
+- Keep code: "`code here`" → "`code here`"
+
+**ESSENTIAL RULES**:
+1. Escape ( and ) with backslashes: \\( and \\)
+2. Escape dots with backslashes: \\.
+3. Escape hyphens in regular text: \\-  
+4. DO NOT escape characters inside `code` or ```code blocks```
+5. DO NOT escape markdown formatting characters (*bold*, _italic_)
+
+<raw_text_to_format>
+{raw_text}
+</raw_text_to_format>
+
+Output the properly escaped text only:"""
+
+    try:
+        # Use robust LLM response with dynamic timeout
+        formatted_response = await get_robust_llm_response(
+            provider_name=formatter_provider,
+            model=formatter_model,
+            prompt=formatter_prompt,
+            history=None,
+            role_name="Formatter Agent",
+            max_retries=2,  # Reduced retries for speed
+            retry_delay=1,
+            request_timeout=dynamic_timeout  # Dynamic timeout based on text length
+        )
+        
+        # Check if formatting was successful
+        if not formatted_response.strip() or formatted_response.startswith("[Error:"):
+            raise ValueError(f"Formatter Agent failed: {formatted_response}")
+        
+        logger.info(f"Formatter Agent successfully processed {len(raw_text)} chars in {dynamic_timeout}s timeout")
+        
+        # Debug logging to see what the formatter actually produced
+        formatted_text = formatted_response.strip()
+        logger.debug(f"Formatter Agent output preview: {formatted_text[:200]}...")
+        
+        return formatted_text, True  # Success!
+        
+    except Exception as e:
+        logger.warning(f"Formatter Agent failed, using clean raw text fallback: {e}")
+        
+        # Unified fallback: always return clean raw text to ensure consistent UX
+        # This follows the UX hierarchy: MarkdownV2 > Clean Raw Text > Never Escaped Text
+        logger.info("Falling back to clean raw text for optimal user experience")
+        return raw_text, False  # Formatter Agent failed, return clean raw text
