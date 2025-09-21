@@ -524,36 +524,7 @@ async def reroll_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         logger.error(f"{log_prefix}Error during /reroll command: {e}", exc_info=True)
         await update.message.reply_text("An error occurred while trying to reroll.", parse_mode=None)
 
-async def shrink_and_retry_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles the 'Shrink and Retry' button press."""
-    from bot.handlers.chat import _generate_and_send_response  # Import here to avoid circular import
-
-    query = update.callback_query
-    await query.answer()
-    chat_id = update.effective_chat.id
-    user_id = update.effective_user.id
-    log_prefix = f"(Chat {chat_id}) "
-    logger.info(f"{log_prefix}User {user_id} triggered 'Shrink and Retry'.")
-    try:
-        await query.edit_message_text("Understood. Retrying with a shortened context...", parse_mode=None)
-        current_thread_id = await storage_manager.get_current_thread_id(chat_id)
-        last_user_prompt = await storage_manager.get_thread_key(chat_id, 'last_user_prompt')
-        if not last_user_prompt:
-            await context.bot.send_message(chat_id, "Error: Couldn't find the last prompt to retry.", parse_mode=None)
-            return
-        await _generate_and_send_response(
-            update=update,
-            context=context,
-            chat_id=chat_id,
-            user_id=user_id,
-            prompt=last_user_prompt,
-            current_thread_id=current_thread_id,
-            is_reroll=False,
-            force_truncate=True
-        )
-    except Exception as e:
-        logger.error(f"{log_prefix}Error during shrink_and_retry_callback: {e}", exc_info=True)
-        await context.bot.send_message(chat_id, "An error occurred during the retry.", parse_mode=None)
+# Note: shrink_and_retry_callback removed in favor of automatic context management
 
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Cancels an active, non-conversation LLM task."""
@@ -573,7 +544,7 @@ misc_handlers = [
     CommandHandler("help", help_command),
     CommandHandler("search", search_command),
     CommandHandler("reroll", reroll_command),
-    CallbackQueryHandler(shrink_and_retry_callback, pattern="^shrink_and_retry$"),
+    # Note: shrink_and_retry callback removed - now handled automatically
     CommandHandler("new", new_command),
     CommandHandler("provider", provider_command),
     CallbackQueryHandler(set_provider_callback, pattern=f"^{PROVIDER_CALLBACK_PREFIX}.*$"),

@@ -144,6 +144,7 @@ def main() -> None:
     # Lower-priority group for command handlers (group=1)
     for handler in misc_handlers:
         app.add_handler(handler, group=1)
+
     
     logger.info("Registered handlers with priority groups")
 

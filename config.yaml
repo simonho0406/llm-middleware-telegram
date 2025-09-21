@@ -81,7 +81,7 @@ expert_panel:
       provider: "openrouter"
       model: "deepseek/deepseek-chat-v3.1:free"
       fallback_provider: "nvidia"
-      fallback_model: "openai/gpt-oss-20b"
+      fallback_model: "openai/gpt-oss-120b"
       request_timeout_seconds: 600
 
     Critic:

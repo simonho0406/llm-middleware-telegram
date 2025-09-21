@@ -80,7 +80,7 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
         logger.info(f"(Chat {chat_id}) LLM task was cancelled.")
         # No need to raise again, the cancellation is the end of this workflow.
 
-async def _generate_llm_response(chat_id: int, prompt: str, is_reroll: bool = False, force_truncate: bool = False) -> dict:
+async def _generate_llm_response(chat_id: int, prompt: str, is_reroll: bool = False, force_truncate: bool = False, operation_id: str = "chat_response") -> dict:
     """
     Core LLM response generation logic, decoupled from message formatting and sending.
     Returns a response dict with 'content', 'error', 'truncated_history', and 'provider_info'.
@@ -114,19 +114,6 @@ async def _generate_llm_response(chat_id: int, prompt: str, is_reroll: bool = Fa
         logger.info(f"{log_prefix}Reroll detected. Removing last assistant message from history.")
         processed_history.pop()
 
-    # Check context limits and truncate if needed
-    if not force_truncate:
-        total_tokens = count_tokens(prompt) + sum(count_tokens(msg.get("content", "")) for msg in processed_history)
-        if total_tokens > config.DEFAULT_MAX_CONTEXT_TOKENS:
-            logger.warning(f"{log_prefix}Context limit exceeded ({total_tokens} > {config.DEFAULT_MAX_CONTEXT_TOKENS}).")
-            return {
-                'content': None,
-                'error': 'context_limit_exceeded',
-                'truncated_history': [],
-                'provider_info': {},
-                'search_query': None
-            }
-
     # Get provider configuration
     session_provider = await storage_manager.get_thread_key(chat_id, 'provider', config.DEFAULT_PROVIDER)
     provider_details = providers.get_provider_details()
@@ -152,13 +139,20 @@ async def _generate_llm_response(chat_id: int, prompt: str, is_reroll: bool = Fa
         'service': service
     }
 
-    # Truncate history for token limits
-    truncated_history = await _truncate_history_by_tokens(
-        history=processed_history,
+    # Automatically ensure context fits within model limits
+    from utils.context_manager import ensure_context_fits
+
+    final_history, context_info = await ensure_context_fits(
         prompt=prompt,
-        max_tokens=config.DEFAULT_MAX_CONTEXT_TOKENS,
-        output_buffer=config.CONTEXT_TOKEN_OUTPUT_BUFFER
+        history=processed_history,
+        model=model_to_use,
+        provider=session_provider
     )
+
+    if context_info:
+        logger.info(f"{log_prefix}{context_info}")
+
+    truncated_history = final_history
 
     # Generate LLM response
     raw_full_llm_response = ""
@@ -341,18 +335,26 @@ async def _generate_and_send_response_task(update: Update, context: ContextTypes
     log_prefix = f"(Chat {chat_id}) "
 
     # Generate the LLM response using the decoupled core logic
-    response_data = await _generate_llm_response(chat_id, prompt, is_reroll, force_truncate)
+    operation_id = "reroll" if is_reroll else "chat_response"
+    response_data = await _generate_llm_response(chat_id, prompt, is_reroll, force_truncate, operation_id)
 
-    # Handle context limit exceeded
+    # Handle context limit exceeded with enhanced UI
     if response_data['error'] == 'context_limit_exceeded':
-        logger.warning(f"{log_prefix}Context limit exceeded. Prompting user to shrink.")
-        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Shrink and Retry", callback_data="shrink_and_retry")]])
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text="This conversation is getting long and might exceed the AI's memory. Shall I proceed with a shortened history?",
-            reply_markup=keyboard,
-            parse_mode=None
-        )
+        logger.warning(f"{log_prefix}Context limit exceeded. Using enhanced context management UI.")
+
+        # Import here to avoid circular imports
+        from bot.handlers.context_handler import context_limit_prompt
+
+        context_action = response_data.get('context_action')
+        if context_action and context_action.get('action') == 'prompt_user':
+            await context_limit_prompt(update, context, context_action)
+        else:
+            # Fallback to simple message if context_action is missing
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="Context window is full. Please use /context_settings to configure your preferences or start a new thread with /new.",
+                parse_mode=None
+            )
         return
 
     # Handle search delegation immediately (no duplication)
