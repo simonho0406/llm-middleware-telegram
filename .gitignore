@@ -69,3 +69,6 @@ obj/
 ### Security ###
 **/secrets/
 **/keys/
+
+### Claude Code ###
+.claude/

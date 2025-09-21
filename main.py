@@ -150,13 +150,25 @@ def main() -> None:
     async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error("Exception while handling an update:", exc_info=context.error)
         if isinstance(update, Update) and update.effective_message:
+            error_msg = "Sorry, an internal error occurred. The developers have been notified."
             try:
-                await update.effective_message.reply_text(
-                    "Sorry, an internal error occurred. The developers have been notified.",
-                    parse_mode=None
+                # Try with timeout protection
+                await asyncio.wait_for(
+                    update.effective_message.reply_text(error_msg, parse_mode=None),
+                    timeout=10.0
                 )
-            except Exception as e:
+            except (asyncio.TimeoutError, Exception) as e:
                 logger.error(f"Failed to send error notification to user: {e}")
+                try:
+                    # Fallback: direct send if reply fails
+                    chat_id = update.effective_chat.id if update.effective_chat else None
+                    if chat_id:
+                        await asyncio.wait_for(
+                            context.bot.send_message(chat_id=chat_id, text=error_msg, parse_mode=None),
+                            timeout=10.0
+                        )
+                except (asyncio.TimeoutError, Exception) as fallback_error:
+                    logger.error(f"Fallback error notification also failed: {fallback_error}")
 
     app.add_error_handler(error_handler)
     logger.info("Registered global error handler.")

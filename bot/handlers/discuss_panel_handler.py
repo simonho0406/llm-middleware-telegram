@@ -8,7 +8,10 @@ from telegram.error import TimedOut
 from httpx import ConnectTimeout
 from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, MessageHandler, filters
 from telegram import BotCommandScopeChat
-from utils.text_processing import split_message_markdown_aware, escape_markdown_v2, pure_markdown_to_telegram_v2
+from utils.text_processing import (
+    escape_markdown_v2,
+    parse_markdown_to_ast, split_document_ast_aware, render_ast_to_telegram_v2, render_ast_to_plain_text
+)
 from utils.llm_utilities import get_robust_llm_response, get_expert_panel_fallback_config
 from telegram import constants
 import config
@@ -28,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 async def _run_refinement_cycle(
     proposer_task, critic_task, user_prompt, full_history, placeholder_msg, panel_results,
-    orchestrator_service, orchestrator_model, orchestrator_timeout, orchestrator_config
+    orchestrator_service, orchestrator_model, orchestrator_timeout, orchestrator_config, panel_config: dict
 ):
     """
     Executes the Master & Apprentice iterative refinement cycle.
@@ -36,10 +39,10 @@ async def _run_refinement_cycle(
     Returns:
         tuple: (proposer_response, quality_score, iteration_count)
     """
-    # Extract configuration
-    quality_threshold = config.EXPERT_PANEL_CONFIG.get('quality_threshold', 85)
-    max_iterations = config.EXPERT_PANEL_CONFIG.get('max_refinement_iterations', 3)
-    role_configs = config.EXPERT_PANEL_CONFIG.get('roles', {})
+    # Extract configuration from user's panel_config
+    quality_threshold = panel_config.get('quality_threshold', 85)
+    max_iterations = panel_config.get('max_refinement_iterations', 3)
+    role_configs = panel_config.get('roles', {})
     
     # Setup role configurations
     proposer_role_config = role_configs.get('Proposer', {})
@@ -88,9 +91,61 @@ async def _run_refinement_cycle(
         
         if "[Error:" in proposer_response:
             logger.error(f"Proposer failed: {proposer_response}")
-            return proposer_response, 0, iteration
+            logger.info("Attempting Orchestrator's backup fallback for failed proposer...")
+
+            # Use the Orchestrator's backup (fallback_provider/fallback_model) - proper hierarchy
+            if fallback_provider and fallback_model:
+                fallback_proposer_prompt = f"""You are acting as a backup Proposer to replace a failed primary Proposer.
+
+Original Proposer Task: {proposer_task.get('description', '')}
+
+User's Request: {user_prompt}
+
+Please provide a direct, comprehensive response to the user's request. Focus on being practical and helpful."""
+
+                try:
+                    fallback_response = await get_robust_llm_response(
+                        provider_name=fallback_provider,
+                        model=fallback_model,
+                        prompt=fallback_proposer_prompt,
+                        history=full_history,
+                        role_name='Backup Proposer',
+                        request_timeout=orchestrator_timeout,
+                        fallback_provider=None,  # No further fallback for backup
+                        fallback_model=None
+                    )
+
+                    if "[Error:" not in fallback_response:
+                        logger.info("Orchestrator's backup successfully provided fallback response")
+                        # Update panel results to reflect backup fallback
+                        panel_results['Proposer'] = {
+                            'provider': fallback_provider,
+                            'model': fallback_model,
+                            'status': 'Success (Backup Fallback)',
+                            'response': fallback_response,
+                            'fallback': True
+                        }
+                        proposer_response = fallback_response
+                    else:
+                        logger.error(f"Orchestrator's backup also failed: {fallback_response}")
+                        return proposer_response, 0, iteration
+
+                except Exception as fallback_error:
+                    logger.error(f"Orchestrator's backup failed with exception: {fallback_error}")
+                    return proposer_response, 0, iteration
+            else:
+                logger.error("No fallback provider/model configured for Orchestrator. Cannot proceed with backup.")
+                return proposer_response, 0, iteration
         
-        await placeholder_msg.edit_text(f"Round {iteration}/{max_iterations}: Critic is reviewing...", parse_mode=None)
+        try:
+            await asyncio.wait_for(
+                placeholder_msg.edit_text(f"Round {iteration}/{max_iterations}: Critic is reviewing...", parse_mode=None),
+                timeout=8.0
+            )
+        except (asyncio.TimeoutError, telegram.error.TimedOut) as e:
+            logger.warning(f"Timeout updating status to 'Critic reviewing' in round {iteration}: {e}")
+        except Exception as e:
+            logger.warning(f"Failed to update status to 'Critic reviewing' in round {iteration}: {e}")
         
         # Execute Critic
         enhanced_critic_prompt = f"""
@@ -191,11 +246,37 @@ async def _run_refinement_cycle(
             fallback_model=fallback_model
         )
         
-        # Parse quality assessment
+        # Parse quality assessment using robust JSON extraction
         try:
-            json_match = re.search(r'{[\s\S]*}', quality_response)
-            if json_match:
-                json_str = json_match.group(0)
+            # Strategy 1: Use brace counting for balanced JSON extraction
+            json_str = None
+            brace_count = 0
+            start_pos = None
+            
+            for i, char in enumerate(quality_response):
+                if char == '{':
+                    if start_pos is None:
+                        start_pos = i
+                    brace_count += 1
+                elif char == '}':
+                    brace_count -= 1
+                    if brace_count == 0 and start_pos is not None:
+                        json_str = quality_response[start_pos:i+1]
+                        break
+            
+            # Strategy 2: Fallback to regex if brace counting didn't work
+            if not json_str:
+                json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', quality_response)
+                if json_match:
+                    json_str = json_match.group(0)
+            
+            # Strategy 3: Last resort - try the original greedy approach
+            if not json_str:
+                json_match = re.search(r'{[\s\S]*}', quality_response)
+                if json_match:
+                    json_str = json_match.group(0)
+            
+            if json_str:
                 quality_assessment = json.loads(json_str)
                 quality_score = quality_assessment.get('quality_score', 0)
                 refinement_instructions = quality_assessment.get('refinement_instructions', '')
@@ -206,6 +287,8 @@ async def _run_refinement_cycle(
                 
         except (json.JSONDecodeError, ValueError, Exception) as e:
             logger.error(f"Quality gate parsing failed: {e}")
+            # Log the problematic response for debugging
+            logger.debug(f"Problematic quality response (first 500 chars): {quality_response[:500]}")
             logger.warning("Quality gate failed, using emergency fallback")
             quality_score = quality_threshold  # Set to threshold to break loop
             refinement_instructions = ""
@@ -273,44 +356,35 @@ async def set_panel_commands(application, chat_id: int) -> None:
 
 
 def _format_panel_summary(panel_results: dict) -> str:
-    """Formats the results of the panel execution into a markdown string with quality metrics."""
-    from utils.text_processing import escape_markdown_v2
-    summary_parts = ["*Panel Execution Summary:*"]
-    
-    # Extract quality metrics first (if available)
+    """Formats the results of the panel execution into a pure markdown string."""
+    summary_parts = ["Panel Execution Summary:"]
+
     quality_metrics = panel_results.get('Quality_Metrics', {})
-    
-    # Format agent execution results (skip Quality_Metrics entry)
+
     for role, result in panel_results.items():
-        if role == 'Quality_Metrics':  # Skip the metrics entry in agent listing
+        if role == 'Quality_Metrics':
             continue
-            
+
         status_icon = "✅" if result.get('status') == 'Success' else "⚠️"
-        # Escape only dynamic parts
-        provider = escape_markdown_v2(result.get('provider', 'Unknown'))
-        model = escape_markdown_v2(result.get('model', 'Unknown'))
-        status = escape_markdown_v2(result.get('status', 'Unknown'))
-        fallback_note = escape_markdown_v2(" (Fallback)") if result.get('fallback') else ""
-        summary_parts.append(f"{status_icon} *{role}:* `{provider}/{model}` ({status}){fallback_note}")
-    
-    # Add quality metrics section if available
+        provider = result.get('provider', 'Unknown')
+        model = result.get('model', 'Unknown')
+        status = result.get('status', 'Unknown')
+        fallback_note = " (Fallback)" if result.get('fallback') else ""
+        summary_parts.append(f"{status_icon} {role}: {provider}/{model} ({status}){fallback_note}")
+
     if quality_metrics:
         final_score = quality_metrics.get('final_score', 'N/A')
         threshold = quality_metrics.get('threshold', 'N/A')
         iterations_used = quality_metrics.get('iterations_used', 'N/A')
         max_iterations = quality_metrics.get('max_iterations', 'N/A')
-        
-        # Determine quality status icon
-        if isinstance(final_score, (int, float)) and isinstance(threshold, (int, float)):
-            quality_icon = "🎯" if final_score >= threshold else "📈"
-        else:
-            quality_icon = "📊"
-        
-        summary_parts.append("")  # Empty line for separation
-        summary_parts.append("*Quality Metrics:*")
-        summary_parts.append(f"{quality_icon} Final Score: `{final_score}/{threshold}` \\(Achieved/Threshold\\)")
-        summary_parts.append(f"🔄 Refinement Rounds: `{iterations_used}/{max_iterations}` \\(Used/Max\\)")
-    
+
+        quality_icon = "🎯" if isinstance(final_score, (int, float)) and isinstance(threshold, (int, float)) and final_score >= threshold else "📈"
+
+        summary_parts.append("")
+        summary_parts.append("Quality Metrics:")
+        summary_parts.append(f"{quality_icon} Final Score: {final_score}/{threshold} (Achieved/Threshold)")
+        summary_parts.append(f"🔄 Refinement Rounds: `{iterations_used}/{max_iterations}` (Used/Max)")
+
     return "\n".join(summary_parts)
 
 async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: str, full_history: list, placeholder_msg, chat_id: int) -> tuple:
@@ -323,12 +397,17 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
     # Validate expert panel configuration
     try:
         # Load user's custom configuration or fall back to defaults
-        custom_config = await storage_manager.get_user_setting(chat_id, 'panel_config', None)
+        config_json = await storage_manager.get_user_setting(chat_id, 'panel_config', None)
         
-        if custom_config:
-            # Use custom user configuration
-            panel_config = custom_config
-            logger.info(f"Using custom panel configuration for chat {chat_id}")
+        if config_json:
+            # Deserialize JSON string back to dictionary
+            try:
+                custom_config = json.loads(config_json)
+                panel_config = custom_config
+                logger.info(f"Using custom panel configuration for chat {chat_id}")
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.warning(f"Failed to parse custom panel config for chat {chat_id}: {e}. Using defaults.")
+                panel_config = config.EXPERT_PANEL_CONFIG
         else:
             # Fall back to default configuration from config.yaml
             panel_config = config.EXPERT_PANEL_CONFIG
@@ -374,7 +453,7 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
             f"⚠️ {str(config_error)} Please check your configuration and use /reroll to try again.",
             parse_mode=None
         )
-        return {}, f"[{str(config_error)}]"
+        return {}, f"[{str(config_error)}]", ""
 
     # --- 1. Deconstruct Task ---
     await placeholder_msg.edit_text("Assembling panel... Decomposing task...", parse_mode=None)
@@ -451,7 +530,7 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
             f"Please use /reroll to try again or /cancel to exit.",
             parse_mode=None
         )
-        return {}, f"[System Error: Orchestrator planning failed. Use /reroll to retry.]"
+        return {}, f"[System Error: Orchestrator planning failed. Use /reroll to retry.]", ""
     
     # Parse JSON from the response using the established extraction strategies
     json_str = None
@@ -490,7 +569,7 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
             f"Please use /reroll to try again or /cancel to exit.",
             parse_mode=None
         )
-        return {}, f"[System Error: Invalid orchestrator response format. Use /reroll to retry.]"
+        return {}, f"[System Error: Invalid orchestrator response format. Use /reroll to retry.]", ""
     
     try:
         orchestrator_plan = json.loads(json_str)
@@ -501,7 +580,7 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
             f"Please use /reroll to try again or /cancel to exit.",
             parse_mode=None
         )
-        return {}, f"[System Error: Orchestrator response parsing failed. Use /reroll to retry.]"
+        return {}, f"[System Error: Orchestrator response parsing failed. Use /reroll to retry.]", ""
     
     # Extract search requirements and tasks from the plan
     requires_search = orchestrator_plan.get("requires_search", False)
@@ -515,7 +594,7 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
             f"Please use /reroll to try again or /cancel to exit.",
             parse_mode=None
         )
-        return {}, f"[System Error: Incomplete orchestrator plan. Use /reroll to retry.]"
+        return {}, f"[System Error: Incomplete orchestrator plan. Use /reroll to retry.]", ""
     
     logger.info(f"Successfully parsed orchestrator's plan. Search required: {requires_search}, Tasks: {len(tasks_list)}")
     
@@ -570,13 +649,13 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
     # The retry logic and error handling is now handled by get_robust_llm_response
 
     # --- 2. Master & Apprentice Architecture: Iterative Quality Loop ---
-    quality_threshold = config.EXPERT_PANEL_CONFIG.get('quality_threshold', 85)
-    max_iterations = config.EXPERT_PANEL_CONFIG.get('max_refinement_iterations', 3)
+    quality_threshold = panel_config.get('quality_threshold', 85)
+    max_iterations = panel_config.get('max_refinement_iterations', 3)
     iteration = 1
     quality_score = 0  # Initialize quality score
     proposer_response = ""
     critic_response = ""
-    role_configs = config.EXPERT_PANEL_CONFIG.get('roles', {})
+    role_configs = panel_config.get('roles', {})
     
     # Find Proposer and Critic in tasks_list
     proposer_task = next((t for t in tasks_list if t.get('role') == 'Proposer'), None)
@@ -588,7 +667,7 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
     # Execute the Master & Apprentice refinement cycle using the helper function
     proposer_response, quality_score, iteration = await _run_refinement_cycle(
         proposer_task, critic_task, user_prompt, full_history, placeholder_msg, panel_results,
-        orchestrator_service, orchestrator_model, orchestrator_timeout, orchestrator_config
+        orchestrator_service, orchestrator_model, orchestrator_timeout, orchestrator_config, panel_config
     )
     if quality_score < quality_threshold and iteration == max_iterations:
         await placeholder_msg.edit_text(f"Reached maximum iterations. Final quality score: {quality_score}/{quality_threshold}", parse_mode=None)
@@ -711,7 +790,29 @@ async def start_panel_discussion(update: Update, context: ContextTypes.DEFAULT_T
         return ConversationHandler.END
     except Exception as e:
         logger.error(f"Panel workflow failed in start_panel_discussion: {e}", exc_info=True)
-        await assembling_msg.edit_text(f"An error occurred: {str(e)}", parse_mode=None)
+
+        # Robust error handling with timeout protection
+        error_message = f"An error occurred: {str(e)}"
+        try:
+            # Try to edit the assembling message with a shorter timeout
+            if assembling_msg:
+                await asyncio.wait_for(
+                    assembling_msg.edit_text(error_message, parse_mode=None),
+                    timeout=8.0
+                )
+        except (asyncio.TimeoutError, Exception) as edit_error:
+            logger.warning(f"Failed to edit assembling message due to: {edit_error}")
+            try:
+                # Fallback: Try to send a new message if editing fails
+                await asyncio.wait_for(
+                    context.bot.send_message(chat_id=chat_id, text=error_message, parse_mode=None),
+                    timeout=10.0
+                )
+            except (asyncio.TimeoutError, Exception) as send_error:
+                logger.error(f"Failed to send error message via fallback: {send_error}")
+                # Last resort: just log the error
+                pass
+
         await _cleanup_discussion_state(context, chat_id, assembling_msg)
         return ConversationHandler.END
 
@@ -728,65 +829,53 @@ async def start_panel_discussion(update: Update, context: ContextTypes.DEFAULT_T
 
     await assembling_msg.delete()
     
-    # Step 1: Generate MarkdownV2-safe summary (presentation chrome)
-    formatted_summary_text = _format_panel_summary(panel_results)
+    # AST-Based Architecture: Parse, Split, and Send
+    pure_summary = _format_panel_summary(panel_results)
+    pure_markdown_content = f"{pure_summary}\n\n---\n\n{final_answer}"
     
-    # Step 2: Generate & Format Content - process ONLY the final answer with Smart Escaper
     try:
-        telegram_safe_final_answer = pure_markdown_to_telegram_v2(final_answer)
-        escaper_success = True
-    except Exception as parser_error:
-        logger.error(f"Smart Escaper failed on final_answer: {parser_error}. Using pure Markdown fallback.")
-        telegram_safe_final_answer = final_answer
-        escaper_success = False
-    
-    # Step 3: Combine Safely - both parts are now in their proper formats
-    # Only add separator and content if final_answer has substance (Challenge B fix)
-    if telegram_safe_final_answer.strip():
-        final_text = f"{formatted_summary_text}\n\n---\n\n{telegram_safe_final_answer}"
-    else:
-        final_text = formatted_summary_text  # Summary only, no dangling separator
-    
-    # Step 4: Split and Send with MarkdownV2
-    content_parts = split_message_markdown_aware(final_text)
-    
-    for i, part in enumerate(content_parts):
-        try:
-            # Send with MarkdownV2 since both summary and content are properly formatted
-            await context.bot.send_message(chat_id=chat_id, text=part, parse_mode=constants.ParseMode.MARKDOWN_V2)
-        except BadRequest as e:
-            logger.warning(f"Part {i+1} MarkdownV2 failed: {e}. Using separate message fallback.")
-            
-            # Step 5: Enhanced Fallback - send summary and content as separate messages
-            # First, send the summary with proper splitting to handle long summaries
-            summary_parts = split_message_markdown_aware(formatted_summary_text)
-            for summary_part in summary_parts:
+        # Step 1: Parse Markdown to AST
+        document = parse_markdown_to_ast(pure_markdown_content)
+        
+        # Step 2: Split AST into logical chunks
+        ast_chunks = split_document_ast_aware(document)
+        
+        # Step 3: Send each chunk with proper fallback
+        for i, chunk_doc in enumerate(ast_chunks):
+            try:
+                # Render AST chunk to MarkdownV2
+                telegram_safe_text = render_ast_to_telegram_v2(chunk_doc)
+                await context.bot.send_message(chat_id=chat_id, text=telegram_safe_text, parse_mode=constants.ParseMode.MARKDOWN_V2)
+            except BadRequest as e:
+                logger.warning(f"Chunk {i+1} MarkdownV2 failed: {e}. Rendering same AST chunk as plain text.")
                 try:
-                    # Send summary parts (already MarkdownV2-safe)
-                    await context.bot.send_message(chat_id=chat_id, text=summary_part, parse_mode=constants.ParseMode.MARKDOWN_V2)
-                except BadRequest as summary_error:
-                    logger.warning(f"Summary part MarkdownV2 failed: {summary_error}. Using plain text.")
-                    # Summary part fallback to plain text
-                    try:
-                        await context.bot.send_message(chat_id=chat_id, text=summary_part, parse_mode=None)
-                    except BadRequest as plain_summary_error:
-                        logger.error(f"Even summary part plain text failed: {plain_summary_error}")
-                        # Last resort: send fallback message
-                        try:
-                            await context.bot.send_message(chat_id=chat_id, text="⚠️ Panel Summary (display failed)", parse_mode=None)
-                        except BadRequest:
-                            pass  # Give up on this summary part
-                        
-            # Then send the final answer, also with proper splitting
-            if final_answer.strip():  # Only send if not empty (Challenge B fix)
-                answer_parts = split_message_markdown_aware(final_answer)
-                for answer_part in answer_parts:
-                    try:
-                        await context.bot.send_message(chat_id=chat_id, text=answer_part, parse_mode=None)
-                    except BadRequest as answer_error:
-                        logger.error(f"Final answer part failed: {answer_error}. Skipping this part.")
-            
-            break  # Exit the loop after fallback attempt
+                    # Render the same AST chunk as clean plain text
+                    plain_text = render_ast_to_plain_text(chunk_doc)
+                    await context.bot.send_message(chat_id=chat_id, text=f"⚠️ This section could not be formatted correctly.\n\n{plain_text}", parse_mode=None)
+                except BadRequest as final_error:
+                    logger.error(f"Final attempt for chunk {i+1} failed: {final_error}. Skipping chunk.")
+
+    except Exception as ast_error:
+        logger.error(f"AST processing failed: {ast_error}. Using emergency fallback.")
+        # Emergency: Send as single plain text message with length truncation
+        emergency_content = f"⚠️ Content formatting failed.\n\n{pure_markdown_content}"
+
+        # Simple length-based chunking for emergency scenarios
+        max_length = 4000  # Conservative limit for Telegram
+        if len(emergency_content) <= max_length:
+            try:
+                await context.bot.send_message(chat_id=chat_id, text=emergency_content, parse_mode=None)
+            except Exception as emergency_error:
+                logger.error(f"Emergency fallback failed: {emergency_error}. Critical failure.")
+        else:
+            # Split into chunks without using legacy markdown-aware splitting
+            chunks = [emergency_content[i:i+max_length] for i in range(0, len(emergency_content), max_length)]
+            for i, chunk in enumerate(chunks):
+                try:
+                    chunk_prefix = f"Part {i+1}/{len(chunks)}: " if len(chunks) > 1 else ""
+                    await context.bot.send_message(chat_id=chat_id, text=f"{chunk_prefix}{chunk}", parse_mode=None)
+                except Exception as emergency_error:
+                    logger.error(f"Emergency chunk {i+1} failed: {emergency_error}. Critical failure.")
 
     return AWAITING_FOLLOW_UP
 
@@ -822,7 +911,16 @@ async def handle_follow_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             return ConversationHandler.END
         except Exception as e:
             logger.error(f"Panel workflow failed in handle_follow_up: {e}", exc_info=True)
-            await placeholder.edit_text(f"An error occurred: {str(e)}", parse_mode=None)
+            try:
+                if placeholder:
+                    await asyncio.wait_for(
+                        placeholder.edit_text(f"An error occurred: {str(e)}", parse_mode=None),
+                        timeout=8.0
+                    )
+            except (asyncio.TimeoutError, telegram.error.TimedOut) as timeout_e:
+                logger.warning(f"Timeout editing error message in follow_up: {timeout_e}")
+            except Exception as edit_e:
+                logger.warning(f"Failed to edit error message in follow_up: {edit_e}")
             await _cleanup_discussion_state(context, chat_id, placeholder)
             return ConversationHandler.END
 
@@ -833,65 +931,54 @@ async def handle_follow_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
         await placeholder.delete()
         
-        # Step 1: Generate MarkdownV2-safe summary (presentation chrome)
-        formatted_summary_text = _format_panel_summary(new_panel_results)
-        
-        # Step 2: Generate & Format Content - process ONLY the final answer with Smart Escaper
+        # Step 1: Generate pure markdown content
+        pure_summary = _format_panel_summary(new_panel_results)
+        pure_markdown_content = f"{pure_summary}\n\n---\n\n{new_final_answer}"
+
+        # AST-Based Architecture: Parse, Split, and Send
         try:
-            telegram_safe_final_answer = pure_markdown_to_telegram_v2(new_final_answer)
-            escaper_success = True
-        except Exception as parser_error:
-            logger.error(f"Smart Escaper failed on new_final_answer: {parser_error}. Using pure Markdown fallback.")
-            telegram_safe_final_answer = new_final_answer
-            escaper_success = False
-        
-        # Step 3: Combine Safely - both parts are now in their proper formats
-        # Only add separator and content if final_answer has substance (Challenge B fix)
-        if telegram_safe_final_answer.strip():
-            final_text = f"{formatted_summary_text}\n\n---\n\n{telegram_safe_final_answer}"
-        else:
-            final_text = formatted_summary_text  # Summary only, no dangling separator
-        
-        # Step 4: Split and Send with MarkdownV2
-        content_parts = split_message_markdown_aware(final_text)
-        
-        for i, part in enumerate(content_parts):
-            try:
-                # Send with MarkdownV2 since both summary and content are properly formatted
-                await context.bot.send_message(chat_id=chat_id, text=part, parse_mode=constants.ParseMode.MARKDOWN_V2)
-            except BadRequest as e:
-                logger.warning(f"Part {i+1} MarkdownV2 failed: {e}. Using separate message fallback.")
-                
-                # Step 5: Enhanced Fallback - send summary and content as separate messages
-                # First, send the summary with proper splitting to handle long summaries
-                summary_parts = split_message_markdown_aware(formatted_summary_text)
-                for summary_part in summary_parts:
+            # Step 1: Parse Markdown to AST
+            document = parse_markdown_to_ast(pure_markdown_content)
+
+            # Step 2: Split AST into logical chunks
+            ast_chunks = split_document_ast_aware(document)
+
+            # Step 3: Send each chunk with proper fallback
+            for i, chunk_doc in enumerate(ast_chunks):
+                try:
+                    # Render AST chunk to MarkdownV2
+                    telegram_safe_text = render_ast_to_telegram_v2(chunk_doc)
+                    await context.bot.send_message(chat_id=chat_id, text=telegram_safe_text, parse_mode=constants.ParseMode.MARKDOWN_V2)
+                except BadRequest as e:
+                    logger.warning(f"Chunk {i+1} MarkdownV2 failed: {e}. Rendering same AST chunk as plain text.")
                     try:
-                        # Send summary parts (already MarkdownV2-safe)
-                        await context.bot.send_message(chat_id=chat_id, text=summary_part, parse_mode=constants.ParseMode.MARKDOWN_V2)
-                    except BadRequest as summary_error:
-                        logger.warning(f"Summary part MarkdownV2 failed: {summary_error}. Using plain text.")
-                        # Summary part fallback to plain text
-                        try:
-                            await context.bot.send_message(chat_id=chat_id, text=summary_part, parse_mode=None)
-                        except BadRequest as plain_summary_error:
-                            logger.error(f"Even summary part plain text failed: {plain_summary_error}")
-                            # Last resort: send fallback message
-                            try:
-                                await context.bot.send_message(chat_id=chat_id, text="⚠️ Panel Summary (display failed)", parse_mode=None)
-                            except BadRequest:
-                                pass  # Give up on this summary part
-                                
-                # Then send the final answer, also with proper splitting
-                if new_final_answer.strip():  # Only send if not empty (Challenge B fix)
-                    answer_parts = split_message_markdown_aware(new_final_answer)
-                    for answer_part in answer_parts:
-                        try:
-                            await context.bot.send_message(chat_id=chat_id, text=answer_part, parse_mode=None)
-                        except BadRequest as answer_error:
-                            logger.error(f"Final answer part failed: {answer_error}. Skipping this part.")
-                
-                break  # Exit the loop after fallback attempt
+                        # Render the same AST chunk as clean plain text
+                        plain_text = render_ast_to_plain_text(chunk_doc)
+                        await context.bot.send_message(chat_id=chat_id, text=f"⚠️ This section could not be formatted correctly.\n\n{plain_text}", parse_mode=None)
+                    except BadRequest as final_error:
+                        logger.error(f"Final attempt for chunk {i+1} failed: {final_error}. Skipping chunk.")
+
+        except Exception as ast_error:
+            logger.error(f"AST processing failed: {ast_error}. Using emergency fallback.")
+            # Emergency: Send as single plain text message with length truncation
+            emergency_content = f"⚠️ Content formatting failed.\n\n{pure_markdown_content}"
+
+            # Simple length-based chunking for emergency scenarios
+            max_length = 4000  # Conservative limit for Telegram
+            if len(emergency_content) <= max_length:
+                try:
+                    await context.bot.send_message(chat_id=chat_id, text=emergency_content, parse_mode=None)
+                except Exception as emergency_error:
+                    logger.error(f"Emergency fallback failed: {emergency_error}. Critical failure.")
+            else:
+                # Split into chunks without using legacy markdown-aware splitting
+                chunks = [emergency_content[i:i+max_length] for i in range(0, len(emergency_content), max_length)]
+                for i, chunk in enumerate(chunks):
+                    try:
+                        chunk_prefix = f"Part {i+1}/{len(chunks)}: " if len(chunks) > 1 else ""
+                        await context.bot.send_message(chat_id=chat_id, text=f"{chunk_prefix}{chunk}", parse_mode=None)
+                    except Exception as emergency_error:
+                        logger.error(f"Emergency chunk {i+1} failed: {emergency_error}. Critical failure.")
 
     return AWAITING_FOLLOW_UP
 
@@ -1042,66 +1129,55 @@ async def reroll_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         panel_state['final_answer'] = final_answer
 
         await placeholder_msg.delete()
-        
-        # Step 1: Generate MarkdownV2-safe summary (presentation chrome)
-        formatted_summary_text = _format_panel_summary(panel_results)
-        
-        # Step 2: Generate & Format Content - process ONLY the final answer with Smart Escaper
+
+        # Step 1: Generate pure markdown content
+        pure_summary = _format_panel_summary(panel_results)
+        pure_markdown_content = f"{pure_summary}\n\n---\n\n{final_answer}"
+
+        # AST-Based Architecture: Parse, Split, and Send
         try:
-            telegram_safe_final_answer = pure_markdown_to_telegram_v2(final_answer)
-            escaper_success = True
-        except Exception as parser_error:
-            logger.error(f"Smart Escaper failed on final_answer: {parser_error}. Using pure Markdown fallback.")
-            telegram_safe_final_answer = final_answer
-            escaper_success = False
-        
-        # Step 3: Combine Safely - both parts are now in their proper formats
-        # Only add separator and content if final_answer has substance (Challenge B fix)
-        if telegram_safe_final_answer.strip():
-            final_text = f"{formatted_summary_text}\n\n---\n\n{telegram_safe_final_answer}"
-        else:
-            final_text = formatted_summary_text  # Summary only, no dangling separator
-        
-        # Step 4: Split and Send with MarkdownV2
-        content_parts = split_message_markdown_aware(final_text)
-        
-        for i, part in enumerate(content_parts):
-            try:
-                # Send with MarkdownV2 since both summary and content are properly formatted
-                await context.bot.send_message(chat_id=chat_id, text=part, parse_mode=constants.ParseMode.MARKDOWN_V2)
-            except BadRequest as e:
-                logger.warning(f"Part {i+1} MarkdownV2 failed: {e}. Using separate message fallback.")
-                
-                # Step 5: Enhanced Fallback - send summary and content as separate messages
-                # First, send the summary with proper splitting to handle long summaries
-                summary_parts = split_message_markdown_aware(formatted_summary_text)
-                for summary_part in summary_parts:
+            # Step 1: Parse Markdown to AST
+            document = parse_markdown_to_ast(pure_markdown_content)
+
+            # Step 2: Split AST into logical chunks
+            ast_chunks = split_document_ast_aware(document)
+
+            # Step 3: Send each chunk with proper fallback
+            for i, chunk_doc in enumerate(ast_chunks):
+                try:
+                    # Render AST chunk to MarkdownV2
+                    telegram_safe_text = render_ast_to_telegram_v2(chunk_doc)
+                    await context.bot.send_message(chat_id=chat_id, text=telegram_safe_text, parse_mode=constants.ParseMode.MARKDOWN_V2)
+                except BadRequest as e:
+                    logger.warning(f"Chunk {i+1} MarkdownV2 failed: {e}. Rendering same AST chunk as plain text.")
                     try:
-                        # Send summary parts (already MarkdownV2-safe)
-                        await context.bot.send_message(chat_id=chat_id, text=summary_part, parse_mode=constants.ParseMode.MARKDOWN_V2)
-                    except BadRequest as summary_error:
-                        logger.warning(f"Summary part MarkdownV2 failed: {summary_error}. Using plain text.")
-                        # Summary part fallback to plain text
-                        try:
-                            await context.bot.send_message(chat_id=chat_id, text=summary_part, parse_mode=None)
-                        except BadRequest as plain_summary_error:
-                            logger.error(f"Even summary part plain text failed: {plain_summary_error}")
-                            # Last resort: send fallback message
-                            try:
-                                await context.bot.send_message(chat_id=chat_id, text="⚠️ Panel Summary (display failed)", parse_mode=None)
-                            except BadRequest:
-                                pass  # Give up on this summary part
-                                
-                # Then send the final answer, also with proper splitting
-                if final_answer.strip():  # Only send if not empty (Challenge B fix)
-                    answer_parts = split_message_markdown_aware(final_answer)
-                    for answer_part in answer_parts:
-                        try:
-                            await context.bot.send_message(chat_id=chat_id, text=answer_part, parse_mode=None)
-                        except BadRequest as answer_error:
-                            logger.error(f"Final answer part failed: {answer_error}. Skipping this part.")
-                
-                break  # Exit the loop after fallback attempt
+                        # Render the same AST chunk as clean plain text
+                        plain_text = render_ast_to_plain_text(chunk_doc)
+                        await context.bot.send_message(chat_id=chat_id, text=f"⚠️ This section could not be formatted correctly.\n\n{plain_text}", parse_mode=None)
+                    except BadRequest as final_error:
+                        logger.error(f"Final attempt for chunk {i+1} failed: {final_error}. Skipping chunk.")
+
+        except Exception as ast_error:
+            logger.error(f"AST processing failed: {ast_error}. Using emergency fallback.")
+            # Emergency: Send as single plain text message with length truncation
+            emergency_content = f"⚠️ Content formatting failed.\n\n{pure_markdown_content}"
+
+            # Simple length-based chunking for emergency scenarios
+            max_length = 4000  # Conservative limit for Telegram
+            if len(emergency_content) <= max_length:
+                try:
+                    await context.bot.send_message(chat_id=chat_id, text=emergency_content, parse_mode=None)
+                except Exception as emergency_error:
+                    logger.error(f"Emergency fallback failed: {emergency_error}. Critical failure.")
+            else:
+                # Split into chunks without using legacy markdown-aware splitting
+                chunks = [emergency_content[i:i+max_length] for i in range(0, len(emergency_content), max_length)]
+                for i, chunk in enumerate(chunks):
+                    try:
+                        chunk_prefix = f"Part {i+1}/{len(chunks)}: " if len(chunks) > 1 else ""
+                        await context.bot.send_message(chat_id=chat_id, text=f"{chunk_prefix}{chunk}", parse_mode=None)
+                    except Exception as emergency_error:
+                        logger.error(f"Emergency chunk {i+1} failed: {emergency_error}. Critical failure.")
 
     return AWAITING_FOLLOW_UP
 

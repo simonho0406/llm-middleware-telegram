@@ -1,5 +1,18 @@
 import re
 import logging
+from typing import Any, List, Union
+try:
+    import mistletoe
+    from mistletoe import Document
+    from mistletoe.renderers.base import BaseRenderer
+    from mistletoe.block_tokens import BlockToken
+    from mistletoe.span_tokens import SpanToken
+except ImportError:
+    mistletoe = None
+    Document = None
+    BaseRenderer = None
+    BlockToken = None
+    SpanToken = None
 
 logger = logging.getLogger(__name__)
 
@@ -11,314 +24,443 @@ def escape_markdown_v2(text: str) -> str:
     return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', text)
 
 
-def pure_markdown_to_telegram_v2(text: str) -> str:
-    """
-    Line-aware parser that converts pure Markdown to Telegram MarkdownV2 format.
-    
-    This function processes text line by line, preserving list markers, blockquotes,
-    and headers while intelligently escaping special characters only in plain text.
-    It handles nested formatting and malformed input gracefully.
-    
-    Args:
-        text: Pure Markdown text from the Refiner agent
-        
-    Returns:
-        Telegram MarkdownV2-safe text with proper escaping
-    """
-    if not text:
-        return ""
-    
-    # Characters that need escaping in MarkdownV2 when not part of formatting
-    escape_chars = r'()#+-=|{}.!'
-    
-    lines = text.split('\n')
-    processed_lines = []
-    in_code_block = False
-    
-    for line in lines:
-        if in_code_block:
-            # Inside code block - preserve everything as-is until we find closing ```
-            if line.strip() == '```' or line.strip().startswith('```'):
-                in_code_block = False
-            processed_lines.append(line)
-            continue
-        
-        # Check for code block start
-        if line.strip().startswith('```'):
-            in_code_block = True
-            processed_lines.append(line)
-            continue
-        
-        # Process this line with line-aware formatting preservation
-        processed_line = _process_line_with_formatting_preservation(line, escape_chars)
-        processed_lines.append(processed_line)
-    
-    return '\n'.join(processed_lines)
+# Legacy markdown processing functions removed - replaced with AST-based pipeline
 
 
-def _process_line_with_formatting_preservation(line: str, escape_chars: str) -> str:
-    """
-    Process a single line, preserving markdown list markers, blockquotes, and headers
-    while escaping special characters in plain text portions.
-    """
-    if not line:
-        return line
-    
-    # Detect line-level markdown structures that should be preserved
-    stripped = line.lstrip()
-    
-    # Preserve list markers (-, *, +, 1., 2., etc.)
-    if re.match(r'^[-*+]\s', stripped) or re.match(r'^\d+\.\s', stripped):
-        # Find where the list content starts after the marker
-        marker_match = re.match(r'^([-*+]|\d+\.)\s*', stripped)
-        if marker_match:
-            indent = line[:len(line) - len(stripped)]  # Preserve indentation
-            marker = marker_match.group(0)
-            content = stripped[len(marker):]
-            processed_content = _process_text_with_inline_formatting(content, escape_chars)
-            return indent + marker + processed_content
-    
-    # Preserve blockquotes
-    if stripped.startswith('> '):
-        indent = line[:len(line) - len(stripped)]
-        content = stripped[2:]  # Remove "> "
-        processed_content = _process_text_with_inline_formatting(content, escape_chars)
-        return indent + '> ' + processed_content
-    
-    # Preserve headers
-    if stripped.startswith('#'):
-        header_match = re.match(r'^(#+)\s*', stripped)
-        if header_match:
-            indent = line[:len(line) - len(stripped)]
-            header_prefix = header_match.group(0)
-            content = stripped[len(header_prefix):]
-            processed_content = _process_text_with_inline_formatting(content, escape_chars)
-            return indent + header_prefix + processed_content
-    
-    # Regular line - process with full formatting
-    return _process_text_with_inline_formatting(line, escape_chars)
+# ================================
+# AST-BASED ARCHITECTURE COMPONENTS
+# ================================
 
-
-def _process_text_with_inline_formatting(text: str, escape_chars: str) -> str:
-    """
-    Process text for inline formatting like *bold*, _italic_, `code`, handling nesting gracefully.
-    Uses a more robust approach than simple find() to handle complex cases.
-    """
-    if not text:
-        return ""
+# Only define AST-based classes if mistletoe is available
+if mistletoe is not None and BaseRenderer is not None:
     
-    result = []
-    i = 0
-    length = len(text)
-    
-    while i < length:
-        char = text[i]
+    class TelegramV2Renderer(BaseRenderer):
+        """
+        Custom AST-based renderer for Telegram MarkdownV2 format.
         
-        # Handle single backtick code spans first (highest precedence)
-        if char == '`':
-            code_span, new_i = _extract_code_span(text, i)
-            if code_span:
-                result.append(code_span)
-                i = new_i
-                continue
+        This renderer provides context-aware escaping by understanding the document structure.
+        It ensures special characters are only escaped in plain text content, not in formatting syntax.
+        """
+        
+        def __init__(self):
+            super().__init__()
+            # Characters that need escaping in MarkdownV2 plain text contexts
+            # Complete list: _ * [ ] ( ) ~ ` > # + - = | { } . ! \
+            self.escape_chars = r'_*[]()~`>#+-=|{}.!\\'  # Backslash must be last
+            # Manually register all missing renderers that mistletoe doesn't auto-detect
+            self.render_map['LineBreak'] = self.render_line_break
+            self.render_map['ThematicBreak'] = self.render_thematic_break
+            self.render_map['SoftBreak'] = self.render_line_break  # Handle both soft and hard breaks
+            self.render_map['HardLineBreak'] = self.render_line_break  # Handle both soft and hard breaks
+            self.render_map['Strong'] = self.render_strong_emphasis  # Handle **bold** text
+        
+        def render_raw_text(self, token):
+            """Render raw text with proper MarkdownV2 escaping."""
+            if hasattr(token, 'content'):
+                text = token.content
             else:
-                # Unclosed backtick - pass through (backticks don't need escaping)
-                result.append(char)
-                i += 1
-                continue
+                text = str(token)
+            
+            # Escape special characters for MarkdownV2
+            return re.sub(f'([{re.escape(self.escape_chars)}])', r'\\\1', text)
         
-        # Handle bold formatting (**text** or __text__)
-        elif char == '*' and i < length - 1 and text[i + 1] == '*':
-            bold_text, new_i = _extract_formatting_span(text, i, '**')
-            if bold_text:
-                result.append(bold_text)
-                i = new_i
-                continue
-            else:
-                # Unclosed ** - escape the first *
-                result.append('\\*')
-                i += 1
-                continue
-                
-        elif char == '_' and i < length - 1 and text[i + 1] == '_':
-            bold_text, new_i = _extract_formatting_span(text, i, '__')
-            if bold_text:
-                result.append(bold_text)
-                i = new_i
-                continue
-            else:
-                # Unclosed __ - escape the first _
-                result.append('\\_')
-                i += 1
-                continue
+        def render_emphasis(self, token):
+            """Render italic text (_text_) - MarkdownV2 uses underscores for italic."""
+            return f"_{self.render_inner(token)}_"
         
-        # Handle italic formatting (*text* or _text_)
-        elif char == '*':
-            italic_text, new_i = _extract_formatting_span(text, i, '*')
-            if italic_text:
-                result.append(italic_text)
-                i = new_i
-                continue
-            else:
-                # Unclosed * - escape it
-                result.append('\\*')
-                i += 1
-                continue
-                
-        elif char == '_':
-            italic_text, new_i = _extract_formatting_span(text, i, '_')
-            if italic_text:
-                result.append(italic_text)
-                i = new_i
-                continue
-            else:
-                # Unclosed _ - escape it
-                result.append('\\_')
-                i += 1
-                continue
+        def render_strong_emphasis(self, token):
+            """Render bold text (**text**).""" 
+            return f"**{self.render_inner(token)}**"
         
-        # Handle characters that need escaping in plain text
-        elif char in escape_chars:
-            result.append('\\' + char)
-            i += 1
+        def render_inline_code(self, token):
+            """Render inline code (`code`)."""
+            return f"`{token.children[0].content}`"
         
-        # Regular characters - pass through unchanged
-        else:
-            result.append(char)
-            i += 1
-    
-    return ''.join(result)
-
-
-def _extract_code_span(text: str, start_pos: int) -> tuple[str, int]:
-    """Extract a code span (`...`) if properly closed, handling nesting gracefully."""
-    if text[start_pos] != '`':
-        return None, start_pos
-    
-    # Find the matching closing backtick
-    end_pos = text.find('`', start_pos + 1)
-    if end_pos != -1:
-        return text[start_pos:end_pos + 1], end_pos + 1
-    else:
-        return None, start_pos
-
-
-def _extract_formatting_span(text: str, start_pos: int, delimiter: str) -> tuple[str, int]:
-    """Extract a formatting span (like **bold** or *italic*) if properly closed."""
-    if not text[start_pos:].startswith(delimiter):
-        return None, start_pos
-    
-    # Look for matching closing delimiter, but be smarter about nesting
-    search_start = start_pos + len(delimiter)
-    end_pos = text.find(delimiter, search_start)
-    
-    if end_pos != -1:
-        # Basic validation: ensure the content between delimiters isn't empty
-        content = text[search_start:end_pos]
-        if content.strip():  # Non-empty content
-            return text[start_pos:end_pos + len(delimiter)], end_pos + len(delimiter)
-    
-    return None, start_pos
-
-TELEGRAM_MAX_LEN = 4096 # Default, can be overridden
-
-def split_message_markdown_aware(text: str, max_len: int = TELEGRAM_MAX_LEN) -> list[str]:
-    """
-    Splits a long message into chunks suitable for Telegram, respecting MarkdownV2 code blocks.
-
-    Args:
-        text: The full text message to split.
-        max_len: The maximum length allowed per chunk (Telegram limit).
-
-    Returns:
-        A list of text chunks, each under max_len.
-    """
-    if len(text) <= max_len:
-        return [text]
-
-    chunks = []
-    current_chunk = ""
-    in_code_block = False
-    code_block_delimiter = ""
-    lines = text.splitlines(keepends=True) # Keep newlines for accurate length
-
-    for line in lines:
-        # Detect start/end of code blocks
-        if line.strip().startswith("```"):
-            if not in_code_block:
-                in_code_block = True
-                code_block_delimiter = line.strip()
-            # Check if this is the matching closing delimiter
-            elif line.strip() == code_block_delimiter:
-                 in_code_block = False
-            # Handle nested or mismatched blocks simply by toggling state
-            # This isn't perfect parsing but handles common cases.
-
-        # --- Check if adding the next line exceeds max_len ---
-        if len(current_chunk) + len(line) > max_len:
-            # If we are inside a code block, we cannot split here.
-            # We need to backtrack and split *before* the code block started,
-            # or if the block itself is too long, split forcefully (though this is less ideal).
-            if in_code_block:
-                 # Option 1: If the current chunk (before this line) is valid, push it.
-                 if current_chunk:
-                     logger.debug(f"Splitting before code block due to length limit.")
-                     chunks.append(current_chunk)
-                     current_chunk = ""
-                 # Option 2: If the code block line *itself* is too long (rare)
-                 elif len(line) > max_len:
-                     logger.warning("Code block line exceeds max_len, splitting forcefully.")
-                     # Force split the long line (might break rendering)
-                     chunks.append(line[:max_len])
-                     current_chunk = line[max_len:] # Start next chunk with the remainder
-                     continue # Skip normal append below
-
-            # If not in a code block, try to find a good split point
-            else:
-                # Prefer splitting at double newline (paragraph break)
-                split_pos = current_chunk.rfind('\n\n')
-                if split_pos != -1:
-                    chunks.append(current_chunk[:split_pos + 2]) # Include the double newline
-                    current_chunk = current_chunk[split_pos + 2:]
-                # Otherwise, try splitting at the last single newline
-                elif '\n' in current_chunk:
-                     split_pos = current_chunk.rfind('\n')
-                     chunks.append(current_chunk[:split_pos + 1]) # Include the newline
-                     current_chunk = current_chunk[split_pos + 1:]
-                # If no newline, split at the last space
-                elif ' ' in current_chunk:
-                    split_pos = current_chunk.rfind(' ')
-                    chunks.append(current_chunk[:split_pos + 1]) # Include the space
-                    current_chunk = current_chunk[split_pos + 1:]
-                # Force split if no good point found (long word/line)
+        def render_code_fence(self, token):
+            """Render code blocks (```code```)."""
+            language = getattr(token, 'language', '') or ''
+            code_content = token.children[0].content if token.children else ''
+            return f"```{language}\n{code_content}```"
+        
+        def render_heading(self, token):
+            """Render headings with bold formatting instead of # - MarkdownV2 doesn't support # headers."""
+            content = self.render_inner(token)
+            # MarkdownV2 doesn't support # headers, use bold text instead
+            return f"**{content}**"
+        
+        def render_list(self, token):
+            """Render lists with proper formatting."""
+            items = []
+            for i, item in enumerate(token.children):
+                if hasattr(token, 'start') and token.start is not None:
+                    # Ordered list - safely handle start value
+                    try:
+                        # If start is callable, call it; otherwise use it directly
+                        start_num = token.start() if callable(token.start) else token.start
+                        number = int(start_num) + i
+                        items.append(f"{number}\\. {self.render_inner(item)}")
+                    except (TypeError, ValueError, AttributeError):
+                        # Fallback to sequential numbering starting from 1
+                        number = i + 1
+                        items.append(f"{number}\\. {self.render_inner(item)}")
                 else:
-                    logger.warning("Force splitting text as no paragraph/space break found.")
-                    chunks.append(current_chunk[:max_len])
-                    current_chunk = current_chunk[max_len:]
+                    # Unordered list - use escaped dash instead of bullet
+                    items.append(f"\\- {self.render_inner(item)}")
+            return '\n'.join(items)
+        
+        def render_list_item(self, token):
+            """Render individual list items."""
+            return self.render_inner(token)
+        
+        def render_quote(self, token):
+            """Render blockquotes with escaped > characters."""
+            content = self.render_inner(token)
+            # Split by lines and add escaped > to each line
+            lines = content.split('\n')
+            return '\n'.join(f"\\> {line}" for line in lines)
+        
+        def render_link(self, token):
+            """Render links [text](url)."""
+            text = self.render_inner(token)
+            url = token.target
+            return f"[{text}]({url})"
+        
+        def render_paragraph(self, token):
+            """Render paragraphs with proper spacing."""
+            return self.render_inner(token)
+        
+        def render_line_break(self, token):
+            """Render line breaks (both hard and soft)."""
+            if hasattr(token, 'soft') and token.soft:
+                # Soft line break - treat as space in Telegram
+                return ' '
+            else:
+                # Hard line break - treat as newline
+                return '\n'
+        
+        def render_thematic_break(self, token):
+            """Render thematic breaks (horizontal rules)."""
+            return '\n---\n'
+        
+        def render_table(self, token):
+            """Render tables as plain-text representation in code block."""
+            rows = []
+            
+            # Process header row if it exists
+            if hasattr(token, 'header') and token.header:
+                header_cells = []
+                for cell in token.header.children:
+                    cell_content = self.render_inner(cell).strip()
+                    header_cells.append(cell_content)
+                
+                # Create header row
+                header_row = '| ' + ' | '.join(header_cells) + ' |'
+                rows.append(header_row)
+                
+                # Create separator row
+                separator = '|' + '|'.join(['----------' for _ in header_cells]) + '|'
+                rows.append(separator)
+            
+            # Process data rows
+            for child in token.children:
+                if hasattr(child, 'children'):  # This is a table row
+                    row_cells = []
+                    for cell in child.children:
+                        cell_content = self.render_inner(cell).strip()
+                        row_cells.append(cell_content)
+                    
+                    row = '| ' + ' | '.join(row_cells) + ' |'
+                    rows.append(row)
+            
+            # Join all rows and wrap in code block for alignment preservation
+            table_content = '\n'.join(rows)
+            return f'```\n{table_content}\n```'
+        
+        def render_inner(self, token):
+            """Render the inner content of a token."""
+            if hasattr(token, 'children') and token.children:
+                return ''.join(self.render(child) for child in token.children)
+            elif hasattr(token, 'content'):
+                return self.render_raw_text(token)
+            else:
+                return ''
+        
+        def render_document(self, token):
+            """Render a Document token (top-level container)."""
+            return self.render_inner(token)
 
-        # Add the line to the potentially modified current_chunk
-        current_chunk += line
+    
+    class PlainTextRenderer(BaseRenderer):
+        """
+        Simple renderer that strips all formatting and returns clean plain text.
+        Used as fallback when MarkdownV2 parsing fails.
+        """
 
-    # Add the last remaining chunk
-    if current_chunk:
-        # If the last chunk is still too long (e.g., a huge code block at the end)
-        while len(current_chunk) > max_len:
-             logger.warning("Last chunk exceeds max_len, force splitting.")
-             # Try to split gracefully first if possible within the remainder
-             split_point = max_len
-             if in_code_block: # Less ideal to split code blocks, but necessary
-                 pass # Force split at max_len
-             else:
-                 # Try splitting at newline/space if possible
-                 nl_pos = current_chunk.rfind('\n', 0, max_len)
-                 sp_pos = current_chunk.rfind(' ', 0, max_len)
-                 best_pos = max(nl_pos, sp_pos)
-                 if best_pos > 0:
-                     split_point = best_pos + 1 # Include the newline/space
+        def __init__(self):
+            super().__init__()
+            # Manually register all missing renderers that mistletoe doesn't auto-detect
+            self.render_map['Strong'] = self.render_strong_emphasis  # Handle **bold** text
 
-             chunks.append(current_chunk[:split_point])
-             current_chunk = current_chunk[split_point:]
-        chunks.append(current_chunk) # Add the final part
+        def render_raw_text(self, token):
+            """Render raw text without any escaping."""
+            if hasattr(token, 'content'):
+                return token.content
+            else:
+                return str(token)
+        
+        def render_emphasis(self, token):
+            """Render italic as plain text."""
+            return self.render_inner(token)
+        
+        def render_strong_emphasis(self, token):
+            """Render bold as plain text."""
+            return self.render_inner(token)
+        
+        def render_inline_code(self, token):
+            """Render inline code as plain text."""
+            return token.children[0].content if token.children else ''
+        
+        def render_code_fence(self, token):
+            """Render code blocks as plain text."""
+            return token.children[0].content if token.children else ''
+        
+        def render_heading(self, token):
+            """Render headings as plain text."""
+            return self.render_inner(token)
+        
+        def render_list(self, token):
+            """Render lists as plain text with simple bullets."""
+            items = []
+            for i, item in enumerate(token.children):
+                if hasattr(token, 'start') and token.start is not None:
+                    # Ordered list - safely handle start value
+                    try:
+                        # If start is callable, call it; otherwise use it directly
+                        start_num = token.start() if callable(token.start) else token.start
+                        number = int(start_num) + i
+                        items.append(f"{number}. {self.render_inner(item)}")
+                    except (TypeError, ValueError, AttributeError):
+                        # Fallback to sequential numbering starting from 1
+                        number = i + 1
+                        items.append(f"{number}. {self.render_inner(item)}")
+                else:
+                    # Unordered list
+                    items.append(f"• {self.render_inner(item)}")
+            return '\n'.join(items)
+        
+        def render_list_item(self, token):
+            """Render list items as plain text."""
+            return self.render_inner(token)
+        
+        def render_quote(self, token):
+            """Render blockquotes as plain text."""
+            return self.render_inner(token)
+        
+        def render_link(self, token):
+            """Render links as plain text with URL."""
+            text = self.render_inner(token)
+            url = token.target
+            return f"{text} ({url})"
+        
+        def render_paragraph(self, token):
+            """Render paragraphs as plain text."""
+            return self.render_inner(token)
+        
+        def render_table(self, token):
+            """Render tables as simple plain text without code block wrapping."""
+            rows = []
+            
+            # Process header row if it exists
+            if hasattr(token, 'header') and token.header:
+                header_cells = []
+                for cell in token.header.children:
+                    cell_content = self.render_inner(cell).strip()
+                    header_cells.append(cell_content)
+                
+                # Create header row
+                header_row = '| ' + ' | '.join(header_cells) + ' |'
+                rows.append(header_row)
+                
+                # Create separator row
+                separator = '|' + '|'.join(['----------' for _ in header_cells]) + '|'
+                rows.append(separator)
+            
+            # Process data rows
+            for child in token.children:
+                if hasattr(child, 'children'):  # This is a table row
+                    row_cells = []
+                    for cell in child.children:
+                        cell_content = self.render_inner(cell).strip()
+                        row_cells.append(cell_content)
+                    
+                    row = '| ' + ' | '.join(row_cells) + ' |'
+                    rows.append(row)
+            
+            # Return plain text table without code block wrapping
+            return '\n'.join(rows)
+        
+        def render_inner(self, token):
+            """Render the inner content of a token."""
+            if hasattr(token, 'children') and token.children:
+                return ''.join(self.render(child) for child in token.children)
+            elif hasattr(token, 'content'):
+                return self.render_raw_text(token)
+            else:
+                return ''
+        
+        def render_document(self, token):
+            """Render a Document token (top-level container)."""
+            return self.render_inner(token)
 
-    # Filter out empty chunks that might result from splitting logic
-    return [chunk for chunk in chunks if chunk.strip()]
+    
+    def split_document_ast_aware(document: 'Document', max_len: int = 4096) -> List['Document']:
+        """
+        Splits a Markdown AST document into smaller documents suitable for Telegram.
+        
+        This function respects the logical structure of the document, ensuring that
+        blocks like lists, tables, and code blocks are never split in the middle.
+        
+        Args:
+            document: A mistletoe Document object (AST)
+            max_len: Maximum length per chunk (Telegram limit)
+            
+        Returns:
+            List of Document objects, each containing a subset of the original blocks
+        """
+        renderer = TelegramV2Renderer()
+        chunks = []
+        current_blocks = []
+        current_length = 0
+        
+        for block in document.children:
+            # Render this block to estimate its length
+            block_text = renderer.render(block)
+            block_length = len(block_text)
+            
+            # If this single block exceeds max_len, it goes in its own chunk
+            if block_length > max_len:
+                # Finalize current chunk if it has content
+                if current_blocks:
+                    chunk_doc = Document(children=current_blocks)
+                    chunks.append(chunk_doc)
+                    current_blocks = []
+                    current_length = 0
+
+                # Create a chunk with just this oversized block
+                oversized_doc = Document(children=[block])
+                chunks.append(oversized_doc)
+                continue
+            
+            # If adding this block would exceed the limit, finalize current chunk
+            if current_length + block_length > max_len and current_blocks:
+                chunk_doc = Document(children=current_blocks)
+                chunks.append(chunk_doc)
+                current_blocks = []
+                current_length = 0
+            
+            # Add this block to the current chunk
+            current_blocks.append(block)
+            current_length += block_length
+        
+        # Add the final chunk if it has content
+        if current_blocks:
+            chunk_doc = Document(children=current_blocks)
+            chunks.append(chunk_doc)
+        
+        return chunks
+
+    
+    def parse_markdown_to_ast(markdown_text: str) -> 'Document':
+        """
+        Parse Markdown text into an AST using mistletoe.
+
+        Args:
+            markdown_text: Pure Markdown text
+
+        Returns:
+            mistletoe Document object (AST)
+        """
+        # Use the correct API: Document.read() expects string or list of lines
+        return Document.read(markdown_text)
+
+    
+    def render_ast_to_telegram_v2(document: 'Document') -> str:
+        """
+        Render a Markdown AST to Telegram MarkdownV2 format.
+        
+        Args:
+            document: mistletoe Document object
+            
+        Returns:
+            Telegram MarkdownV2-formatted string
+        """
+        renderer = TelegramV2Renderer()
+        return renderer.render(document)
+
+    
+    def render_ast_to_plain_text(document: 'Document') -> str:
+        """
+        Render a Markdown AST to clean plain text (fallback).
+
+        Args:
+            document: mistletoe Document object
+
+        Returns:
+            Clean plain text string
+        """
+        renderer = PlainTextRenderer()
+        return renderer.render(document)
+
+
+    def format_for_telegram_v2(markdown_text: str) -> str:
+        """
+        High-level function to format Markdown text for Telegram MarkdownV2.
+
+        This is the single authoritative formatting function that uses AST-based processing.
+
+        Args:
+            markdown_text: Pure Markdown text
+
+        Returns:
+            Telegram MarkdownV2-formatted string
+
+        Raises:
+            Exception: If AST processing fails for any reason
+        """
+        try:
+            # Parse the markdown into an AST
+            document = parse_markdown_to_ast(markdown_text)
+
+            # Render to Telegram MarkdownV2
+            return render_ast_to_telegram_v2(document)
+
+        except Exception as e:
+            # Re-raise with context for the caller to handle fallback
+            logger.error(f"AST-based formatting failed: {e}")
+            raise Exception(f"AST formatting failed: {e}") from e
+
+else:
+    # Placeholder/stub versions when mistletoe is not available
+    def split_document_ast_aware(document, max_len: int = 4096):
+        """
+        Fallback function when mistletoe is not available.
+        """
+        raise ImportError("mistletoe library not available. Install with: pip install mistletoe-ebp")
+    
+    def parse_markdown_to_ast(markdown_text: str):
+        """
+        Fallback function when mistletoe is not available.
+        """
+        raise ImportError("mistletoe library not available. Install with: pip install mistletoe-ebp")
+    
+    def render_ast_to_telegram_v2(document) -> str:
+        """
+        Fallback function when mistletoe is not available.
+        """
+        raise ImportError("mistletoe library not available. Install with: pip install mistletoe-ebp")
+    
+    def render_ast_to_plain_text(document) -> str:
+        """
+        Fallback function when mistletoe is not available.
+        """
+        raise ImportError("mistletoe library not available. Install with: pip install mistletoe-ebp")

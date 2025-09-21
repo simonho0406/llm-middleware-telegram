@@ -23,10 +23,10 @@ from telegram.error import BadRequest
 import config
 from bot import providers
 from storage import storage_manager
-from bot.handlers.chat import _generate_and_send_response
+# Import moved inside functions to avoid circular import
 from utils.text_processing import escape_markdown_v2
 from services import web_search_service
-from utils.text_processing import split_message_markdown_aware
+from utils.text_processing import parse_markdown_to_ast, split_document_ast_aware, render_ast_to_telegram_v2, render_ast_to_plain_text
 
 logger = logging.getLogger(__name__)
 
@@ -130,11 +130,39 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
 
     try:
         await placeholder_message.delete()
-        message_parts = split_message_markdown_aware(final_response)
-        for part in message_parts:
-            await context.bot.send_message(chat_id, text=escape_markdown_v2(part), parse_mode=constants.ParseMode.MARKDOWN_V2)
-    except BadRequest:
-        await context.bot.send_message(chat_id, text=final_response, parse_mode=None)
+
+        # AST-Based Architecture: Parse, Split, and Send
+        try:
+            # Step 1: Parse Markdown to AST
+            document = parse_markdown_to_ast(final_response)
+
+            # Step 2: Split AST into logical chunks
+            ast_chunks = split_document_ast_aware(document)
+
+            # Step 3: Send each chunk with proper fallback
+            for i, chunk_doc in enumerate(ast_chunks):
+                try:
+                    # Render AST chunk to MarkdownV2
+                    telegram_safe_text = render_ast_to_telegram_v2(chunk_doc)
+                    await context.bot.send_message(chat_id, text=telegram_safe_text, parse_mode=constants.ParseMode.MARKDOWN_V2)
+                except BadRequest as e:
+                    logger.warning(f"Chunk {i+1} MarkdownV2 failed in misc_commands: {e}. Rendering same AST chunk as plain text.")
+                    try:
+                        # Render the same AST chunk as clean plain text
+                        plain_text = render_ast_to_plain_text(chunk_doc)
+                        await context.bot.send_message(chat_id, text=f"⚠️ This section could not be formatted correctly.\n\n{plain_text}", parse_mode=None)
+                    except BadRequest as final_error:
+                        logger.error(f"Final attempt for chunk {i+1} failed in misc_commands: {final_error}. Skipping chunk.")
+
+        except Exception as ast_error:
+            logger.error(f"AST processing failed in misc_commands: {ast_error}. Using emergency fallback.")
+            # Emergency: Send as single plain text message
+            emergency_content = f"⚠️ Content formatting failed.\n\n{final_response}"
+            try:
+                await context.bot.send_message(chat_id, text=emergency_content, parse_mode=None)
+            except Exception as emergency_error:
+                logger.error(f"Emergency fallback failed in misc_commands: {emergency_error}. Critical failure.")
+
     except Exception as e:
         logger.error(f"{log_prefix}Failed to send final search response: {e}", exc_info=True)
 
@@ -471,6 +499,8 @@ async def delete_thread_command(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def reroll_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Regenerates the last AI response."""
+    from bot.handlers.chat import _generate_and_send_response  # Import here to avoid circular import
+
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
     log_prefix = f"(Chat {chat_id}) "
@@ -496,6 +526,8 @@ async def reroll_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def shrink_and_retry_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles the 'Shrink and Retry' button press."""
+    from bot.handlers.chat import _generate_and_send_response  # Import here to avoid circular import
+
     query = update.callback_query
     await query.answer()
     chat_id = update.effective_chat.id
@@ -504,8 +536,8 @@ async def shrink_and_retry_callback(update: Update, context: ContextTypes.DEFAUL
     logger.info(f"{log_prefix}User {user_id} triggered 'Shrink and Retry'.")
     try:
         await query.edit_message_text("Understood. Retrying with a shortened context...", parse_mode=None)
-        current_thread_id = await storage.get_current_thread_id(chat_id)
-        last_user_prompt = await storage.get_thread_key(chat_id, 'last_user_prompt')
+        current_thread_id = await storage_manager.get_current_thread_id(chat_id)
+        last_user_prompt = await storage_manager.get_thread_key(chat_id, 'last_user_prompt')
         if not last_user_prompt:
             await context.bot.send_message(chat_id, "Error: Couldn't find the last prompt to retry.", parse_mode=None)
             return

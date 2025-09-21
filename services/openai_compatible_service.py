@@ -1,6 +1,6 @@
 import logging
 import httpx
-from openai import AsyncOpenAI, APIConnectionError, RateLimitError, APIStatusError
+from openai import AsyncOpenAI, APIConnectionError, RateLimitError, APIStatusError, APIError
 import config
 import asyncio
 import tiktoken
@@ -35,6 +35,7 @@ class OpenAICompatibleService:
 
         self.max_retries = provider_config.get('max_retries', 3)
         self.initial_delay = provider_config.get('initial_delay', 1)
+        self.enable_streaming = provider_config.get('enable_streaming', True)  # Allow disabling streaming per provider
 
     async def list_models(self) -> list[str]:
         if not hasattr(self.client.models, 'list'):
@@ -89,20 +90,33 @@ class OpenAICompatibleService:
         for attempt in range(retries + 1):
             try:
                 # Prepare keyword arguments for the API call
+                use_streaming = self.enable_streaming and True  # Can be overridden by individual request if needed
                 api_kwargs = {
                     "model": model,
                     "messages": messages,
-                    "stream": True,
+                    "stream": use_streaming,
                 }
                 # Use per-request timeout or fallback to global default
                 timeout_value = request_timeout if request_timeout is not None else config.REQUEST_TIMEOUT_SECONDS
                 api_kwargs["timeout"] = timeout_value
 
-                stream = await self.client.chat.completions.create(**api_kwargs)
-                async for chunk in stream:
-                    content = chunk.choices[0].delta.content
-                    if content is not None:
-                        yield content
+                if use_streaming:
+                    stream = await self.client.chat.completions.create(**api_kwargs)
+                    async for chunk in stream:
+                        if chunk and hasattr(chunk, 'choices') and chunk.choices:
+                            content = chunk.choices[0].delta.content
+                            if content is not None:
+                                yield content
+                else:
+                    response = await self.client.chat.completions.create(**api_kwargs)
+                    if response and hasattr(response, 'choices') and response.choices:
+                        content = response.choices[0].message.content
+                        if content:
+                            yield content
+                    else:
+                        logger.error(f"[{self.provider_name}] API returned empty/invalid response")
+                        yield f"[Error: Provider returned invalid response format.]"
+                        return
                 success = True
                 break
             except (APIConnectionError, RateLimitError, httpx.ReadTimeout, httpx.ConnectTimeout) as e:
@@ -121,6 +135,34 @@ class OpenAICompatibleService:
                     logger.error(f"[{self.provider_name}] API Status Error: {e.status_code} - {e.response}")
                     yield f"[Error: API returned an error (Status {e.status_code}). Details: {e.message}]"
                 return
+            except APIError as e:
+                # Handle general API errors including streaming errors
+                error_message = str(e)
+                if "streaming" in error_message.lower() and use_streaming:
+                    logger.warning(f"[{self.provider_name}] Streaming error occurred: {e}")
+                    # Try non-streaming mode as fallback only if we were using streaming
+                    try:
+                        logger.info(f"[{self.provider_name}] Attempting fallback to non-streaming mode...")
+                        api_kwargs["stream"] = False
+                        response = await self.client.chat.completions.create(**api_kwargs)
+                        if response and hasattr(response, 'choices') and response.choices:
+                            content = response.choices[0].message.content
+                            if content:
+                                yield content
+                                success = True
+                                break
+                        else:
+                            logger.error(f"[{self.provider_name}] Non-streaming fallback returned empty/invalid response")
+                            yield f"[Error: Provider returned invalid response format.]"
+                            return
+                    except Exception as fallback_error:
+                        logger.error(f"[{self.provider_name}] Non-streaming fallback also failed: {fallback_error}")
+                        yield f"[Error: Both streaming and non-streaming failed. Provider may be temporarily unavailable.]"
+                        return
+                else:
+                    logger.error(f"[{self.provider_name}] API Error: {e}")
+                    yield f"[Error: API error occurred. Details: {e}]"
+                    return
             except Exception as e:
                 if "EngineCore" in str(e):
                     logger.error(f"[{self.provider_name}] NVIDIA EngineCore Error: {e}")

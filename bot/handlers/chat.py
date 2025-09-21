@@ -13,12 +13,18 @@ from services import ollama_service, gemini_service, openrouter_service
 from services.openai_compatible_service import OpenAICompatibleService
 from config import CUSTOM_PROVIDERS_CONFIG
 from storage import storage_manager
-from utils.text_processing import split_message_markdown_aware, escape_markdown_v2
-from . import misc_commands
+from utils.text_processing import (
+    format_for_telegram_v2,
+    parse_markdown_to_ast,
+    split_document_ast_aware,
+    render_ast_to_telegram_v2,
+    render_ast_to_plain_text
+)
+# from . import misc_commands  # Temporarily commented to test circular import
 
 logger = logging.getLogger(__name__)
 
-STREAMING_THROTTLE_SECONDS = 1.5
+STREAMING_THROTTLE_SECONDS = 3.0
 
 def count_tokens(text: str) -> int:
     try:
@@ -74,19 +80,21 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
         logger.info(f"(Chat {chat_id}) LLM task was cancelled.")
         # No need to raise again, the cancellation is the end of this workflow.
 
-async def _generate_and_send_response_task(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int, prompt: str, current_thread_id: str, is_reroll: bool = False, force_truncate: bool = False, placeholder_message = None) -> None:
+async def _generate_llm_response(chat_id: int, prompt: str, is_reroll: bool = False, force_truncate: bool = False) -> dict:
     """
-    Generates and sends an AI response, now with interactive context management.
+    Core LLM response generation logic, decoupled from message formatting and sending.
+    Returns a response dict with 'content', 'error', 'truncated_history', and 'provider_info'.
     """
     log_prefix = f"(Chat {chat_id}) "
-    
+
+    # Load and process conversation history
     context_history = await storage_manager.get_thread_history(chat_id)
     import json
     processed_history = []
     for message in context_history:
         role = message.get('role')
         content = message.get('content')
-        
+
         if role == 'panel_discussion': # Old format (summary)
             try:
                 panel_data = json.loads(content)
@@ -101,73 +109,67 @@ async def _generate_and_send_response_task(update: Update, context: ContextTypes
             processed_history.append({'role': 'assistant', 'content': content})
         else:
             processed_history.append(message)
-    
+
     if is_reroll and processed_history and processed_history[-1].get('role') == 'assistant':
         logger.info(f"{log_prefix}Reroll detected. Removing last assistant message from history.")
         processed_history.pop()
 
+    # Check context limits and truncate if needed
     if not force_truncate:
         total_tokens = count_tokens(prompt) + sum(count_tokens(msg.get("content", "")) for msg in processed_history)
         if total_tokens > config.DEFAULT_MAX_CONTEXT_TOKENS:
-            logger.warning(f"{log_prefix}Context limit exceeded ({total_tokens} > {config.DEFAULT_MAX_CONTEXT_TOKENS}). Prompting user to shrink.")
-            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Shrink and Retry", callback_data="shrink_and_retry")]])
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text="This conversation is getting long and might exceed the AI's memory. Shall I proceed with a shortened history?",
-                reply_markup=keyboard,
-                parse_mode=None
-            )
-            return
-        
+            logger.warning(f"{log_prefix}Context limit exceeded ({total_tokens} > {config.DEFAULT_MAX_CONTEXT_TOKENS}).")
+            return {
+                'content': None,
+                'error': 'context_limit_exceeded',
+                'truncated_history': [],
+                'provider_info': {},
+                'search_query': None
+            }
+
+    # Get provider configuration
     session_provider = await storage_manager.get_thread_key(chat_id, 'provider', config.DEFAULT_PROVIDER)
-    provider_details = providers.get_provider_details()  # Corrected function call
-    
+    provider_details = providers.get_provider_details()
+
     if session_provider not in provider_details:
         logger.error(f"{log_prefix}Invalid provider '{session_provider}', falling back to default.")
         session_provider = config.DEFAULT_PROVIDER
         await storage_manager.set_thread_key(chat_id, 'provider', session_provider)
-    
+
     provider_config = provider_details[session_provider]
     service = provider_config['service']
     model_key = 'model'
     default_model = provider_config['default_model']
-    
+
     model_to_use = await storage_manager.get_thread_key(chat_id, model_key, default_model)
     provider_name_display = session_provider.capitalize()
     logger.info(f"{log_prefix}Using service: {service.__class__.__name__ if hasattr(service, '__class__') else service.__name__}, Model: {model_to_use}")
 
-    # If no placeholder_message was passed in, create one
-    if placeholder_message is None:
-        try:
-            placeholder_text = f"Thinking with {provider_name_display} ({model_to_use})..."
-            if is_reroll: placeholder_text = f"Rerolling with {provider_name_display} ({model_to_use})..."
-            
-            escaped_placeholder_text = escape_markdown_v2(placeholder_text)
-            
-            reply_to_msg_id = update.message.message_id if update.message else (update.callback_query.message.message_id if update.callback_query else None)
+    provider_info = {
+        'provider': session_provider,
+        'provider_display': provider_name_display,
+        'model': model_to_use,
+        'service': service
+    }
 
-            placeholder_message = await context.bot.send_message(chat_id=chat_id, text=escaped_placeholder_text, parse_mode=constants.ParseMode.MARKDOWN_V2, reply_to_message_id=reply_to_msg_id)
-        except Exception as e:
-            logger.error(f"{log_prefix}Failed to send placeholder message: {e}")
+    # Truncate history for token limits
+    truncated_history = await _truncate_history_by_tokens(
+        history=processed_history,
+        prompt=prompt,
+        max_tokens=config.DEFAULT_MAX_CONTEXT_TOKENS,
+        output_buffer=config.CONTEXT_TOKEN_OUTPUT_BUFFER
+    )
 
-    # --- Start of response generation ---
+    # Generate LLM response
     raw_full_llm_response = ""
-    last_edit_time = time.time()
     llm_error_reported_by_model = False
-    truncated_history = []
+
     try:
-        logger.info(f"{log_prefix}Starting LLM generation for thread {current_thread_id}...")
-        
-        truncated_history = await _truncate_history_by_tokens(
-            history=processed_history,
-            prompt=prompt,
-            max_tokens=config.DEFAULT_MAX_CONTEXT_TOKENS,
-            output_buffer=config.CONTEXT_TOKEN_OUTPUT_BUFFER
-        )
-        
+        logger.info(f"{log_prefix}Starting LLM generation...")
+
         search_instruction = "If you need to perform a web search for current information, include the search query inside <search> tags like <search>latest news on the Artemis mission</search>, but ALWAYS also provide your best answer based on your existing knowledge after the search tags."
         augmented_prompt = f"{search_instruction}\n\n{prompt}"
-        
+
         async for chunk in service.generate_response(model=model_to_use, prompt=augmented_prompt, context_history=truncated_history):
             if chunk.startswith("[Error:") or chunk.startswith("Error:"):
                 raw_full_llm_response = chunk
@@ -175,96 +177,312 @@ async def _generate_and_send_response_task(update: Update, context: ContextTypes
                 break
             raw_full_llm_response += chunk
 
-            current_time = time.time()
-            if (current_time - last_edit_time) > STREAMING_THROTTLE_SECONDS:
-                try:
-                    await placeholder_message.edit_text(
-                        text=raw_full_llm_response + " ▌",
-                        parse_mode=None
-                    )
-                    last_edit_time = current_time
-                except BadRequest as e:
-                    if "Message is not modified" not in str(e) and "Message_too_long" not in str(e):
-                        logger.warning(f"Throttled streaming edit failed: {e}")
-        
-        if not llm_error_reported_by_model: logger.info(f"{log_prefix}LLM generation complete. Length: {len(raw_full_llm_response)}")
-        
-        # Check if auto-search is enabled for normal chat
-        from bot.settings import USER_SETTINGS
-        autosearch_enabled = await storage_manager.get_user_setting(
-            chat_id, 
-            'autosearch_normal_chat', 
-            USER_SETTINGS['autosearch_normal_chat']['default']
-        )
-        
-        search_tag_match = re.search(r"<search>(.*?)</search>", raw_full_llm_response, re.DOTALL)
-        if search_tag_match and autosearch_enabled:
-            search_query = search_tag_match.group(1).strip()
-            logger.info(f"{log_prefix}Auto-search enabled. Delegating to search_command: '{search_query}'")
-            context.args = [search_query]
-            await misc_commands.search_command(update, context, placeholder_message)
-            return
-        elif search_tag_match and not autosearch_enabled:
-            logger.info(f"{log_prefix}Auto-search disabled. Removing search tag and providing fallback answer.")
-            search_query = search_tag_match.group(1).strip()
-            # Remove the search tag entirely, but keep any additional content the LLM provided
-            raw_full_llm_response = raw_full_llm_response.replace(search_tag_match.group(0), "").strip()
-            
-            # If there's still content after removing the search tag, keep it
-            # If not, provide a helpful message
-            if not raw_full_llm_response:
-                raw_full_llm_response = f"I'd need to search for current information about '{search_query}' to give you an accurate answer. Auto-search is disabled - you can enable it in /config or try the /search command directly."
+        if not llm_error_reported_by_model:
+            logger.info(f"{log_prefix}LLM generation complete. Length: {len(raw_full_llm_response)}")
 
     except Exception as e:
         logger.exception(f"{log_prefix}Critical error during LLM stream: {e}")
         raw_full_llm_response = "[Error: An unexpected error occurred while communicating with the AI.]"
         llm_error_reported_by_model = True
 
-    final_content_to_send = raw_full_llm_response.strip()
-    if not final_content_to_send:
-        final_content_to_send = escape_markdown_v2(
-            "[Error: The AI returned an empty response. This might be due to a content filter or an issue with the selected model. Please try rerolling or using a different model.]"
+    # Handle search queries
+    search_query = None
+    search_tag_match = re.search(r"<search>(.*?)</search>", raw_full_llm_response, re.DOTALL)
+    if search_tag_match:
+        search_query = search_tag_match.group(1).strip()
+
+        # Check if auto-search is enabled
+        from bot.settings import USER_SETTINGS
+        autosearch_enabled = await storage_manager.get_user_setting(
+            chat_id,
+            'autosearch_normal_chat',
+            USER_SETTINGS['autosearch_normal_chat']['default']
         )
-    message_sent_or_edited_successfully = False
-    
+
+        if not autosearch_enabled:
+            logger.info(f"{log_prefix}Auto-search disabled. Removing search tag and providing fallback answer.")
+            # Remove the search tag entirely, but keep any additional content the LLM provided
+            raw_full_llm_response = raw_full_llm_response.replace(search_tag_match.group(0), "").strip()
+
+            # If there's still content after removing the search tag, keep it
+            # If not, provide a helpful message
+            if not raw_full_llm_response:
+                raw_full_llm_response = f"I'd need to search for current information about '{search_query}' to give you an accurate answer. Auto-search is disabled - you can enable it in /config or try the /search command directly."
+            search_query = None  # Clear search query since we're not using it
+
+    final_content = raw_full_llm_response.strip()
+    if not final_content:
+        final_content = "[Error: The AI returned an empty response. This might be due to a content filter or an issue with the selected model. Please try rerolling or using a different model.]"
+        llm_error_reported_by_model = True
+
+    return {
+        'content': final_content,
+        'error': 'llm_error' if llm_error_reported_by_model else None,
+        'truncated_history': truncated_history,
+        'provider_info': provider_info,
+        'search_query': search_query,
+        'processed_history': processed_history
+    }
+
+async def _send_ast_formatted_response(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int, final_content: str, placeholder_message=None) -> bool:
+    """
+    Sends a formatted response using single-tier AST-based formatting.
+
+    Architecture: AST Primary → Plain Text Emergency (no legacy middle tier).
+    Uses proper AST-aware document splitting for long messages.
+
+    Returns True if message was sent successfully, False otherwise.
+    """
+    log_prefix = f"(Chat {chat_id}) "
+
+    if not final_content:
+        logger.warning(f"{log_prefix}No content to send")
+        return False
+
+    # Clean up meta tags before formatting
+    final_content = escape_meta_tags_for_markdown_attempt(final_content)
     reply_to_msg_id = update.message.message_id if update.message else (update.callback_query.message.id if update.callback_query else None)
 
+    # Primary: AST-based MarkdownV2 formatting with AST-aware splitting
     try:
-        final_content_to_send = escape_meta_tags_for_markdown_attempt(final_content_to_send)
-        
-        if len(final_content_to_send) <= TELEGRAM_MAX_LEN and placeholder_message:
-            await placeholder_message.edit_text(text=escape_markdown_v2(final_content_to_send), parse_mode=constants.ParseMode.MARKDOWN_V2)
-            message_sent_or_edited_successfully = True
-        else:
-            if placeholder_message:
-                await placeholder_message.delete()
-            
-            message_parts = split_message_markdown_aware(final_content_to_send, TELEGRAM_MAX_LEN)
-            for idx, part in enumerate(message_parts):
-                current_reply_id = reply_to_msg_id if idx == 0 else None
-                await context.bot.send_message(chat_id=chat_id, text=escape_markdown_v2(part), parse_mode=constants.ParseMode.MARKDOWN_V2, reply_to_message_id=current_reply_id)
-            message_sent_or_edited_successfully = True
-            
-    except BadRequest as e:
-        logger.error(f"{log_prefix}BadRequest sending/editing message, will try sending as plain text. Error: {e}")
-        try:
-            if placeholder_message: await placeholder_message.delete()
-            await context.bot.send_message(chat_id=chat_id, text=final_content_to_send, parse_mode=None, reply_to_message_id=reply_to_msg_id)
-            message_sent_or_edited_successfully = True
-        except Exception as fallback_e:
-            logger.error(f"{log_prefix}Plain text fallback sending failed: {fallback_e}")
-    except Exception as e:
-        logger.exception(f"{log_prefix}Unexpected error during message sending: {e}")
+        # Parse content into AST document
+        document = parse_markdown_to_ast(final_content)
 
-    if not llm_error_reported_by_model and final_content_to_send and message_sent_or_edited_successfully:
+        # Check if single document fits within limits
+        formatted_content = render_ast_to_telegram_v2(document)
+
+        if len(formatted_content) <= TELEGRAM_MAX_LEN and placeholder_message:
+            await asyncio.wait_for(
+                placeholder_message.edit_text(text=formatted_content, parse_mode=constants.ParseMode.MARKDOWN_V2),
+                timeout=15.0
+            )
+            logger.info(f"{log_prefix}Message sent successfully with AST formatting")
+            return True
+        else:
+            # Use AST-aware splitting for long messages
+            if placeholder_message:
+                try:
+                    await asyncio.wait_for(placeholder_message.delete(), timeout=5.0)
+                except (asyncio.TimeoutError, Exception):
+                    logger.warning(f"{log_prefix}Timeout deleting placeholder message, continuing...")
+
+            # Split document using AST-aware logic
+            document_chunks = split_document_ast_aware(document, TELEGRAM_MAX_LEN)
+
+            for idx, chunk_doc in enumerate(document_chunks):
+                current_reply_id = reply_to_msg_id if idx == 0 else None
+                chunk_content = render_ast_to_telegram_v2(chunk_doc)
+                await asyncio.wait_for(
+                    context.bot.send_message(
+                        chat_id=chat_id,
+                        text=chunk_content,
+                        parse_mode=constants.ParseMode.MARKDOWN_V2,
+                        reply_to_message_id=current_reply_id
+                    ),
+                    timeout=15.0
+                )
+
+            logger.info(f"{log_prefix}Long message sent successfully with AST formatting ({len(document_chunks)} chunks)")
+            return True
+
+    except Exception as e:
+        logger.warning(f"{log_prefix}AST formatting failed: {e}. Using plain text emergency fallback.")
+
+        # Emergency Fallback: Plain text with no formatting (no legacy middle tier)
+        try:
+            if placeholder_message:
+                try:
+                    await asyncio.wait_for(placeholder_message.delete(), timeout=3.0)
+                except:
+                    pass
+
+            # For plain text, we can still split on reasonable boundaries
+            if len(final_content) <= TELEGRAM_MAX_LEN:
+                await asyncio.wait_for(
+                    context.bot.send_message(chat_id=chat_id, text=final_content, parse_mode=None, reply_to_message_id=reply_to_msg_id),
+                    timeout=10.0
+                )
+            else:
+                # Simple text splitting for emergency fallback
+                chunks = []
+                while len(final_content) > TELEGRAM_MAX_LEN:
+                    # Find last newline within limit
+                    split_pos = final_content.rfind('\n', 0, TELEGRAM_MAX_LEN)
+                    if split_pos == -1:
+                        split_pos = TELEGRAM_MAX_LEN
+
+                    chunks.append(final_content[:split_pos])
+                    final_content = final_content[split_pos:].lstrip()
+
+                if final_content:
+                    chunks.append(final_content)
+
+                for idx, chunk in enumerate(chunks):
+                    current_reply_id = reply_to_msg_id if idx == 0 else None
+                    await asyncio.wait_for(
+                        context.bot.send_message(chat_id=chat_id, text=chunk, parse_mode=None, reply_to_message_id=current_reply_id),
+                        timeout=10.0
+                    )
+
+            logger.info(f"{log_prefix}Message sent successfully with plain text emergency fallback")
+            return True
+
+        except Exception as emergency_e:
+            logger.error(f"{log_prefix}Emergency plain text fallback failed: {emergency_e}")
+            return False
+
+async def _generate_and_send_response_task(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int, prompt: str, current_thread_id: str, is_reroll: bool = False, force_truncate: bool = False, placeholder_message = None) -> None:
+    """
+    True single-pass streaming AST architecture.
+
+    This implementation eliminates the inefficient dual LLM generation and provides
+    real-time AST-formatted streaming with proper document structure awareness.
+    """
+    log_prefix = f"(Chat {chat_id}) "
+
+    # Generate the LLM response using the decoupled core logic
+    response_data = await _generate_llm_response(chat_id, prompt, is_reroll, force_truncate)
+
+    # Handle context limit exceeded
+    if response_data['error'] == 'context_limit_exceeded':
+        logger.warning(f"{log_prefix}Context limit exceeded. Prompting user to shrink.")
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Shrink and Retry", callback_data="shrink_and_retry")]])
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="This conversation is getting long and might exceed the AI's memory. Shall I proceed with a shortened history?",
+            reply_markup=keyboard,
+            parse_mode=None
+        )
+        return
+
+    # Handle search delegation immediately (no duplication)
+    if response_data['search_query']:
+        from . import misc_commands  # Local import to avoid circular dependency
+        logger.info(f"{log_prefix}Auto-search enabled. Delegating to search_command: '{response_data['search_query']}'")
+        context.args = [response_data['search_query']]
+        await misc_commands.search_command(update, context, placeholder_message)
+        return
+
+    # Create placeholder message if needed
+    if placeholder_message is None:
+        try:
+            provider_info = response_data['provider_info']
+            # Use plain text for placeholder to avoid escaping issues
+            placeholder_text = f"Thinking with {provider_info['provider_display']} ({provider_info['model']})..."
+            if is_reroll:
+                placeholder_text = f"Rerolling with {provider_info['provider_display']} ({provider_info['model']})..."
+
+            reply_to_msg_id = update.message.message_id if update.message else (update.callback_query.message.message_id if update.callback_query else None)
+
+            placeholder_message = await context.bot.send_message(
+                chat_id=chat_id,
+                text=placeholder_text,
+                parse_mode=None,  # Plain text for simplicity
+                reply_to_message_id=reply_to_msg_id
+            )
+        except Exception as e:
+            logger.error(f"{log_prefix}Failed to send placeholder message: {e}")
+
+    # Single-pass streaming with incremental AST processing
+    provider_info = response_data['provider_info']
+    service = provider_info['service']
+    model_to_use = provider_info['model']
+    truncated_history = response_data['truncated_history']
+
+    raw_llm_response = ""
+    last_edit_time = time.time()
+    llm_error_reported_by_model = False
+
+    try:
+        logger.info(f"{log_prefix}Starting single-pass streaming AST processing for thread {current_thread_id}...")
+
+        search_instruction = "If you need to perform a web search for current information, include the search query inside <search> tags like <search>latest news on the Artemis mission</search>, but ALWAYS also provide your best answer based on your existing knowledge after the search tags."
+        augmented_prompt = f"{search_instruction}\n\n{prompt}"
+
+        async for chunk in service.generate_response(model=model_to_use, prompt=augmented_prompt, context_history=truncated_history):
+            if chunk.startswith("[Error:") or chunk.startswith("Error:"):
+                raw_llm_response = chunk
+                llm_error_reported_by_model = True
+                break
+            raw_llm_response += chunk
+
+            # Throttled streaming updates with plain text preview
+            current_time = time.time()
+            if (current_time - last_edit_time) > STREAMING_THROTTLE_SECONDS and placeholder_message is not None:
+                try:
+                    # Provide plain text preview during streaming for immediate feedback
+                    preview_text = raw_llm_response + " ▌"
+                    if len(preview_text) > TELEGRAM_MAX_LEN:
+                        preview_text = preview_text[:TELEGRAM_MAX_LEN-20] + "... ▌"
+
+                    await asyncio.wait_for(
+                        placeholder_message.edit_text(text=preview_text, parse_mode=None),
+                        timeout=8.0
+                    )
+                    last_edit_time = current_time
+                except (BadRequest, asyncio.TimeoutError, Exception) as e:
+                    if isinstance(e, BadRequest) and ("Message is not modified" in str(e) or "Message_too_long" in str(e)):
+                        pass  # Expected and safe to ignore
+                    else:
+                        logger.warning(f"{log_prefix}Streaming preview failed: {e}")
+                        # Reduce frequency on failure to prevent cascading issues
+                        if isinstance(e, (asyncio.TimeoutError, Exception)):
+                            last_edit_time = current_time + 10
+
+        if not llm_error_reported_by_model:
+            logger.info(f"{log_prefix}Streaming complete. Length: {len(raw_llm_response)}")
+
+        # Handle search queries (single processing, no duplication)
+        search_tag_match = re.search(r"<search>(.*?)</search>", raw_llm_response, re.DOTALL)
+        if search_tag_match:
+            search_query = search_tag_match.group(1).strip()
+
+            # Check if auto-search is enabled
+            from bot.settings import USER_SETTINGS
+            autosearch_enabled = await storage_manager.get_user_setting(
+                chat_id,
+                'autosearch_normal_chat',
+                USER_SETTINGS['autosearch_normal_chat']['default']
+            )
+
+            if autosearch_enabled:
+                from . import misc_commands  # Local import to avoid circular dependency
+                logger.info(f"{log_prefix}Auto-search enabled. Delegating to search_command: '{search_query}'")
+                context.args = [search_query]
+                await misc_commands.search_command(update, context, placeholder_message)
+                return
+            else:
+                logger.info(f"{log_prefix}Auto-search disabled. Removing search tag.")
+                raw_llm_response = raw_llm_response.replace(search_tag_match.group(0), "").strip()
+
+                if not raw_llm_response:
+                    raw_llm_response = f"I'd need to search for current information about '{search_query}' to give you an accurate answer. Auto-search is disabled - you can enable it in /config or try the /search command directly."
+
+    except Exception as e:
+        logger.exception(f"{log_prefix}Critical error during streaming: {e}")
+        raw_llm_response = "[Error: An unexpected error occurred while communicating with the AI.]"
+        llm_error_reported_by_model = True
+
+    # Final AST processing and sending
+    final_content = raw_llm_response.strip()
+    if not final_content:
+        final_content = "[Error: The AI returned an empty response. This might be due to a content filter or an issue with the selected model. Please try rerolling or using a different model.]"
+        llm_error_reported_by_model = True
+
+    # Single AST processing pass with proper document splitting
+    message_sent_successfully = await _send_ast_formatted_response(update, context, chat_id, final_content, placeholder_message)
+
+    # Update conversation history if successful
+    if not llm_error_reported_by_model and final_content and message_sent_successfully:
         logger.debug(f"{log_prefix}Updating conversation history.")
         try:
+            processed_history = response_data['processed_history']
             history_to_save = list(processed_history)
             history_to_save.extend([
                 {'role': 'user', 'content': prompt},
-                {'role': 'assistant', 'content': final_content_to_send}
+                {'role': 'assistant', 'content': final_content}
             ])
-            
+
             final_truncated_history = await _truncate_history_by_tokens(
                 history=history_to_save,
                 prompt="",

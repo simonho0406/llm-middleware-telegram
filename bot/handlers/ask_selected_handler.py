@@ -353,37 +353,53 @@ async def done_selecting_callback(update: Update, context: ContextTypes.DEFAULT_
         else:
             results[model_key_display] = str(result_data)
 
-    # --- Format and Send Final Response ---
-    from utils.text_processing import split_message_markdown_aware, escape_markdown_v2
+    # --- Format and Send Final Response Using AST Pipeline ---
+    from utils.text_processing import parse_markdown_to_ast, split_document_ast_aware, render_ast_to_telegram_v2, render_ast_to_plain_text
     from telegram import constants
 
-    escaped_prompt = escape_markdown_v2(prompt)
-    response_parts = [f"*Responses for prompt:* {escaped_prompt}"]
+    # Generate clean markdown content
+    response_parts = [f"**Responses for prompt:** {prompt}"]
     sorted_results = sorted(results.items())
 
     for model_key_display, response_text in sorted_results:
-        escaped_model = escape_markdown_v2(model_key_display)
-        escaped_response = escape_markdown_v2(response_text)
-        response_parts.append(f"\\n\\n___\\n*Model: `{escaped_model}`*\\n___\\n{escaped_response}")
+        response_parts.append(f"\n\n---\n**Model: `{model_key_display}`**\n---\n{response_text}")
 
-    final_response_text = "".join(response_parts)
+    final_response_markdown = "\n".join(response_parts)
 
     # Delete the placeholder "Asking..." message
     await placeholder_message.delete()
 
-    # Use the modern, robust message splitting and sending logic
-    message_parts = split_message_markdown_aware(final_response_text)
-    for part in message_parts:
+    # AST-Based Architecture: Parse, Split, and Send
+    try:
+        # Step 1: Parse Markdown to AST
+        document = parse_markdown_to_ast(final_response_markdown)
+
+        # Step 2: Split AST into logical chunks
+        ast_chunks = split_document_ast_aware(document)
+
+        # Step 3: Send each chunk with proper fallback
+        for i, chunk_doc in enumerate(ast_chunks):
+            try:
+                # Render AST chunk to MarkdownV2
+                telegram_safe_text = render_ast_to_telegram_v2(chunk_doc)
+                await context.bot.send_message(chat_id, text=telegram_safe_text, parse_mode=constants.ParseMode.MARKDOWN_V2)
+            except BadRequest as e:
+                logger.warning(f"Chunk {i+1} MarkdownV2 failed in ask_selected: {e}. Rendering same AST chunk as plain text.")
+                try:
+                    # Render the same AST chunk as clean plain text
+                    plain_text = render_ast_to_plain_text(chunk_doc)
+                    await context.bot.send_message(chat_id, text=f"⚠️ This section could not be formatted correctly.\n\n{plain_text}", parse_mode=None)
+                except BadRequest as final_error:
+                    logger.error(f"Final attempt for chunk {i+1} failed in ask_selected: {final_error}. Skipping chunk.")
+
+    except Exception as ast_error:
+        logger.error(f"AST processing failed in ask_selected: {ast_error}. Using emergency fallback.")
+        # Emergency: Send as single plain text message
+        emergency_content = f"⚠️ Content formatting failed.\n\n{final_response_markdown}"
         try:
-            await context.bot.send_message(
-                chat_id,
-                text=part,
-                parse_mode=constants.ParseMode.MARKDOWN_V2
-            )
-        except BadRequest:
-            # Fallback to sending as plain text if markdown fails
-            logger.warning(f"MarkdownV2 parsing failed for a message part. Sending as plain text.")
-            await context.bot.send_message(chat_id, text=part, parse_mode=None)
+            await context.bot.send_message(chat_id, text=emergency_content, parse_mode=None)
+        except Exception as emergency_error:
+            logger.error(f"Emergency fallback failed in ask_selected: {emergency_error}. Critical failure.")
 
 
     # Clean up user_data

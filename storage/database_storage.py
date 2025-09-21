@@ -270,12 +270,19 @@ async def get_user_setting(chat_id: int, key: str, default: Any = None) -> Any:
             return default
 
 async def set_user_setting(chat_id: int, key: str, value: Any) -> None:
-    """Stores setting value with proper boolean conversion"""
+    """Stores setting value with proper boolean conversion. If value is None, deletes the setting."""
     from bot.settings import USER_SETTINGS
-    # Convert Python bool to SQLite integer
-    if key in USER_SETTINGS and USER_SETTINGS[key]['type'] == bool:
-        value = 1 if value else 0
+    
     async with aiosqlite.connect(config.DB_PATH) as db:
         await _get_or_create_chat(db, chat_id)
-        await db.execute("INSERT OR REPLACE INTO user_settings (chat_id, key, value) VALUES (?, ?, ?)", (chat_id, key, value))
+        
+        if value is None:
+            # Delete the setting entirely
+            await db.execute("DELETE FROM user_settings WHERE chat_id = ? AND key = ?", (chat_id, key))
+        else:
+            # Convert Python bool to SQLite integer
+            if key in USER_SETTINGS and USER_SETTINGS[key]['type'] == bool:
+                value = 1 if value else 0
+            await db.execute("INSERT OR REPLACE INTO user_settings (chat_id, key, value) VALUES (?, ?, ?)", (chat_id, key, value))
+        
         await db.commit()

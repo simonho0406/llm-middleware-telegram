@@ -8,7 +8,8 @@ logger = logging.getLogger(__name__)
 async def generate_response(
     model: str,
     prompt: str,
-    context_history: Optional[List[Dict]] = None # Use Optional and correct type hint
+    context_history: Optional[List[Dict]] = None, # Use Optional and correct type hint
+    request_timeout: Optional[int] = None
 ) -> AsyncGenerator[str, None]: # Correct return type hint for async generator
     """
     Sends a request to OpenRouter API with streaming support.
@@ -34,7 +35,9 @@ async def generate_response(
              if role not in ['user', 'assistant']:
                  role = 'user' # Default to user if role is invalid
              messages.append({"role": role, "content": msg.get('content', '')})
-    messages.append({"role": "user", "content": prompt})
+    # FIX: Only append the prompt if it's not an empty string
+    if prompt:
+        messages.append({"role": "user", "content": prompt})
 
     data = {
         "model": model,
@@ -44,7 +47,8 @@ async def generate_response(
     }
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        timeout_config = request_timeout if request_timeout is not None else 30.0
+        async with httpx.AsyncClient(timeout=timeout_config) as client:
             async with client.stream(
                 "POST",
                 "https://openrouter.ai/api/v1/chat/completions", # Use chat completions endpoint
@@ -173,7 +177,9 @@ async def _generate_single_model_non_streaming(model_id: str, prompt: str, conte
              role = msg.get('role', 'user').lower()
              if role not in ['user', 'assistant']: role = 'user'
              messages.append({"role": role, "content": msg.get('content', '')})
-    messages.append({"role": "user", "content": prompt})
+    # FIX: Only append the prompt if it's not an empty string
+    if prompt:
+        messages.append({"role": "user", "content": prompt})
 
     data = { "model": model_id, "messages": messages, "temperature": 0.7, "stream": False } # stream=False
 

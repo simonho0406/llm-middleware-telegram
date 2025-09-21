@@ -1,117 +1,118 @@
-# Default LLM provider to use if not specified by user session
-# Options: "ollama", "gemini"
-default_provider: "ollama"
+# =====================================
+# LLM Middleware Telegram Bot Configuration
+# Clean rebuild with verified free models (2025-09-20)
+# =====================================
 
-# Default model for Ollama (user can override with /set_ollama_model)
-# Ensure this model exists in your Ollama setup
+# --- Primary Provider Settings ---
+default_provider: "openrouter"
 default_ollama_model: "qwq"
 
-# Default model for Gemini (used for regular chat when provider is gemini)
-# Using gemini-1.5-pro-latest as a stable, generally available model.
-# Adjust if you have access to specific experimental models.
-default_gemini_model: "gemini-1.5-pro-latest"
-
-# List of Gemini models to query with /ask_all_gemini
-# Ensure these models are available for your API key
+# --- Gemini Configuration (Free Tier: 5 RPM / 25 RPD) ---
+default_gemini_model: "gemini-1.5-flash-latest"  # Using flash for better free tier compatibility
 gemini_ask_all_models:
-  - "gemini-1.5-pro-latest"
   - "gemini-1.5-flash-latest"
-  # Add other models like "gemini-1.0-pro" if needed
+  - "gemini-1.5-pro-latest"
 
-# Path to store session data (relative to project root)
+# --- OpenRouter Configuration (Free Tier: 20 RPM / 1000 daily with $10 credit) ---
+default_openrouter_model: "deepseek/deepseek-chat-v3.1:free"
+openrouter_http_referer: "https://github.com/user/llm-middleware-telegram"
+openrouter_allowed_models:
+  # Verified working free models from OpenRouter API
+  - "x-ai/grok-4-fast:free"                    # 2M context, multimodal
+  - "openai/gpt-oss-120b:free"                 # 32K context, 117B MoE
+  - "openai/gpt-oss-20b:free"                  # 131K context, 21B MoE
+  - "deepseek/deepseek-chat-v3.1:free"         # 163K context, hybrid reasoning
+  - "google/gemma-3n-e2b-it:free"              # 8K context, multimodal
+  - "tencent/hunyuan-a13b-instruct:free"       # 32K context, CoT reasoning
+  - "mistralai/mistral-small-3.2-24b:free"     # Good for general tasks
+
+# --- System Configuration ---
 session_file_path: "data/sessions.json"
-
-# Default timeout for LLM API requests in seconds
 REQUEST_TIMEOUT_SECONDS: 180
-
-# Default maximum tokens for history sent to LLMs and for storing history
 default_max_context_tokens: 100000
-# Buffer to leave for the AI's response tokens
 context_token_output_buffer: 10000
 
-# Add other configurations as needed
-# openrouter_api_key is now managed via .env file
-openrouter_allowed_models:
-  - "llama-2-70b"
-  - "mistral-7b"
-  - "stability-ai/stablelm-tuned-alpha-7b"
-  # Add more free models here
-default_openrouter_model: "deepseek/deepseek-chat-v3-0324:free"
-openrouter_http_referer: "YOUR_APP_URL_OR_NAME"
-
-# google_api_key is legacy and managed via .env (GEMINI_API_KEY_*)
-# e.g., allowed chat IDs, admin user IDs, etc.
-# allowed_chat_ids:
-#   - 123456789
-#   - -987654321
-
 # --- Custom OpenAI-Compatible Providers ---
-# Define additional providers that use an OpenAI-compatible API structure.
-# The API key for each provider must be set in the .env file following the
-# convention: PROVIDERNAME_API_KEY (e.g., GROQ_API_KEY).
 custom_openai_providers:
-  - name: "groq" # Unique identifier for the provider
-    base_url: "https://api.groq.com/openai/v1" # API endpoint base URL
-    default_model: "llama3-8b-8192" # Default model for this provider
-    allowed_models: # Optional: List of models users can select with /set_model
+  # Groq - Free tier with fast inference
+  - name: "groq"
+    base_url: "https://api.groq.com/openai/v1"
+    default_model: "llama-3.3-70b-versatile"
+    enable_streaming: true
+    allowed_models:
+      - "llama-3.3-70b-versatile"
       - "llama3-8b-8192"
       - "mixtral-8x7b-32768"
-      - "gemma-7b-it"
-  - name: "requesty" # Unique identifier
-    base_url: "https://router.requesty.ai/v1" # API endpoint base URL
-    default_model: "openai/gpt-4o" # Default model for this provider
-    allowed_models: # Optional: List of models users can select
-      - "openai/gpt-4o"
-      - "openai/gpt-3.5-turbo"
-      # Add other models supported by Requesty if known/desired
+      - "gemma2-9b-it"
+
+  # NVIDIA NIM - Free tier with 1000 credits
   - name: "nvidia"
-    base_url: "https://integrate.api.nvidia.com/v1" # API endpoint base URL
-    default_model: "nvidia/llama-3.1-nemotron-ultra-253b-v1" # Default model for this provider
-    # allowed_models: # Optional: List of models users can select
-    #   - "nvidia/llama-3.1-nemotron-ultra-253b-v1"
-    #   - "qwen/qwq-32b"
-      # Add other models supported by Requesty if known/desired
-  # - name: "another_provider"
-  #   base_url: "https://api.anotherprovider.com/v1"
-  #   default_model: "some-model-v2"
-  #   allowed_models:
-  #     - "some-model-v2"
+    base_url: "https://integrate.api.nvidia.com/v1"
+    default_model: "nvidia/llama-3.3-nemotron-70b-instruct"
+    enable_streaming: false  # Disable streaming for stability
+    allowed_models:
+      - "nvidia/llama-3.3-nemotron-70b-instruct"
+      - "meta/llama3-70b-instruct"
+      - "meta/llama3-8b-instruct"
+
+  # Requesty - DISABLED for development (paid service)
+  # - name: "requesty"
+  #   base_url: "https://router.requesty.ai/v1"
+  #   default_model: "openai/gpt-4o"
+  #   enabled: false
 
 # --- Expert Panel Configuration ---
 expert_panel:
   # Master & Apprentice Architecture Quality Settings
-  quality_threshold: 85  # Minimum score (1-100) required to pass quality gate
-  max_refinement_iterations: 3  # Maximum number of refinement loops
-  
+  quality_threshold: 85
+  max_refinement_iterations: 3
+
+  # Orchestrator (Project Manager) - Keep original working configuration
   orchestrator:
     provider: "nvidia"
-    # model: "nvidia/llama-3.1-nemotron-ultra-253b-v1" # Or another suitable Groq model
-    # model: "moonshotai/kimi-k2-instruct"
     model: "nvidia/llama-3.3-nemotron-super-49b-v1.5"
-    fallback_provider: "nvidia"
-    fallback_model: "openai/gpt-oss-20b"
-    # model: "openai/gpt-oss-120b"
-    request_timeout_seconds: 600 # Add this line
+    fallback_provider: "openrouter"
+    fallback_model: "openai/gpt-oss-20b:free"
+    request_timeout_seconds: 600
 
-  # Define the roles and the models assigned to them
-  # The keys (e.g., "Proposer", "Critic") must match the roles the orchestrator uses
+  # Expert Panel Roles - Restore original working models
   roles:
     Proposer:
-      provider: "nvidia"
-      # model: "deepseek/deepseek-chat-v3-0324:free" # Or another suitable OpenRouter model
-      # model: "z-ai/glm-4.5-air:free" # Or another suitable model
-      # model: "deepseek-ai/deepseek-v3.1"
-      model: "openai/gpt-oss-120b"
+      provider: "openrouter"
+      model: "deepseek/deepseek-chat-v3.1:free"
+      fallback_provider: "nvidia"
+      fallback_model: "openai/gpt-oss-20b"
       request_timeout_seconds: 600
+
     Critic:
       provider: "openrouter"
-      model: "deepseek/deepseek-r1-0528:free" # Or another suitable model
-      # model: "qwen/qwen3-235b-a22b:free" # Or another suitable Nvidia model
+      model: "deepseek/deepseek-r1-0528:free"
       request_timeout_seconds: 600
+
     Refiner:
-      provider: "nvidia"
-      # model: "deepseek/deepseek-r1-0528:free" # Or another suitable model
-      # model: "moonshotai/kimi-k2-instruct" # Or another suitable model
-      model: "qwen/qwen3-coder-480b-a35b-instruct" # Or another suitable model
-      # model: "qwen/qwen3-235b-a22b:free" # Or another suitable Nvidia model
+      provider: "openrouter"
+      model: "qwen/qwen3-coder:free"
       request_timeout_seconds: 600
+
+# --- Rate Limiting Configuration ---
+# Conservative limits to respect free tier quotas
+rate_limits:
+  openrouter:
+    requests_per_minute: 15  # Below 20 RPM limit
+    daily_requests: 800      # Below 1000 daily limit
+
+  gemini:
+    requests_per_minute: 4   # Below 5 RPM limit
+    daily_requests: 20       # Below 25 daily limit
+
+  groq:
+    requests_per_minute: 30  # Conservative for free tier
+
+  nvidia:
+    requests_per_minute: 10  # Conservative for credit usage
+
+# --- Security and Access Control ---
+# Uncomment and configure if needed
+# allowed_chat_ids:
+#   - 123456789
+#   - -987654321

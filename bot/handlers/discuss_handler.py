@@ -10,7 +10,7 @@ from telegram.ext import (
 )
 from telegram.error import BadRequest
 from bot.providers import get_available_provider_names, get_service_for_provider
-from utils.text_processing import escape_markdown_v2, split_message_markdown_aware
+from utils.text_processing import escape_markdown_v2, parse_markdown_to_ast, split_document_ast_aware, render_ast_to_telegram_v2, render_ast_to_plain_text
 
 logger = logging.getLogger(__name__)
 
@@ -266,9 +266,38 @@ async def run_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         final_transcript = "".join(final_transcript_parts)
 
         await placeholder.delete()
-        message_parts = split_message_markdown_aware(final_transcript)
-        for part in message_parts:
-            await context.bot.send_message(chat_id, text=part, parse_mode=constants.ParseMode.MARKDOWN_V2)
+
+        # AST-Based Architecture: Parse, Split, and Send
+        try:
+            # Step 1: Parse Markdown to AST
+            document = parse_markdown_to_ast(final_transcript)
+
+            # Step 2: Split AST into logical chunks
+            ast_chunks = split_document_ast_aware(document)
+
+            # Step 3: Send each chunk with proper fallback
+            for i, chunk_doc in enumerate(ast_chunks):
+                try:
+                    # Render AST chunk to MarkdownV2
+                    telegram_safe_text = render_ast_to_telegram_v2(chunk_doc)
+                    await context.bot.send_message(chat_id, text=telegram_safe_text, parse_mode=constants.ParseMode.MARKDOWN_V2)
+                except BadRequest as e:
+                    logger.warning(f"Chunk {i+1} MarkdownV2 failed in discuss_handler: {e}. Rendering same AST chunk as plain text.")
+                    try:
+                        # Render the same AST chunk as clean plain text
+                        plain_text = render_ast_to_plain_text(chunk_doc)
+                        await context.bot.send_message(chat_id, text=f"⚠️ This section could not be formatted correctly.\n\n{plain_text}", parse_mode=None)
+                    except BadRequest as final_error:
+                        logger.error(f"Final attempt for chunk {i+1} failed in discuss_handler: {final_error}. Skipping chunk.")
+
+        except Exception as ast_error:
+            logger.error(f"AST processing failed in discuss_handler: {ast_error}. Using emergency fallback.")
+            # Emergency: Send as single plain text message
+            emergency_content = f"⚠️ Content formatting failed.\n\n{final_transcript}"
+            try:
+                await context.bot.send_message(chat_id, text=emergency_content, parse_mode=None)
+            except Exception as emergency_error:
+                logger.error(f"Emergency fallback failed in discuss_handler: {emergency_error}. Critical failure.")
 
     except Exception as e:
         logger.error(f"{log_prefix} Critical failure in run_discussion: {e}", exc_info=True)

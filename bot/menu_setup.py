@@ -19,6 +19,7 @@ async def setup_bot_commands_and_menu(application: Application, chat_id: int | N
         BotCommand("ask_selected", "Query multiple models at once"),
         BotCommand("discuss", "Start a multi-model, multi-provider discussion"),
         BotCommand("discuss_panel", "Orchestrate an expert AI panel"),
+        BotCommand("configure_panel", "Customize your Expert Panel agents"),
         BotCommand("end_discussion", "Conclude an ongoing panel discussion"),
         # Provider & Model
         BotCommand("provider", "Switch AI provider"),

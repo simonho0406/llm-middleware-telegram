@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   llm-middleware-telegram:
     build: . # Build the image from the Dockerfile in the current directory
