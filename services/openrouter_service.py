@@ -1,8 +1,6 @@
 import httpx
 import logging
 import config
-import asyncio
-import json
 from typing import AsyncGenerator, List, Dict, Optional, Any # Import Any
 
 logger = logging.getLogger(__name__)
@@ -10,8 +8,7 @@ logger = logging.getLogger(__name__)
 async def generate_response(
     model: str,
     prompt: str,
-    context_history: Optional[List[Dict]] = None, # Use Optional and correct type hint
-    request_timeout: int = None
+    context_history: Optional[List[Dict]] = None # Use Optional and correct type hint
 ) -> AsyncGenerator[str, None]: # Correct return type hint for async generator
     """
     Sends a request to OpenRouter API with streaming support.
@@ -47,57 +44,54 @@ async def generate_response(
     }
 
     try:
-        if isinstance(data, dict):
-            logger.debug(f"Sending request to OpenRouter. Model: {model}. Payload: {json.dumps(data, indent=2)}")
-        else:
-            logger.error(f"OpenRouter payload is not a dictionary. Type: {type(data)}. Value: {data}")
-    except NameError:
-        logger.error("json module not found when attempting to log OpenRouter payload.")
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            async with client.stream(
+                "POST",
+                "https://openrouter.ai/api/v1/chat/completions", # Use chat completions endpoint
+                headers=headers,
+                json=data
+            ) as response:
+
+                if response.status_code != 200:
+                    try:
+                        err_details = await response.aread()
+                        err_details = err_details.decode('utf-8')
+                        logger.error(f"OpenRouter API Error {response.status_code}: {err_details}")
+                        yield f"[Error: OpenRouter API Error {response.status_code} - See logs]"
+                    except Exception as json_e:
+                        logger.error(f"OpenRouter API Error {response.status_code} (failed to decode error details: {json_e})")
+                        yield f"[Error: OpenRouter API Error {response.status_code}]"
+                    return # Stop processing on error
+
+                buffer = ""
+                async for line in response.aiter_lines():
+                    if line.startswith("data: "):
+                        line_data = line[len("data: "):].strip()
+                        if line_data == "[DONE]":
+                            break
+                        try:
+                            import json
+                            chunk_data = json.loads(line_data)
+                            if 'choices' in chunk_data and chunk_data['choices']:
+                                delta = chunk_data['choices'][0].get('delta', {})
+                                content = delta.get('content')
+                                if content:
+                                    # buffer += content # No need to accumulate here
+                                    yield content # Yield only the new content delta
+                        except json.JSONDecodeError:
+                            logger.warning(f"Received non-JSON data line: {line_data}")
+                        except Exception as e:
+                             logger.exception(f"Error processing stream chunk: {e}")
+
+    except httpx.HTTPStatusError as http_err:
+        logger.error(f"HTTP Error connecting to OpenRouter: {http_err}")
+        yield f"[Error: HTTP Error connecting to OpenRouter - {http_err.response.status_code}]"
+    except httpx.ReadTimeout as timeout_err:
+        logger.error(f"OpenRouter API Timeout: {timeout_err}")
+        yield "[Error: OpenRouter API request timed out]"
     except Exception as e:
-        logger.error(f"Error dumping OpenRouter payload for logging: {e}. Payload: {data}")
-
-    retries = 3
-    delay = 1.0
-    for attempt in range(retries):
-        try:
-            timeout_config = request_timeout if request_timeout is not None else 30.0
-            async with httpx.AsyncClient(timeout=timeout_config) as client:
-                async with client.stream(
-                    "POST",
-                    "https://openrouter.ai/api/v1/chat/completions",
-                    headers=headers,
-                    json=data
-                ) as response:
-                    response.raise_for_status() # Raise an exception for 4xx/5xx errors
-                    async for line in response.aiter_lines():
-                        # ... (existing stream processing logic) ...
-                        if line.startswith("data: "):
-                            line_data = line[len("data: "):].strip()
-                            if line_data == "[DONE]":
-                                break
-                            try:
-                                chunk_data = json.loads(line_data)
-                                if 'choices' in chunk_data and chunk_data['choices']:
-                                    delta = chunk_data['choices'][0].get('delta', {})
-                                    content = delta.get('content')
-                                    if content:
-                                        yield content
-                            except json.JSONDecodeError:
-                                logger.warning(f"Received non-JSON data line: {line_data}")
-                    return # Success, exit the retry loop
-
-        except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.HTTPStatusError) as e:
-            logger.warning(f"OpenRouter request failed (Attempt {attempt + 1}/{retries}): {e}")
-            if attempt == retries - 1:
-                logger.error("OpenRouter request failed after all retries.")
-                yield f"[Error: The request to OpenRouter failed after {retries} attempts. Details: {e}]"
-                return
-            await asyncio.sleep(delay)
-            delay *= 2
-        except Exception as e:
-            logger.exception("Unexpected error in OpenRouter service")
-            yield f"[Error: Unexpected error - {str(e)}]"
-            return
+        logger.exception("Unexpected error in OpenRouter service")
+        yield f"[Error: Unexpected error - {str(e)}]"
 
 
 async def check_connection() -> bool:

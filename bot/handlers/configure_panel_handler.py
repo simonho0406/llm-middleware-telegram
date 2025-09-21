@@ -11,6 +11,7 @@ import config
 from bot import providers
 from storage import storage_manager
 from utils.text_processing import escape_markdown_v2
+import hashlib
 from bot.settings import USER_SETTINGS
 
 logger = logging.getLogger(__name__)
@@ -256,22 +257,45 @@ async def show_model_selection(update: Update, context: ContextTypes.DEFAULT_TYP
     end_index = min(start_index + MODELS_PER_PAGE, total_models)
     models_page = models_result[start_index:end_index]
     
-    # Build model selection menu
-    menu_text = f"*🔧 Configure {role} → {provider}*\n\n"
-    menu_text += f"*Current Model:* `{current_model or 'Not Set'}`\n\n"
-    menu_text += f"*Select a Model* \\(Page {page}/{(total_models - 1) // MODELS_PER_PAGE + 1}\\):"
+    # Build model selection menu with proper escaping
+    escaped_role = escape_markdown_v2(role)
+    escaped_provider = escape_markdown_v2(provider)
+    escaped_current_model = escape_markdown_v2(current_model or 'Not Set')
+    total_pages = (total_models - 1) // MODELS_PER_PAGE + 1
     
-    # Create model buttons
+    menu_text = f"*🔧 Configure {escaped_role} → {escaped_provider}*\n\n"
+    menu_text += f"*Current Model:* `{escaped_current_model}`\n\n"
+    menu_text += f"*Select a Model* \\(Page {page}/{total_pages}\\):"
+    
+    # Create model buttons with safe callback data
     keyboard = []
     for model in models_page:
-        model_name = model['name'] if isinstance(model, dict) else model
-        # Truncate long model names for button display
-        display_name = model_name if len(model_name) <= 40 else f"{model_name[:37]}..."
-        button_text = f"✅ {display_name}" if model_name == current_model else display_name
+        # Extract both display name and API model ID
+        if isinstance(model, dict):
+            model_id = model.get('id', model.get('name', ''))  # API-compatible ID
+            display_name = model.get('name', model_id)  # Human-readable name
+        else:
+            model_id = model  # For simple string models
+            display_name = model
+
+        # Truncate long display names for button display
+        truncated_display = display_name if len(display_name) <= 40 else f"{display_name[:37]}..."
+        button_text = f"✅ {truncated_display}" if model_id == current_model else truncated_display
+
+        # Create safe callback data using API model ID (not display name)
+        callback_data = f"{MODEL_CALLBACK_PREFIX}{model_id}"
+        if len(callback_data) > 60:  # Leave room for prefix
+            # Use hash for long model IDs and store mapping in context
+            model_hash = hashlib.md5(model_id.encode()).hexdigest()[:16]
+            callback_data = f"{MODEL_CALLBACK_PREFIX}hash_{model_hash}"
+            # Store the mapping in context for later retrieval (use model_id, not display name)
+            if 'model_hash_map' not in context.user_data:
+                context.user_data['model_hash_map'] = {}
+            context.user_data['model_hash_map'][model_hash] = model_id
         
         keyboard.append([InlineKeyboardButton(
             button_text,
-            callback_data=f"{MODEL_CALLBACK_PREFIX}{model_name}"
+            callback_data=callback_data
         )])
     
     # Pagination buttons
@@ -301,13 +325,28 @@ async def show_model_selection(update: Update, context: ContextTypes.DEFAULT_TYP
             reply_markup=reply_markup,
             parse_mode=constants.ParseMode.MARKDOWN_V2
         )
-    except BadRequest:
-        # Fallback to plain text
-        plain_text = menu_text.replace('*', '').replace('`', '').replace('\\', '').replace('✅', '').replace('🔧', '').replace('◀️', '').replace('▶️', '')
-        await update.callback_query.edit_message_text(
-            text=plain_text,
-            reply_markup=reply_markup
+    except BadRequest as e:
+        logger.warning(f"MarkdownV2 parsing failed in model selection: {e}")
+        # Fallback to plain text without markdown
+        plain_text = (
+            f"🔧 Configure {role} → {provider}\n\n"
+            f"Current Model: {current_model or 'Not Set'}\n\n"
+            f"Select a Model (Page {page}/{total_pages}):"
         )
+        try:
+            await update.callback_query.edit_message_text(
+                text=plain_text,
+                reply_markup=reply_markup
+            )
+        except BadRequest as e2:
+            logger.error(f"Even plain text failed in model selection: {e2}")
+            # Last resort - send new message
+            await update.callback_query.message.reply_text(
+                "Error displaying model selection. Please try /configure_panel again.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🏠 Main Menu", callback_data=BACK_TO_MENU_CALLBACK)
+                ]])
+            )
     
     return SELECT_MODEL
 
@@ -318,7 +357,15 @@ async def handle_model_selection(update: Update, context: ContextTypes.DEFAULT_T
     await query.answer()
     
     # Extract model from callback data
-    model = query.data[len(MODEL_CALLBACK_PREFIX):]
+    model_data = query.data[len(MODEL_CALLBACK_PREFIX):]
+    
+    # Handle hashed model names
+    if model_data.startswith('hash_'):
+        model_hash = model_data[5:]  # Remove 'hash_' prefix
+        model_hash_map = context.user_data.get('model_hash_map', {})
+        model = model_hash_map.get(model_hash, model_data)  # Fallback to original if not found
+    else:
+        model = model_data
     
     role = context.user_data['config_temp']['selected_role']
     provider = context.user_data['config_temp']['selected_provider']
@@ -492,9 +539,12 @@ async def load_panel_config(chat_id: int) -> dict:
     
     # Try to load custom configuration with JSON corruption protection
     try:
-        custom_overrides = await storage_manager.get_user_setting(chat_id, 'panel_config', None)
+        config_json = await storage_manager.get_user_setting(chat_id, 'panel_config', None)
         
-        if custom_overrides:
+        if config_json:
+            # Parse JSON string back to dictionary
+            custom_overrides = json.loads(config_json)
+            
             # Deep merge user overrides on top of default config
             merged_config = deep_merge_configs(default_config, custom_overrides)
             logger.debug(f"Successfully merged custom panel config for chat {chat_id}")
@@ -539,8 +589,9 @@ async def save_role_config(chat_id: int, role: str, provider: str, model: str) -
         'request_timeout_seconds': 600  # Use default timeout
     }
     
-    # Save back to storage
-    await storage_manager.set_user_setting(chat_id, 'panel_config', current_config)
+    # Save back to storage - serialize to JSON string
+    config_json = json.dumps(current_config)
+    await storage_manager.set_user_setting(chat_id, 'panel_config', config_json)
     logger.info(f"Updated {role} configuration for chat {chat_id}: {provider}/{model}")
 
 
@@ -562,8 +613,9 @@ configure_panel_conv_handler = ConversationHandler(
             CallbackQueryHandler(handle_role_selection, pattern=f"^{ROLE_CALLBACK_PREFIX}"),
         ],
         SELECT_MODEL: [
-            CallbackQueryHandler(handle_model_selection, pattern=f"^{MODEL_CALLBACK_PREFIX}"),
+            # Order matters! More specific patterns must come first
             CallbackQueryHandler(handle_model_page_change, pattern=f"^{MODEL_PAGE_CALLBACK_PREFIX}"),
+            CallbackQueryHandler(handle_model_selection, pattern=f"^{MODEL_CALLBACK_PREFIX}"),
             CallbackQueryHandler(handle_role_selection, pattern=f"^{ROLE_CALLBACK_PREFIX}"),
             CallbackQueryHandler(handle_back_to_menu, pattern=f"^{BACK_TO_MENU_CALLBACK}$"),
         ],
