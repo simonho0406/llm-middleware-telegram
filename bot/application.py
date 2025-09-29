@@ -1,6 +1,7 @@
 import logging
 from telegram.ext import Application, ApplicationBuilder, Defaults
 from telegram.constants import ParseMode
+from telegram.request import HTTPXRequest
 from typing import Callable, Awaitable
 import config
 
@@ -18,8 +19,20 @@ def create_application(post_init_hook: PostInitFunc | None = None) -> Applicatio
     # Set default settings for the bot (e.g., parse mode)
     defaults = Defaults(parse_mode=ParseMode.MARKDOWN_V2)
 
-    # Create the ApplicationBuilder instance
-    builder = Application.builder().token(config.TELEGRAM_BOT_TOKEN).defaults(defaults)
+    # Configure HTTP request settings with improved timeout handling
+    request = HTTPXRequest(
+        connection_pool_size=8,  # Increase connection pool size
+        pool_timeout=20.0,       # Pool timeout
+        read_timeout=30.0,       # Read timeout for responses
+        write_timeout=30.0,      # Write timeout for requests
+        connect_timeout=10.0     # Connection timeout (includes socket timeout)
+    )
+
+    # Create the ApplicationBuilder instance with improved request configuration
+    builder = (Application.builder()
+               .token(config.TELEGRAM_BOT_TOKEN)
+               .defaults(defaults)
+               .request(request))
 
     # Add the post_init hook if provided
     if post_init_hook:
@@ -28,7 +41,7 @@ def create_application(post_init_hook: PostInitFunc | None = None) -> Applicatio
     # Build the Application
     application = builder.build()
 
-    logger.info("Telegram Application created.")
+    logger.info("Telegram Application created with improved timeout configuration.")
     return application
 
 # Note: We no longer create the app instance here as a singleton,

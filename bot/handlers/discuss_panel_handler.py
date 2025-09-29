@@ -396,23 +396,17 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
     
     # Validate expert panel configuration
     try:
-        # Load user's custom configuration or fall back to defaults
-        config_json = await storage_manager.get_user_setting(chat_id, 'panel_config', None)
+        # Import the necessary helper functions
+        from bot.handlers.configure_panel_handler import load_panel_config
+
+        # Use the centralized function to load and merge the config
+        panel_config = await load_panel_config(chat_id)
         
-        if config_json:
-            # Deserialize JSON string back to dictionary
-            try:
-                custom_config = json.loads(config_json)
-                panel_config = custom_config
-                logger.info(f"Using custom panel configuration for chat {chat_id}")
-            except (json.JSONDecodeError, TypeError) as e:
-                logger.warning(f"Failed to parse custom panel config for chat {chat_id}: {e}. Using defaults.")
-                panel_config = config.EXPERT_PANEL_CONFIG
+        if panel_config != config.EXPERT_PANEL_CONFIG:
+             logger.info(f"Using custom panel configuration for chat {chat_id}")
         else:
-            # Fall back to default configuration from config.yaml
-            panel_config = config.EXPERT_PANEL_CONFIG
-            logger.debug(f"Using default panel configuration for chat {chat_id}")
-        
+             logger.debug(f"Using default panel configuration for chat {chat_id}")
+
         # Load configuration needed for the workflow
         quality_threshold = panel_config.get('quality_threshold', 85)
         max_iterations = panel_config.get('max_refinement_iterations', 3)
@@ -447,7 +441,7 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
         if refiner_config and (not refiner_config.get('provider') or not refiner_config.get('model')):
             raise ValueError("Configuration Error: The 'Refiner' role is incomplete - missing provider or model. Use /configure_panel to fix this.")
             
-    except ValueError as config_error:
+    except (ValueError, ImportError) as config_error:
         # Return user-friendly configuration error
         await placeholder_msg.edit_text(
             f"⚠️ {str(config_error)} Please check your configuration and use /reroll to try again.",
@@ -840,18 +834,44 @@ async def start_panel_discussion(update: Update, context: ContextTypes.DEFAULT_T
         # Step 2: Split AST into logical chunks
         ast_chunks = split_document_ast_aware(document)
         
-        # Step 3: Send each chunk with proper fallback
+        # Step 3: Send each chunk with advanced splitting and error handling
         for i, chunk_doc in enumerate(ast_chunks):
             try:
                 # Render AST chunk to MarkdownV2
                 telegram_safe_text = render_ast_to_telegram_v2(chunk_doc)
-                await context.bot.send_message(chat_id=chat_id, text=telegram_safe_text, parse_mode=constants.ParseMode.MARKDOWN_V2)
+
+                # Challenge C Fix: Skip empty or whitespace-only messages
+                if not telegram_safe_text.strip():
+                    continue
+
+                # Challenge A Fix: Handle oversized messages
+                if len(telegram_safe_text) > constants.MessageLimit.MAX_TEXT_LENGTH:
+                    logger.warning(f"Chunk {i+1} is oversized ({len(telegram_safe_text)} chars). Applying secondary splitting.")
+                    sub_chunks = [telegram_safe_text[j:j+constants.MessageLimit.MAX_TEXT_LENGTH] for j in range(0, len(telegram_safe_text), constants.MessageLimit.MAX_TEXT_LENGTH)]
+                    for k, sub_chunk in enumerate(sub_chunks):
+                        # Prepend with a note for all but the first sub-chunk
+                        prefix = "_(continued...)_\\n" if k > 0 else ""
+                        await context.bot.send_message(chat_id=chat_id, text=prefix + sub_chunk, parse_mode=constants.ParseMode.MARKDOWN_V2)
+                else:
+                    # Send normally if not oversized
+                    await context.bot.send_message(chat_id=chat_id, text=telegram_safe_text, parse_mode=constants.ParseMode.MARKDOWN_V2)
+
             except BadRequest as e:
                 logger.warning(f"Chunk {i+1} MarkdownV2 failed: {e}. Rendering same AST chunk as plain text.")
                 try:
                     # Render the same AST chunk as clean plain text
                     plain_text = render_ast_to_plain_text(chunk_doc)
-                    await context.bot.send_message(chat_id=chat_id, text=f"⚠️ This section could not be formatted correctly.\n\n{plain_text}", parse_mode=None)
+                    if not plain_text.strip(): # Also check fallback for empty content
+                        continue
+                    
+                    # Also apply splitting to fallback text
+                    if len(plain_text) > constants.MessageLimit.MAX_TEXT_LENGTH:
+                         sub_chunks = [plain_text[j:j+constants.MessageLimit.MAX_TEXT_LENGTH] for j in range(0, len(plain_text), constants.MessageLimit.MAX_TEXT_LENGTH)]
+                         for sub_chunk in sub_chunks:
+                            await context.bot.send_message(chat_id=chat_id, text=sub_chunk, parse_mode=None)
+                    else:
+                        await context.bot.send_message(chat_id=chat_id, text=f"⚠️ This section could not be formatted correctly.\n\n{plain_text}", parse_mode=None)
+
                 except BadRequest as final_error:
                     logger.error(f"Final attempt for chunk {i+1} failed: {final_error}. Skipping chunk.")
 
@@ -931,10 +951,6 @@ async def handle_follow_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
         await placeholder.delete()
         
-        # Step 1: Generate pure markdown content
-        pure_summary = _format_panel_summary(new_panel_results)
-        pure_markdown_content = f"{pure_summary}\n\n---\n\n{new_final_answer}"
-
         # AST-Based Architecture: Parse, Split, and Send
         try:
             # Step 1: Parse Markdown to AST
@@ -943,18 +959,44 @@ async def handle_follow_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             # Step 2: Split AST into logical chunks
             ast_chunks = split_document_ast_aware(document)
 
-            # Step 3: Send each chunk with proper fallback
+            # Step 3: Send each chunk with advanced splitting and error handling
             for i, chunk_doc in enumerate(ast_chunks):
                 try:
                     # Render AST chunk to MarkdownV2
                     telegram_safe_text = render_ast_to_telegram_v2(chunk_doc)
-                    await context.bot.send_message(chat_id=chat_id, text=telegram_safe_text, parse_mode=constants.ParseMode.MARKDOWN_V2)
+
+                    # Challenge C Fix: Skip empty or whitespace-only messages
+                    if not telegram_safe_text.strip():
+                        continue
+
+                    # Challenge A Fix: Handle oversized messages
+                    if len(telegram_safe_text) > constants.MessageLimit.MAX_TEXT_LENGTH:
+                        logger.warning(f"Chunk {i+1} is oversized ({len(telegram_safe_text)} chars). Applying secondary splitting.")
+                        sub_chunks = [telegram_safe_text[j:j+constants.MessageLimit.MAX_TEXT_LENGTH] for j in range(0, len(telegram_safe_text), constants.MessageLimit.MAX_TEXT_LENGTH)]
+                        for k, sub_chunk in enumerate(sub_chunks):
+                            # Prepend with a note for all but the first sub-chunk
+                            prefix = "_(continued...)_\\n" if k > 0 else ""
+                            await context.bot.send_message(chat_id=chat_id, text=prefix + sub_chunk, parse_mode=constants.ParseMode.MARKDOWN_V2)
+                    else:
+                        # Send normally if not oversized
+                        await context.bot.send_message(chat_id=chat_id, text=telegram_safe_text, parse_mode=constants.ParseMode.MARKDOWN_V2)
+
                 except BadRequest as e:
                     logger.warning(f"Chunk {i+1} MarkdownV2 failed: {e}. Rendering same AST chunk as plain text.")
                     try:
                         # Render the same AST chunk as clean plain text
                         plain_text = render_ast_to_plain_text(chunk_doc)
-                        await context.bot.send_message(chat_id=chat_id, text=f"⚠️ This section could not be formatted correctly.\n\n{plain_text}", parse_mode=None)
+                        if not plain_text.strip(): # Also check fallback for empty content
+                            continue
+                        
+                        # Also apply splitting to fallback text
+                        if len(plain_text) > constants.MessageLimit.MAX_TEXT_LENGTH:
+                             sub_chunks = [plain_text[j:j+constants.MessageLimit.MAX_TEXT_LENGTH] for j in range(0, len(plain_text), constants.MessageLimit.MAX_TEXT_LENGTH)]
+                             for sub_chunk in sub_chunks:
+                                await context.bot.send_message(chat_id=chat_id, text=sub_chunk, parse_mode=None)
+                        else:
+                            await context.bot.send_message(chat_id=chat_id, text=f"⚠️ This section could not be formatted correctly.\n\n{plain_text}", parse_mode=None)
+
                     except BadRequest as final_error:
                         logger.error(f"Final attempt for chunk {i+1} failed: {final_error}. Skipping chunk.")
 

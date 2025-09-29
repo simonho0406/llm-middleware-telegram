@@ -46,23 +46,32 @@ if mistletoe is not None and BaseRenderer is not None:
             super().__init__()
             # Characters that need escaping in MarkdownV2 plain text contexts
             # Complete list: _ * [ ] ( ) ~ ` > # + - = | { } . ! \
-            self.escape_chars = r'_*[]()~`>#+-=|{}.!\\'  # Backslash must be last
+            self.escape_chars = r'\_* ()~`>#+-=|{}.!'
             # Manually register all missing renderers that mistletoe doesn't auto-detect
             self.render_map['LineBreak'] = self.render_line_break
             self.render_map['ThematicBreak'] = self.render_thematic_break
             self.render_map['SoftBreak'] = self.render_line_break  # Handle both soft and hard breaks
             self.render_map['HardLineBreak'] = self.render_line_break  # Handle both soft and hard breaks
             self.render_map['Strong'] = self.render_strong_emphasis  # Handle **bold** text
+            self.render_map['EscapeSequence'] = self.render_escape_sequence  # Handle escaped characters
         
         def render_raw_text(self, token):
-            """Render raw text with proper MarkdownV2 escaping."""
-            if hasattr(token, 'content'):
-                text = token.content
-            else:
-                text = str(token)
+            """Render raw text with proper MarkdownV2 escaping in a single pass."""
+            content = token.content if hasattr(token, 'content') else str(token)
             
-            # Escape special characters for MarkdownV2
-            return re.sub(f'([{re.escape(self.escape_chars)}])', r'\\\1', text)
+            # Define the set of characters that MUST be escaped in Telegram MarkdownV2.
+            escape_chars = {'_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!'}
+            
+            # Build the new string in a single pass to avoid double-escaping issues.
+            # This is more robust than chained replace() calls.
+            escaped_content = []
+            for char in content:
+                if char in escape_chars:
+                    escaped_content.append('\\' + char)
+                else:
+                    escaped_content.append(char)
+            
+            return "".join(escaped_content)
         
         def render_emphasis(self, token):
             """Render italic text (_text_) - MarkdownV2 uses underscores for italic."""
@@ -89,22 +98,21 @@ if mistletoe is not None and BaseRenderer is not None:
             return f"**{content}**"
         
         def render_list(self, token):
-            """Render lists with proper formatting."""
+            """Render lists with proper formatting for TelegramV2.""" 
             items = []
             for i, item in enumerate(token.children):
                 if hasattr(token, 'start') and token.start is not None:
-                    # Ordered list - safely handle start value
+                    # Ordered list: "1\. ", "2\. ", etc.
                     try:
-                        # If start is callable, call it; otherwise use it directly
-                        start_num = token.start() if callable(token.start) else token.start
-                        number = int(start_num) + i
+                        # The start attribute can be a method, requiring the line number
+                        start_num = token.start(token.line_number) if callable(token.start) else token.start
+                        number = start_num + i
                         items.append(f"{number}\\. {self.render_inner(item)}")
-                    except (TypeError, ValueError, AttributeError):
-                        # Fallback to sequential numbering starting from 1
-                        number = i + 1
+                    except TypeError: # Fallback for older mistletoe versions
+                        number = (token.start() if callable(token.start) else token.start) + i
                         items.append(f"{number}\\. {self.render_inner(item)}")
                 else:
-                    # Unordered list - use escaped dash instead of bullet
+                    # Unordered list: "\- "
                     items.append(f"\\- {self.render_inner(item)}")
             return '\n'.join(items)
         
@@ -113,11 +121,11 @@ if mistletoe is not None and BaseRenderer is not None:
             return self.render_inner(token)
         
         def render_quote(self, token):
-            """Render blockquotes with escaped > characters."""
+            """Render blockquotes with a single > character."""
             content = self.render_inner(token)
-            # Split by lines and add escaped > to each line
             lines = content.split('\n')
-            return '\n'.join(f"\\> {line}" for line in lines)
+            # Prepend each line with '> '
+            return '\n'.join(f"> {line}" for line in lines)
         
         def render_link(self, token):
             """Render links [text](url)."""
@@ -141,6 +149,14 @@ if mistletoe is not None and BaseRenderer is not None:
         def render_thematic_break(self, token):
             """Render thematic breaks (horizontal rules)."""
             return '\n---\n'
+
+        def render_escape_sequence(self, token):
+            """Render escape sequences (backslash-escaped characters)."""
+            if hasattr(token, 'content'):
+                # Return the escaped character as-is (already properly escaped)
+                return token.content
+            else:
+                return str(token)
         
         def render_table(self, token):
             """Render tables as plain-text representation in code block."""
@@ -198,8 +214,12 @@ if mistletoe is not None and BaseRenderer is not None:
 
         def __init__(self):
             super().__init__()
-            # Manually register all missing renderers that mistletoe doesn't auto-detect
-            self.render_map['Strong'] = self.render_strong_emphasis  # Handle **bold** text
+            self.render_map['Strong'] = self.render_strong_emphasis
+            self.render_map['LineBreak'] = self.render_line_break
+            self.render_map['SoftBreak'] = self.render_line_break
+            self.render_map['HardLineBreak'] = self.render_line_break
+            self.render_map['ThematicBreak'] = self.render_thematic_break
+            self.render_map['Table'] = self.render_table # Ensure table is handled
 
         def render_raw_text(self, token):
             """Render raw text without any escaping."""
@@ -233,15 +253,13 @@ if mistletoe is not None and BaseRenderer is not None:
             items = []
             for i, item in enumerate(token.children):
                 if hasattr(token, 'start') and token.start is not None:
-                    # Ordered list - safely handle start value
+                    # Ordered list
                     try:
-                        # If start is callable, call it; otherwise use it directly
-                        start_num = token.start() if callable(token.start) else token.start
-                        number = int(start_num) + i
+                        start_num = token.start(token.line_number) if callable(token.start) else token.start
+                        number = start_num + i
                         items.append(f"{number}. {self.render_inner(item)}")
-                    except (TypeError, ValueError, AttributeError):
-                        # Fallback to sequential numbering starting from 1
-                        number = i + 1
+                    except TypeError:
+                        number = (token.start() if callable(token.start) else token.start) + i
                         items.append(f"{number}. {self.render_inner(item)}")
                 else:
                     # Unordered list
@@ -261,44 +279,34 @@ if mistletoe is not None and BaseRenderer is not None:
             text = self.render_inner(token)
             url = token.target
             return f"{text} ({url})"
-        
+
         def render_paragraph(self, token):
             """Render paragraphs as plain text."""
             return self.render_inner(token)
-        
+
+        def render_line_break(self, token):
+            """Render line breaks as a newline for plain text."""
+            return '\n'
+
+        def render_thematic_break(self, token):
+            """Render thematic breaks as a simple separator."""
+            return "\n---\n"
+
         def render_table(self, token):
             """Render tables as simple plain text without code block wrapping."""
+            # This is a simplified text representation of a table
             rows = []
-            
-            # Process header row if it exists
             if hasattr(token, 'header') and token.header:
-                header_cells = []
-                for cell in token.header.children:
-                    cell_content = self.render_inner(cell).strip()
-                    header_cells.append(cell_content)
-                
-                # Create header row
-                header_row = '| ' + ' | '.join(header_cells) + ' |'
-                rows.append(header_row)
-                
-                # Create separator row
-                separator = '|' + '|'.join(['----------' for _ in header_cells]) + '|'
-                rows.append(separator)
-            
-            # Process data rows
+                header_cells = [self.render_inner(cell).strip() for cell in token.header.children]
+                rows.append(' | '.join(header_cells))
+                rows.append('-' * (sum(len(c) for c in header_cells) + (len(header_cells) - 1) * 3)) # Visual separator
+
             for child in token.children:
-                if hasattr(child, 'children'):  # This is a table row
-                    row_cells = []
-                    for cell in child.children:
-                        cell_content = self.render_inner(cell).strip()
-                        row_cells.append(cell_content)
-                    
-                    row = '| ' + ' | '.join(row_cells) + ' |'
-                    rows.append(row)
-            
-            # Return plain text table without code block wrapping
+                if hasattr(child, 'children'):
+                    row_cells = [self.render_inner(cell).strip() for cell in child.children]
+                    rows.append(' | '.join(row_cells))
             return '\n'.join(rows)
-        
+
         def render_inner(self, token):
             """Render the inner content of a token."""
             if hasattr(token, 'children') and token.children:

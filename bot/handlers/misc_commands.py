@@ -274,10 +274,39 @@ async def model_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     provider_name = await storage_manager.get_thread_key(chat_id, 'provider', config.DEFAULT_PROVIDER)
     provider_config = providers.get_config_for_provider(provider_name)
     current_model = await storage_manager.get_thread_key(chat_id, 'model', provider_config['default_model'])
-    await update.message.reply_text(
-        f"Current model for *{escape_markdown(provider_name)}*: `{escape_markdown(current_model)}`", 
-        parse_mode='Markdown'
-    )
+
+    # Improved error handling and retry logic for Telegram API timeouts
+    message_text = f"Current model for *{escape_markdown(provider_name)}*: `{escape_markdown(current_model)}`"
+
+    for attempt in range(3):  # Retry up to 3 times
+        try:
+            await asyncio.wait_for(
+                update.message.reply_text(message_text, parse_mode='Markdown'),
+                timeout=15.0
+            )
+            break  # Success, exit retry loop
+        except asyncio.TimeoutError:
+            logger.warning(f"Timeout sending model info (attempt {attempt + 1}/3)")
+            if attempt == 2:  # Last attempt failed
+                try:
+                    # Emergency fallback: send without markdown
+                    await asyncio.wait_for(
+                        update.message.reply_text(
+                            f"Current model for {provider_name}: {current_model}",
+                            parse_mode=None
+                        ),
+                        timeout=10.0
+                    )
+                except Exception as fallback_error:
+                    logger.error(f"Complete failure to send model info: {fallback_error}")
+                    # Don't raise - let the global error handler deal with it
+            else:
+                await asyncio.sleep(1)  # Wait before retry
+        except Exception as e:
+            logger.error(f"Error in model_command (attempt {attempt + 1}/3): {e}")
+            if attempt == 2:  # Last attempt, let it propagate to global error handler
+                raise
+            await asyncio.sleep(1)  # Wait before retry
 
 async def list_models_command(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 1, provider_name_from_callback: str | None = None) -> None:
     """Lists available/allowed models for the current provider with pagination."""
