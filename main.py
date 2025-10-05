@@ -26,12 +26,11 @@ async def run_startup_checks(application: Application) -> None:
 
     results = await asyncio.gather(
         ollama_service.check_connection(),
-        gemini_service.check_connection(),
         openrouter_service.check_connection(),
         return_exceptions=True
     )
     
-    service_names = ["Ollama", "Gemini", "OpenRouter"]
+    service_names = ["Ollama", "OpenRouter"]
     for name, result in zip(service_names, results):
         if isinstance(result, Exception) or not result:
             logger.warning(f"{name} connection check failed. Features may be limited. Error: {result}")
