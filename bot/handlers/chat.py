@@ -249,14 +249,19 @@ async def _generate_and_send_response_task(update: Update, context: ContextTypes
     # Centralized, safe sending
     message_sent_successfully = await send_safe_message(context, update, final_content)
 
+    # Check if the task was cancelled before saving history
+    if asyncio.current_task().cancelled():
+        logger.info(f"{log_prefix}Task was cancelled, skipping history update.")
+        return
+
     # Update history
     if response_data.get('error') is None and message_sent_successfully:
         try:
             history = response_data.get('processed_history', [])
-            history.extend([
-                {'role': 'user', 'content': prompt},
-                {'role': 'assistant', 'content': final_content}
-            ])
+            # For a reroll or edit, the user message is already in the history.
+            if not is_reroll:
+                history.append({'role': 'user', 'content': prompt})
+            history.append({'role': 'assistant', 'content': final_content})
             await storage_manager.set_thread_history(chat_id, history)
         except Exception as e_hist:
             logger.error(f"{log_prefix}Failed to update history: {e_hist}")
