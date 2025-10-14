@@ -71,8 +71,8 @@ expert_panel:
   orchestrator:
     provider: "nvidia"
     model: "nvidia/llama-3.3-nemotron-super-49b-v1.5"
-    fallback_provider: "openrouter"
-    fallback_model: "openai/gpt-oss-20b:free"
+    fallback_provider: "nvidia"
+    fallback_model: "openai/gpt-oss-120b"
     request_timeout_seconds: 600
 
   # Expert Panel Roles - Restore original working models

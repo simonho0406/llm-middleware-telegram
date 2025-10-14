@@ -23,10 +23,8 @@ from telegram.error import BadRequest
 import config
 from bot import providers
 from storage import storage_manager
-# Import moved inside functions to avoid circular import
-from utils.text_processing import escape_markdown_v2
+from bot.messaging import send_safe_message
 from services import web_search_service
-from utils.text_processing import parse_markdown_to_ast, split_document_ast_aware, render_ast_to_telegram_v2, render_ast_to_plain_text
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +70,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 *💡 Smart Features*:
 • Auto-search: I can automatically web search when needed
 • Configure in /config → Auto-Search settings"""
-    await update.message.reply_text(escape_markdown(help_text, version=2), parse_mode='MarkdownV2')
+    await send_safe_message(context, update, help_text)
 
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, placeholder_message = None) -> None:
     """
@@ -84,15 +82,14 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
     log_prefix = f"(Chat {chat_id}) "
 
     if not context.args:
-        await update.message.reply_text("Please provide a query to search. Usage: /search <your query>", parse_mode=None)
+        await send_safe_message(context, update, "Please provide a query to search. Usage: /search <query>")
         return
 
     query = " ".join(context.args)
     logger.info(f"{log_prefix}User {user_id} initiated /search with query: '{query}'")
 
-    # If no placeholder_message was passed in, create one
     if placeholder_message is None:
-        placeholder_message = await update.message.reply_text(f"Searching the web for: \"{query}\"...", parse_mode=None)
+        placeholder_message = await context.bot.send_message(chat_id, f"Searching the web for: \"{query}\"...", parse_mode=None)
     else:
         await placeholder_message.edit_text(f"Searching the web for: \"{query}\"...", parse_mode=None)
         
@@ -113,9 +110,7 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
     provider_config = provider_details.get(session_provider, provider_details[config.DEFAULT_PROVIDER])
     
     service = provider_config['service']
-    model_key = 'model'
-    default_model = provider_config['default_model']
-    model_to_use = await storage_manager.get_thread_key(chat_id, model_key, default_model)
+    model_to_use = await storage_manager.get_thread_key(chat_id, 'model', provider_config['default_model'])
 
     await placeholder_message.edit_text(f"Found results. Asking {session_provider.capitalize()} ({model_to_use}) for analysis...", parse_mode=None)
 
@@ -128,43 +123,7 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
         await placeholder_message.edit_text("Sorry, an error occurred while processing the search results.", parse_mode=None)
         return
 
-    try:
-        await placeholder_message.delete()
-
-        # AST-Based Architecture: Parse, Split, and Send
-        try:
-            # Step 1: Parse Markdown to AST
-            document = parse_markdown_to_ast(final_response)
-
-            # Step 2: Split AST into logical chunks
-            ast_chunks = split_document_ast_aware(document)
-
-            # Step 3: Send each chunk with proper fallback
-            for i, chunk_doc in enumerate(ast_chunks):
-                try:
-                    # Render AST chunk to MarkdownV2
-                    telegram_safe_text = render_ast_to_telegram_v2(chunk_doc)
-                    await context.bot.send_message(chat_id, text=telegram_safe_text, parse_mode=constants.ParseMode.MARKDOWN_V2)
-                except BadRequest as e:
-                    logger.warning(f"Chunk {i+1} MarkdownV2 failed in misc_commands: {e}. Rendering same AST chunk as plain text.")
-                    try:
-                        # Render the same AST chunk as clean plain text
-                        plain_text = render_ast_to_plain_text(chunk_doc)
-                        await context.bot.send_message(chat_id, text=f"⚠️ This section could not be formatted correctly.\n\n{plain_text}", parse_mode=None)
-                    except BadRequest as final_error:
-                        logger.error(f"Final attempt for chunk {i+1} failed in misc_commands: {final_error}. Skipping chunk.")
-
-        except Exception as ast_error:
-            logger.error(f"AST processing failed in misc_commands: {ast_error}. Using emergency fallback.")
-            # Emergency: Send as single plain text message
-            emergency_content = f"⚠️ Content formatting failed.\n\n{final_response}"
-            try:
-                await context.bot.send_message(chat_id, text=emergency_content, parse_mode=None)
-            except Exception as emergency_error:
-                logger.error(f"Emergency fallback failed in misc_commands: {emergency_error}. Critical failure.")
-
-    except Exception as e:
-        logger.error(f"{log_prefix}Failed to send final search response: {e}", exc_info=True)
+    await send_safe_message(context, update, final_response, placeholder_message)
 
     try:
         history = await storage_manager.get_thread_history(chat_id)
@@ -194,11 +153,11 @@ async def new_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             default_model = provider_config.get('default_model')
             if default_model:
                 await storage_manager.set_thread_key(chat_id, 'model', default_model)
-        msg = f"Started a new thread: `{escape_markdown_v2(new_thread_id)}`"
-        await update.message.reply_text(msg, parse_mode=constants.ParseMode.MARKDOWN_V2)
+        msg = f"Started a new thread: `{new_thread_id}`"
+        await send_safe_message(context, update, msg)
     except Exception as e:
         logger.error(f"Error creating new thread for chat {chat_id}: {e}", exc_info=True)
-        await update.message.reply_text("An error occurred while creating a new thread.", parse_mode=None)
+        await send_safe_message(context, update, "An error occurred while creating a new thread.")
 
 async def provider_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Shows current provider and buttons to switch."""
@@ -206,16 +165,12 @@ async def provider_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     current_provider = await storage_manager.get_thread_key(chat_id, 'provider', config.DEFAULT_PROVIDER)
     available_providers = providers.get_available_provider_names()
     if not available_providers:
-         await update.message.reply_text("Error: No providers available.")
+         await send_safe_message(context, update, "Error: No providers available.")
          return
     buttons = [InlineKeyboardButton(f"✅ {p}" if p == current_provider else p, callback_data=f"{PROVIDER_CALLBACK_PREFIX}{p}") for p in available_providers]
     keyboard = [buttons[i:i + 3] for i in range(0, len(buttons), 3)]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(
-        f"Current provider: *{escape_markdown(current_provider)}*\nChoose a new provider:",
-        reply_markup=reply_markup,
-        parse_mode='Markdown'
-    )
+    await send_safe_message(context, update, f"Current provider: *{current_provider}*\nChoose a new provider:", reply_markup=reply_markup)
 
 async def set_provider_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles button presses for setting the provider."""
@@ -231,14 +186,7 @@ async def set_provider_callback(update: Update, context: ContextTypes.DEFAULT_TY
     keyboard = [buttons[i:i + 3] for i in range(0, len(buttons), 3)]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    try:
-        await query.edit_message_text(
-            f"Provider set to *{escape_markdown(provider_name)}*.\nChoose a new provider:",
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except Exception as e:
-        logger.error(f"Failed to edit provider message: {e}")
+    await send_safe_message(context, update, f"Provider set to *{provider_name}*.\nChoose a new provider:", reply_markup=reply_markup)
 
 async def list_threads_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Lists all threads for the user with switch/delete buttons."""
@@ -247,7 +195,7 @@ async def list_threads_command(update: Update, context: ContextTypes.DEFAULT_TYP
     current_thread = await storage_manager.get_current_thread_id(chat_id)
 
     if not threads:
-        await update.effective_message.reply_text("No threads found.")
+        await send_safe_message(context, update, "No threads found.")
         return
 
     keyboard = []
@@ -267,7 +215,7 @@ async def list_threads_command(update: Update, context: ContextTypes.DEFAULT_TYP
         keyboard.append([InlineKeyboardButton(label, callback_data="noop")] + action_row)
 
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.effective_message.reply_text("Your conversation threads:", reply_markup=reply_markup)
+    await send_safe_message(context, update, "Your conversation threads:", reply_markup=reply_markup)
 
 async def model_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
@@ -275,38 +223,8 @@ async def model_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     provider_config = providers.get_config_for_provider(provider_name)
     current_model = await storage_manager.get_thread_key(chat_id, 'model', provider_config['default_model'])
 
-    # Improved error handling and retry logic for Telegram API timeouts
-    message_text = f"Current model for *{escape_markdown(provider_name)}*: `{escape_markdown(current_model)}`"
-
-    for attempt in range(3):  # Retry up to 3 times
-        try:
-            await asyncio.wait_for(
-                update.message.reply_text(message_text, parse_mode='Markdown'),
-                timeout=15.0
-            )
-            break  # Success, exit retry loop
-        except asyncio.TimeoutError:
-            logger.warning(f"Timeout sending model info (attempt {attempt + 1}/3)")
-            if attempt == 2:  # Last attempt failed
-                try:
-                    # Emergency fallback: send without markdown
-                    await asyncio.wait_for(
-                        update.message.reply_text(
-                            f"Current model for {provider_name}: {current_model}",
-                            parse_mode=None
-                        ),
-                        timeout=10.0
-                    )
-                except Exception as fallback_error:
-                    logger.error(f"Complete failure to send model info: {fallback_error}")
-                    # Don't raise - let the global error handler deal with it
-            else:
-                await asyncio.sleep(1)  # Wait before retry
-        except Exception as e:
-            logger.error(f"Error in model_command (attempt {attempt + 1}/3): {e}")
-            if attempt == 2:  # Last attempt, let it propagate to global error handler
-                raise
-            await asyncio.sleep(1)  # Wait before retry
+    message_text = f"Current model for *{provider_name}*: `{current_model}`"
+    await send_safe_message(context, update, message_text)
 
 async def list_models_command(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 1, provider_name_from_callback: str | None = None) -> None:
     """Lists available/allowed models for the current provider with pagination."""
@@ -315,7 +233,7 @@ async def list_models_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     provider_config = providers.get_config_for_provider(provider_name)
     if not provider_config:
-        await update.effective_message.reply_text(f"Error: Could not find configuration for provider '{escape_markdown(provider_name)}'.")
+        await send_safe_message(context, update, f"Error: Could not find configuration for provider '{provider_name}'.")
         return
         
     service = providers.get_service_for_provider(provider_name)
@@ -328,11 +246,11 @@ async def list_models_command(update: Update, context: ContextTypes.DEFAULT_TYPE
             models_result = provider_config.get('allowed_models')
     except Exception as e:
         logger.error(f"Failed to get models for provider '{provider_name}': {e}")
-        await update.effective_message.reply_text(f"An error occurred while fetching models for '{escape_markdown(provider_name)}'.")
+        await send_safe_message(context, update, f"An error occurred while fetching models for '{provider_name}'.")
         return
 
     if not models_result:
-        await update.effective_message.reply_text(f"No models found or configured for provider '{escape_markdown(provider_name)}'.")
+        await send_safe_message(context, update, f"No models found or configured for provider '{provider_name}'.")
         return
 
     models_result.sort(key=lambda m: m['name'].lower() if isinstance(m, dict) else m.lower())
@@ -368,19 +286,9 @@ async def list_models_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     reply_markup = InlineKeyboardMarkup(buttons)
     total_pages = (total_models + MODELS_PER_PAGE - 1) // MODELS_PER_PAGE
-    message_text = f"Select a model for *{escape_markdown(provider_name)}* (Page {page}/{total_pages}):"
+    message_text = f"Select a model for *{provider_name}* (Page {page}/{total_pages}):"
     
-    try:
-        if update.callback_query:
-            await update.callback_query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode='Markdown')
-        else:
-            await update.message.reply_text(message_text, reply_markup=reply_markup, parse_mode='Markdown')
-    except BadRequest as e:
-        if "Button_data_invalid" in str(e):
-            logger.error(f"Error sending model list keyboard: {e}. Some model names might be too long for callback data.")
-            await update.effective_message.reply_text("Error: Could not display model list due to an API limitation. Please try a different provider.")
-        else:
-            raise
+    await send_safe_message(context, update, message_text, reply_markup=reply_markup)
 
 async def list_models_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles pagination for model list."""
@@ -393,7 +301,7 @@ async def list_models_page_callback(update: Update, context: ContextTypes.DEFAUL
         await list_models_command(update, context, page=page, provider_name_from_callback=provider_name)
     except (ValueError, IndexError) as e:
         logger.error(f"Error processing pagination callback: {e}", exc_info=True)
-        await query.edit_message_text(escape_markdown_v2("Error processing pagination. Please try the /list_models command again."))
+        await send_safe_message(context, update, "Error processing pagination. Please try the /list_models command again.")
 
 async def set_model_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles button presses for setting the model."""
@@ -407,7 +315,7 @@ async def set_model_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         model_info = model_metadata.get(model_hash)
         
         if not model_info:
-            await query.edit_message_text(escape_markdown_v2("Model selection has expired or the bot was restarted. Please use /list_models again."))
+            await send_safe_message(context, update, "Model selection has expired or the bot was restarted. Please use /list_models again.")
             return
             
         provider_name = model_info['provider']
@@ -415,27 +323,23 @@ async def set_model_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         
         provider_config = providers.get_config_for_provider(provider_name)
         if not provider_config:
-            await query.edit_message_text(escape_markdown_v2(f"Error: Provider '{provider_name}' not found."))
+            await send_safe_message(context, update, f"Error: Provider '{provider_name}' not found.")
             return
             
-        model_session_key = 'model'
-        await storage_manager.set_thread_key(chat_id, model_session_key, model_name)
+        await storage_manager.set_thread_key(chat_id, 'model', model_name)
         
         context.user_data.pop('model_metadata', None)
             
-        await query.edit_message_text(f"Model for *{escape_markdown(provider_name)}* set to: `{escape_markdown(model_name)}`", parse_mode='Markdown')
+        await send_safe_message(context, update, f"Model for *{provider_name}* set to: `{model_name}`")
     except Exception as e:
         logger.error(f"Error in set_model_callback: {e}", exc_info=True)
-        await query.edit_message_text(escape_markdown_v2("An error occurred while setting the model. Please try again."))
+        await send_safe_message(context, update, "An error occurred while setting the model. Please try again.")
 
 async def set_model_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Starts the conversation to set a model by typing."""
     chat_id = update.effective_chat.id
     provider_name = await storage_manager.get_thread_key(chat_id, 'provider', config.DEFAULT_PROVIDER)
-    await update.message.reply_text(
-        f"Please type the name of the model for *{escape_markdown(provider_name)}*.",
-        parse_mode='Markdown'
-    )
+    await send_safe_message(context, update, f"Please type the name of the model for *{provider_name}*.")
     return SET_MODEL_TYPING
 
 async def set_model_typed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -445,19 +349,15 @@ async def set_model_typed(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     provider_name = await storage_manager.get_thread_key(chat_id, 'provider', config.DEFAULT_PROVIDER)
     provider_config = providers.get_config_for_provider(provider_name)
     if provider_config:
-        model_session_key = 'model'
-        await storage_manager.set_thread_key(chat_id, model_session_key, model_name)
-        await update.message.reply_text(
-            f"Model for *{escape_markdown(provider_name)}* set to `{escape_markdown(model_name)}`.",
-            parse_mode='Markdown'
-        )
+        await storage_manager.set_thread_key(chat_id, 'model', model_name)
+        await send_safe_message(context, update, f"Model for *{provider_name}* set to `{model_name}`.")
     else:
-        await update.message.reply_text(f"Error: Provider '{escape_markdown(provider_name)}' not found.")
+        await send_safe_message(context, update, f"Error: Provider '{provider_name}' not found.")
     return ConversationHandler.END
 
 async def cancel_set_model(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Cancels the set model conversation."""
-    await update.message.reply_text("Model selection cancelled.")
+    await send_safe_message(context, update, "Model selection cancelled.")
     return ConversationHandler.END
 
 set_model_conv_handler = ConversationHandler(
@@ -472,9 +372,7 @@ set_model_conv_handler = ConversationHandler(
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     safe_user_name = user.mention_markdown_v2()
-    await update.message.reply_markdown_v2(
-        rf'Hi {safe_user_name}\! I am your friendly LLM bot\. Use /help to see what I can do\.'
-    )
+    await send_safe_message(context, update, rf'Hi {safe_user_name}\! I am your friendly LLM bot\. Use /help to see what I can do\.')
 
 async def thread_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles switch/delete thread button presses."""
@@ -485,10 +383,10 @@ async def thread_callback_handler(update: Update, context: ContextTypes.DEFAULT_
     
     if action == "switch_thread":
         await storage_manager.set_current_thread_id(chat_id, thread_id)
-        await query.edit_message_text(f"Switched to thread: {escape_markdown_v2(thread_id)}")
+        await send_safe_message(context, update, f"Switched to thread: {thread_id}")
     elif action == "delete_thread":
         await storage_manager.delete_thread(chat_id, thread_id)
-        await query.edit_message_text(f"Deleted thread: {escape_markdown_v2(thread_id)}")
+        await send_safe_message(context, update, f"Deleted thread: {thread_id}")
     
     await list_threads_command(update, context)
 
@@ -497,34 +395,32 @@ async def rename_thread_command(update: Update, context: ContextTypes.DEFAULT_TY
     chat_id = update.effective_chat.id
     new_name = " ".join(context.args)
     if not new_name:
-        await update.message.reply_text("Usage: /rename_thread <new_name>")
+        await send_safe_message(context, update, "Usage: /rename_thread <new_name>")
         return
     
     success = await storage_manager.rename_thread(chat_id, new_name)
     if success:
-        await update.message.reply_text(f"Thread renamed to: {new_name}")
+        await send_safe_message(context, update, f"Thread renamed to: {new_name}")
     else:
-        await update.message.reply_text("An error occurred while renaming the thread.")
+        await send_safe_message(context, update, "An error occurred while renaming the thread.")
+
 async def delete_thread_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Deletes a specific thread by ID."""
     chat_id = update.effective_chat.id
     if not context.args:
-        await update.message.reply_text("Usage: /delete_thread <thread_id>")
+        await send_safe_message(context, update, "Usage: /delete_thread <thread_id>")
         return
     thread_id = context.args[0].strip()
     
-    # Verify thread exists
     threads = await storage_manager.list_threads(chat_id)
     thread_ids = [t.get("id") if isinstance(t, dict) else t for t in threads]
     
     if thread_id not in thread_ids:
-        await update.message.reply_text(f"Error: Thread `{escape_markdown_v2(thread_id)}` not found. Use /threads to list all threads.")
+        await send_safe_message(context, update, f"Error: Thread `{thread_id}` not found. Use /threads to list all threads.")
         return
     
     await storage_manager.delete_thread(chat_id, thread_id)
-    await update.message.reply_text(f"Thread `{escape_markdown_v2(thread_id)}` deleted successfully.")
-    await storage_manager.rename_thread(chat_id, new_name)
-    await update.message.reply_text(f"Thread renamed to: {new_name}")
+    await send_safe_message(context, update, f"Thread `{thread_id}` deleted successfully.")
 
 async def reroll_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Regenerates the last AI response."""
@@ -538,7 +434,7 @@ async def reroll_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         current_thread_id = await storage_manager.get_current_thread_id(chat_id)
         last_user_prompt = await storage_manager.get_thread_key(chat_id, 'last_user_prompt')
         if not last_user_prompt:
-            await update.message.reply_text("There is no previous prompt to reroll.", parse_mode=None)
+            await send_safe_message(context, update, "There is no previous prompt to reroll.")
             return
         await _generate_and_send_response(
             update=update,
@@ -551,29 +447,24 @@ async def reroll_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
     except Exception as e:
         logger.error(f"{log_prefix}Error during /reroll command: {e}", exc_info=True)
-        await update.message.reply_text("An error occurred while trying to reroll.", parse_mode=None)
-
-# Note: shrink_and_retry_callback removed in favor of automatic context management
+        await send_safe_message(context, update, "An error occurred while trying to reroll.")
 
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Cancels an active, non-conversation LLM task."""
     chat_id = update.effective_chat.id
-    # This command is now only for the main chat_handler's tasks.
-    # It is blocked by the panel's ConversationHandler when a panel is active.
     llm_task = context.chat_data.get('llm_task')
     if llm_task and not llm_task.done():
         llm_task.cancel()
         logger.info(f"(Chat {chat_id}) Normal chat LLM task cancelled by user.")
-        await update.message.reply_text("The current AI response generation has been cancelled.", parse_mode=None)
+        await send_safe_message(context, update, "The current AI response generation has been cancelled.")
         context.chat_data.pop('llm_task', None)
     else:
-        await update.message.reply_text("There is no active response generation to cancel.", parse_mode=None)
+        await send_safe_message(context, update, "There is no active response generation to cancel.")
 
 misc_handlers = [
     CommandHandler("help", help_command),
     CommandHandler("search", search_command),
     CommandHandler("reroll", reroll_command),
-    # Note: shrink_and_retry callback removed - now handled automatically
     CommandHandler("new", new_command),
     CommandHandler("provider", provider_command),
     CallbackQueryHandler(set_provider_callback, pattern=f"^{PROVIDER_CALLBACK_PREFIX}.*$"),

@@ -13,6 +13,7 @@ from telegram.ext import (
 
 from storage import storage_manager
 from bot.settings import USER_SETTINGS
+from bot.messaging import send_safe_message
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ async def get_settings_summary_text(chat_id: int) -> str:
         status = "Enabled" if current_value else "Disabled"
         summary_parts.append(f"\\- `{details['display_name']}`: *{status}*")
     
-    summary_parts.append("\nTo change these, please ensure no panel discussion is active and use /config\\.")
+    summary_parts.append("\nTo change these, please ensure no panel discussion is active and use /config")
     return "\n".join(summary_parts)
 
 async def build_settings_keyboard(chat_id: int) -> InlineKeyboardMarkup:
@@ -60,24 +61,15 @@ async def config_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     """
     chat_id = update.effective_chat.id
 
-    # Check if a panel discussion is active by looking for its state object
     if 'panel_state' in context.user_data:
-        # If active, show a helpful message and exit immediately.
-        await update.message.reply_text(
-            "Configuration cannot be changed during an active panel discussion. "
-            "Please use /end_discussion first.",
-            parse_mode=None
-        )
-        return ConversationHandler.END # Do not enter the conversation
+        await send_safe_message(context, update, "Configuration cannot be changed during an active panel discussion. Please use /end_discussion first.")
+        return ConversationHandler.END
     
-    # Additional safety: Clear any stale conversation states that might interfere
-    # This helps with persistent database issues
     logger.debug(f"Config entry point accessed for chat {chat_id} - clearing any stale states")
     
-    # No panel active, start the configuration conversation normally.
     keyboard = await build_settings_keyboard(chat_id)
-    await update.message.reply_text("User Settings:", reply_markup=keyboard, parse_mode=None)
-    return CONFIG_MENU # Enter the conversation state
+    await send_safe_message(context, update, "User Settings:", reply_markup=keyboard)
+    return CONFIG_MENU
 
 async def handle_setting_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Generic handler to toggle a boolean setting and refresh the menu in-place."""
@@ -111,17 +103,16 @@ async def config_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     """Ends the configuration conversation successfully."""
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("✅ Settings saved.", parse_mode=None)
+    await send_safe_message(context, update, "✅ Settings saved.", is_edit=True)
     return ConversationHandler.END
 
 async def cancel_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Cancels the configuration conversation."""
-    query = update.callback_query
-    if query:
-        await query.answer()
-        await query.edit_message_text("❌ Configuration cancelled.", parse_mode=None)
+    if update.callback_query:
+        await update.callback_query.answer()
+        await send_safe_message(context, update, "❌ Configuration cancelled.", is_edit=True)
     else:
-        await update.message.reply_text("❌ Configuration cancelled.", parse_mode=None)
+        await send_safe_message(context, update, "❌ Configuration cancelled.")
     return ConversationHandler.END
 
 # --- Handler Export ---

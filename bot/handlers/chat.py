@@ -218,282 +218,46 @@ async def _generate_llm_response(chat_id: int, prompt: str, is_reroll: bool = Fa
         'processed_history': processed_history
     }
 
-async def _send_ast_formatted_response(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int, final_content: str, placeholder_message=None) -> bool:
-    """
-    Sends a formatted response using single-tier AST-based formatting.
-
-    Architecture: AST Primary → Plain Text Emergency (no legacy middle tier).
-    Uses proper AST-aware document splitting for long messages.
-
-    Returns True if message was sent successfully, False otherwise.
-    """
-    log_prefix = f"(Chat {chat_id}) "
-
-    if not final_content:
-        logger.warning(f"{log_prefix}No content to send")
-        return False
-
-    # Clean up meta tags before formatting
-    final_content = escape_meta_tags_for_markdown_attempt(final_content)
-    reply_to_msg_id = update.message.message_id if update.message else (update.callback_query.message.id if update.callback_query else None)
-
-    # Primary: AST-based MarkdownV2 formatting with AST-aware splitting
-    try:
-        # Parse content into AST document
-        document = parse_markdown_to_ast(final_content)
-
-        # Check if single document fits within limits
-        formatted_content = render_ast_to_telegram_v2(document)
-
-        if len(formatted_content) <= TELEGRAM_MAX_LEN and placeholder_message:
-            await asyncio.wait_for(
-                placeholder_message.edit_text(text=formatted_content, parse_mode=constants.ParseMode.MARKDOWN_V2),
-                timeout=15.0
-            )
-            logger.info(f"{log_prefix}Message sent successfully with AST formatting")
-            return True
-        else:
-            # Use AST-aware splitting for long messages
-            if placeholder_message:
-                try:
-                    await asyncio.wait_for(placeholder_message.delete(), timeout=5.0)
-                except (asyncio.TimeoutError, Exception):
-                    logger.warning(f"{log_prefix}Timeout deleting placeholder message, continuing...")
-
-            # Split document using AST-aware logic
-            document_chunks = split_document_ast_aware(document, TELEGRAM_MAX_LEN)
-
-            for idx, chunk_doc in enumerate(document_chunks):
-                current_reply_id = reply_to_msg_id if idx == 0 else None
-                chunk_content = render_ast_to_telegram_v2(chunk_doc)
-                await asyncio.wait_for(
-                    context.bot.send_message(
-                        chat_id=chat_id,
-                        text=chunk_content,
-                        parse_mode=constants.ParseMode.MARKDOWN_V2,
-                        reply_to_message_id=current_reply_id
-                    ),
-                    timeout=15.0
-                )
-
-            logger.info(f"{log_prefix}Long message sent successfully with AST formatting ({len(document_chunks)} chunks)")
-            return True
-
-    except Exception as e:
-        logger.warning(f"{log_prefix}AST formatting failed: {e}. Using plain text emergency fallback.")
-
-        # Emergency Fallback: Plain text with no formatting (no legacy middle tier)
-        try:
-            if placeholder_message:
-                try:
-                    await asyncio.wait_for(placeholder_message.delete(), timeout=3.0)
-                except:
-                    pass
-
-            # For plain text, we can still split on reasonable boundaries
-            if len(final_content) <= TELEGRAM_MAX_LEN:
-                await asyncio.wait_for(
-                    context.bot.send_message(chat_id=chat_id, text=final_content, parse_mode=None, reply_to_message_id=reply_to_msg_id),
-                    timeout=10.0
-                )
-            else:
-                # Simple text splitting for emergency fallback
-                chunks = []
-                while len(final_content) > TELEGRAM_MAX_LEN:
-                    # Find last newline within limit
-                    split_pos = final_content.rfind('\n', 0, TELEGRAM_MAX_LEN)
-                    if split_pos == -1:
-                        split_pos = TELEGRAM_MAX_LEN
-
-                    chunks.append(final_content[:split_pos])
-                    final_content = final_content[split_pos:].lstrip()
-
-                if final_content:
-                    chunks.append(final_content)
-
-                for idx, chunk in enumerate(chunks):
-                    current_reply_id = reply_to_msg_id if idx == 0 else None
-                    await asyncio.wait_for(
-                        context.bot.send_message(chat_id=chat_id, text=chunk, parse_mode=None, reply_to_message_id=current_reply_id),
-                        timeout=10.0
-                    )
-
-            logger.info(f"{log_prefix}Message sent successfully with plain text emergency fallback")
-            return True
-
-        except Exception as emergency_e:
-            logger.error(f"{log_prefix}Emergency plain text fallback failed: {emergency_e}")
-            return False
+from bot.messaging import send_safe_message
 
 async def _generate_and_send_response_task(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int, prompt: str, current_thread_id: str, is_reroll: bool = False, force_truncate: bool = False, placeholder_message = None) -> None:
-    """
-    True single-pass streaming AST architecture.
-
-    This implementation eliminates the inefficient dual LLM generation and provides
-    real-time AST-formatted streaming with proper document structure awareness.
-    """
     log_prefix = f"(Chat {chat_id}) "
 
-    # Generate the LLM response using the decoupled core logic
-    operation_id = "reroll" if is_reroll else "chat_response"
-    response_data = await _generate_llm_response(chat_id, prompt, is_reroll, force_truncate, operation_id)
+    response_data = await _generate_llm_response(chat_id, prompt, is_reroll, force_truncate)
 
-    # Handle context limit exceeded with enhanced UI
-    if response_data['error'] == 'context_limit_exceeded':
-        logger.warning(f"{log_prefix}Context limit exceeded. Using enhanced context management UI.")
-
-        # Import here to avoid circular imports
-        from bot.handlers.context_handler import context_limit_prompt
-
-        context_action = response_data.get('context_action')
-        if context_action and context_action.get('action') == 'prompt_user':
-            await context_limit_prompt(update, context, context_action)
-        else:
-            # Fallback to simple message if context_action is missing
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text="Context window is full. Please use /context_settings to configure your preferences or start a new thread with /new.",
-                parse_mode=None
-            )
+    if response_data.get('error') == 'context_limit_exceeded':
+        # This logic remains in the handler as it's specific to the chat workflow
+        await send_safe_message(context, update, "Context window is full. Please use /config to manage conversation history.")
         return
 
-    # Handle search delegation immediately (no duplication)
-    if response_data['search_query']:
-        from . import misc_commands  # Local import to avoid circular dependency
-        logger.info(f"{log_prefix}Auto-search enabled. Delegating to search_command: '{response_data['search_query']}'")
+    if response_data.get('search_query'):
+        from . import misc_commands
+        logger.info(f"{log_prefix}Auto-search triggered. Delegating to search_command: '{response_data['search_query']}'")
         context.args = [response_data['search_query']]
         await misc_commands.search_command(update, context, placeholder_message)
         return
 
-    # Create placeholder message if needed
-    if placeholder_message is None:
+    final_content = response_data.get('content', "[Error: Empty response from AI]")
+
+    # The handler is now responsible for placeholder deletion
+    if placeholder_message:
         try:
-            provider_info = response_data['provider_info']
-            # Use plain text for placeholder to avoid escaping issues
-            placeholder_text = f"Thinking with {provider_info['provider_display']} ({provider_info['model']})..."
-            if is_reroll:
-                placeholder_text = f"Rerolling with {provider_info['provider_display']} ({provider_info['model']})..."
-
-            reply_to_msg_id = update.message.message_id if update.message else (update.callback_query.message.message_id if update.callback_query else None)
-
-            placeholder_message = await context.bot.send_message(
-                chat_id=chat_id,
-                text=placeholder_text,
-                parse_mode=None,  # Plain text for simplicity
-                reply_to_message_id=reply_to_msg_id
-            )
+            await placeholder_message.delete()
         except Exception as e:
-            logger.error(f"{log_prefix}Failed to send placeholder message: {e}")
+            logger.warning(f"{log_prefix}Failed to delete placeholder message: {e}")
 
-    # Single-pass streaming with incremental AST processing
-    provider_info = response_data['provider_info']
-    service = provider_info['service']
-    model_to_use = provider_info['model']
-    truncated_history = response_data['truncated_history']
+    # Centralized, safe sending
+    message_sent_successfully = await send_safe_message(context, update, final_content)
 
-    raw_llm_response = ""
-    last_edit_time = time.time()
-    llm_error_reported_by_model = False
-
-    try:
-        logger.info(f"{log_prefix}Starting single-pass streaming AST processing for thread {current_thread_id}...")
-
-        search_instruction = "If you need to perform a web search for current information, include the search query inside <search> tags like <search>latest news on the Artemis mission</search>, but ALWAYS also provide your best answer based on your existing knowledge after the search tags."
-        augmented_prompt = f"{search_instruction}\n\n{prompt}"
-
-        async for chunk in service.generate_response(model=model_to_use, prompt=augmented_prompt, context_history=truncated_history):
-            if chunk.startswith("[Error:") or chunk.startswith("Error:"):
-                raw_llm_response = chunk
-                llm_error_reported_by_model = True
-                break
-            raw_llm_response += chunk
-
-            # Throttled streaming updates with plain text preview
-            current_time = time.time()
-            if (current_time - last_edit_time) > STREAMING_THROTTLE_SECONDS and placeholder_message is not None:
-                try:
-                    # Provide plain text preview during streaming for immediate feedback
-                    preview_text = raw_llm_response + " ▌"
-                    if len(preview_text) > TELEGRAM_MAX_LEN:
-                        preview_text = preview_text[:TELEGRAM_MAX_LEN-20] + "... ▌"
-
-                    await asyncio.wait_for(
-                        placeholder_message.edit_text(text=preview_text, parse_mode=None),
-                        timeout=8.0
-                    )
-                    last_edit_time = current_time
-                except (BadRequest, asyncio.TimeoutError, Exception) as e:
-                    if isinstance(e, BadRequest) and ("Message is not modified" in str(e) or "Message_too_long" in str(e)):
-                        pass  # Expected and safe to ignore
-                    else:
-                        logger.warning(f"{log_prefix}Streaming preview failed: {e}")
-                        # Reduce frequency on failure to prevent cascading issues
-                        if isinstance(e, (asyncio.TimeoutError, Exception)):
-                            last_edit_time = current_time + 10
-
-        if not llm_error_reported_by_model:
-            logger.info(f"{log_prefix}Streaming complete. Length: {len(raw_llm_response)}")
-
-        # Handle search queries (single processing, no duplication)
-        search_tag_match = re.search(r"<search>(.*?)</search>", raw_llm_response, re.DOTALL)
-        if search_tag_match:
-            search_query = search_tag_match.group(1).strip()
-
-            # Check if auto-search is enabled
-            from bot.settings import USER_SETTINGS
-            autosearch_enabled = await storage_manager.get_user_setting(
-                chat_id,
-                'autosearch_normal_chat',
-                USER_SETTINGS['autosearch_normal_chat']['default']
-            )
-
-            if autosearch_enabled:
-                from . import misc_commands  # Local import to avoid circular dependency
-                logger.info(f"{log_prefix}Auto-search enabled. Delegating to search_command: '{search_query}'")
-                context.args = [search_query]
-                await misc_commands.search_command(update, context, placeholder_message)
-                return
-            else:
-                logger.info(f"{log_prefix}Auto-search disabled. Removing search tag.")
-                raw_llm_response = raw_llm_response.replace(search_tag_match.group(0), "").strip()
-
-                if not raw_llm_response:
-                    raw_llm_response = f"I'd need to search for current information about '{search_query}' to give you an accurate answer. Auto-search is disabled - you can enable it in /config or try the /search command directly."
-
-    except Exception as e:
-        logger.exception(f"{log_prefix}Critical error during streaming: {e}")
-        raw_llm_response = "[Error: An unexpected error occurred while communicating with the AI.]"
-        llm_error_reported_by_model = True
-
-    # Final AST processing and sending
-    final_content = raw_llm_response.strip()
-    if not final_content:
-        final_content = "[Error: The AI returned an empty response. This might be due to a content filter or an issue with the selected model. Please try rerolling or using a different model.]"
-        llm_error_reported_by_model = True
-
-    # Single AST processing pass with proper document splitting
-    message_sent_successfully = await _send_ast_formatted_response(update, context, chat_id, final_content, placeholder_message)
-
-    # Update conversation history if successful
-    if not llm_error_reported_by_model and final_content and message_sent_successfully:
-        logger.debug(f"{log_prefix}Updating conversation history.")
+    # Update history
+    if response_data.get('error') is None and message_sent_successfully:
         try:
-            processed_history = response_data['processed_history']
-            history_to_save = list(processed_history)
-            history_to_save.extend([
+            history = response_data.get('processed_history', [])
+            history.extend([
                 {'role': 'user', 'content': prompt},
                 {'role': 'assistant', 'content': final_content}
             ])
-
-            final_truncated_history = await _truncate_history_by_tokens(
-                history=history_to_save,
-                prompt="",
-                max_tokens=config.DEFAULT_MAX_CONTEXT_TOKENS,
-                output_buffer=0
-            )
-
-            await storage_manager.set_thread_history(chat_id, final_truncated_history)
-            logger.info(f"{log_prefix}History updated to {len(final_truncated_history)} entries.")
+            await storage_manager.set_thread_history(chat_id, history)
         except Exception as e_hist:
             logger.error(f"{log_prefix}Failed to update history: {e_hist}")
 
