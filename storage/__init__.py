@@ -46,4 +46,4 @@ class StorageManager:
             raise ValueError(f"Invalid STORAGE_BACKEND: {backend}")
 
 # Create a single, globally accessible instance of the StorageManager
-storage_manager = StorageManager(backend=config.STORAGE_BACKEND)
+storage_manager = StorageManager(backend=config.get_storage_backend())

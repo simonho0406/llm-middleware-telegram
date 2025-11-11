@@ -10,6 +10,7 @@ services:
       - ./config.yaml:/app/config.yaml:ro
       # Mount the data directory to persist session data
       - ./data:/app/data
+    mem_limit: 2g
     # Optional: If you want the bot container to talk to an Ollama
     # container running on the host machine via Docker's network:
     # extra_hosts:

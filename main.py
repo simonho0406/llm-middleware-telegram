@@ -114,6 +114,7 @@ def main() -> None:
 
     try:
         app = create_application(post_init_hook=post_init_with_commands)
+
     except ValueError as e:
         logger.critical(f"Failed to create Telegram application: {e}. Exiting.")
         return

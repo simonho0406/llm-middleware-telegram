@@ -10,7 +10,8 @@ from telegram.ext import (
 )
 from telegram.error import BadRequest
 from bot.providers import get_available_provider_names, get_service_for_provider
-from utils.text_processing import escape_markdown_v2, parse_markdown_to_ast, split_document_ast_aware, render_ast_to_telegram_v2, render_ast_to_plain_text
+from utils.text_processing import parse_markdown_to_ast, split_document_ast_aware, render_ast_to_telegram_v2
+from bot.messaging import send_safe_message
 
 logger = logging.getLogger(__name__)
 
@@ -102,17 +103,14 @@ async def start_discussion_command(update: Update, context: ContextTypes.DEFAULT
 
     prompt = " ".join(context.args) if context.args else ""
     if not prompt:
-        await update.effective_message.reply_text(
-            "Please provide a prompt. Usage: /discuss <your prompt>",
-            parse_mode=None
-        )
+        await send_safe_message(context, update, "Please provide a prompt. Usage: /discuss <your prompt>")
         return ConversationHandler.END
 
-    placeholder = await update.effective_message.reply_text("Fetching all available models...", parse_mode=None)
+    placeholder = await send_safe_message(context, update, "Fetching all available models...")
     
     all_models = await get_all_models()
     if not all_models:
-        await placeholder.edit_text("Could not find any available models from any provider.")
+        await send_safe_message(context, update, "Could not find any available models from any provider.", is_edit=True)
         return ConversationHandler.END
 
     context.user_data['discussion_data'] = {
@@ -126,7 +124,7 @@ async def start_discussion_command(update: Update, context: ContextTypes.DEFAULT
     keyboard = build_model_selection_keyboard(context)
     total_pages = (len(all_models) + MODELS_PER_PAGE - 1) // MODELS_PER_PAGE
     message_text = f"Select at least 2 models to join the discussion (Page 1/{total_pages}):"
-    await placeholder.edit_text(message_text, reply_markup=keyboard, parse_mode='Markdown')
+    await send_safe_message(context, update, message_text, reply_markup=keyboard, is_edit=True)
 
     return SELECT_MODELS
 
@@ -203,10 +201,10 @@ async def run_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         selected_models = discussion_data['selected_models']
 
         if len(selected_models) < 2:
-            await query.edit_message_text("Please select at least 2 models to begin.", parse_mode=None)
+            await send_safe_message(context, update, "Please select at least 2 models to begin.", is_edit=True)
             return SELECT_MODELS
 
-        placeholder = await query.edit_message_text("Starting discussion...", parse_mode=None)
+        placeholder = await send_safe_message(context, update, "Starting discussion...", is_edit=True)
 
         discussion_transcript = [{"role": "user", "content": discussion_data['user_prompt']}]
         # Initialize main transcript with user prompt
@@ -221,8 +219,8 @@ async def run_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 discussion_transcript.append({"role": "assistant", "content": f"Error: Could not find service for provider '{provider_name}'."})
                 continue
 
-            turn_info = f"Turn {i+1}/{len(selected_models)}: `{escape_markdown_v2(model_info['name'])}` is thinking\\.\\.\\."
-            await placeholder.edit_text(turn_info, parse_mode=constants.ParseMode.MARKDOWN_V2)
+            turn_info = f"Turn {i+1}/{len(selected_models)}: `{escape_markdown_v2(model_info['name'])}` is thinking..."
+            await send_safe_message(context, update, turn_info, is_edit=True)
 
             # Create temporary history copy
             history_for_call = discussion_transcript.copy()
@@ -255,57 +253,44 @@ async def run_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             discussion_transcript.append({"role": "assistant", "content": msg['content']})
 
         # Build final transcript from main discussion_transcript
-        final_transcript_parts = [f"*Original Query:*\n{escape_markdown_v2(discussion_data['user_prompt'])}"]
+        final_transcript_parts = [f"""*Original Query:*
+{discussion_data['user_prompt']}"""]
         for i, entry in enumerate(discussion_transcript[1:]):  # Skip initial user prompt
             model_name = selected_models[i]['name']
-            separator = "\n\n\\-\\-\-\\-\n"
-            model_header = f"*Turn {i+1}: `{escape_markdown_v2(model_name)}`*\n"
-            content_body = escape_markdown_v2(entry['content'])
+            separator = "\n\n---\n"
+            model_header = f"*Turn {i+1}: `{model_name}`*\n"
+            content_body = entry['content']
             final_transcript_parts.append(separator + model_header + content_body)
 
         final_transcript = "".join(final_transcript_parts)
-
-        await placeholder.delete()
 
         # AST-Based Architecture: Parse, Split, and Send
         try:
             # Step 1: Parse Markdown to AST
             document = parse_markdown_to_ast(final_transcript)
-
+            
             # Step 2: Split AST into logical chunks
             ast_chunks = split_document_ast_aware(document)
-
-            # Step 3: Send each chunk with proper fallback
+            
+            # Step 3: Send each chunk with advanced splitting and error handling
             for i, chunk_doc in enumerate(ast_chunks):
-                try:
-                    # Render AST chunk to MarkdownV2
-                    telegram_safe_text = render_ast_to_telegram_v2(chunk_doc)
-                    await context.bot.send_message(chat_id, text=telegram_safe_text, parse_mode=constants.ParseMode.MARKDOWN_V2)
-                except BadRequest as e:
-                    logger.warning(f"Chunk {i+1} MarkdownV2 failed in discuss_handler: {e}. Rendering same AST chunk as plain text.")
-                    try:
-                        # Render the same AST chunk as clean plain text
-                        plain_text = render_ast_to_plain_text(chunk_doc)
-                        await context.bot.send_message(chat_id, text=f"⚠️ This section could not be formatted correctly.\n\n{plain_text}", parse_mode=None)
-                    except BadRequest as final_error:
-                        logger.error(f"Final attempt for chunk {i+1} failed in discuss_handler: {final_error}. Skipping chunk.")
+                # Render AST chunk to MarkdownV2
+                telegram_safe_text = render_ast_to_telegram_v2(chunk_doc)
+
+                if not telegram_safe_text.strip():
+                    continue
+
+                await send_safe_message(context, update, telegram_safe_text, is_edit=(i==0))
 
         except Exception as ast_error:
-            logger.error(f"AST processing failed in discuss_handler: {ast_error}. Using emergency fallback.")
-            # Emergency: Send as single plain text message
-            emergency_content = f"⚠️ Content formatting failed.\n\n{final_transcript}"
-            try:
-                await context.bot.send_message(chat_id, text=emergency_content, parse_mode=None)
-            except Exception as emergency_error:
-                logger.error(f"Emergency fallback failed in discuss_handler: {emergency_error}. Critical failure.")
+            logger.error(f"AST processing failed: {ast_error}. Using emergency fallback.")
+            # Emergency: Send as single plain text message with length truncation
+            await send_safe_message(context, update, final_transcript)
 
     except Exception as e:
         logger.error(f"{log_prefix} Critical failure in run_discussion: {e}", exc_info=True)
         if placeholder:
-            await placeholder.edit_message_text(
-                "A critical error occurred during the discussion. The process has been stopped.",
-                parse_mode=None
-            )
+            await send_safe_message(context, update, "A critical error occurred during the discussion. The process has been stopped.", is_edit=True)
     finally:
         context.user_data.pop('discussion_data', None)
         context.user_data.pop('model_metadata', None)
@@ -317,9 +302,9 @@ async def cancel_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     query = update.callback_query
     if query:
         await query.answer()
-        await query.edit_message_text("Discussion canceled.", parse_mode=None)
+        await send_safe_message(context, update, "Discussion canceled.", is_edit=True)
     else:
-        await update.effective_message.reply_text("Discussion canceled.", parse_mode=None)
+        await send_safe_message(context, update, "Discussion canceled.")
         
     context.user_data.pop('discussion_data', None)
     context.user_data.pop('model_metadata', None)

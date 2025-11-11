@@ -1,5 +1,5 @@
 # Use an official Python runtime as a parent image
-FROM python:3.11-slim
+FROM python:3.11-buster
 
 # Set environment variables
 # Prevents Python from writing pyc files to disc (equivalent to python -B)
@@ -16,8 +16,12 @@ WORKDIR /app
 # Install Python dependencies
 # Copy only requirements first to leverage Docker cache
 COPY requirements.txt .
+ENV PYTHONPATH=/usr/local/lib/python3.11/site-packages:$PYTHONPATH
+ENV PYTHONPATH=/usr/local/lib/python3.11/site-packages:$PYTHONPATH
+
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
+
 
 # Copy the rest of the application code into the container
 COPY . .

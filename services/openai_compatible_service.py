@@ -26,7 +26,7 @@ class OpenAICompatibleService:
             self.client = AsyncOpenAI(
                 base_url=self.base_url,
                 api_key=self.api_key,
-                http_client=httpx.AsyncClient(timeout=config.REQUEST_TIMEOUT_SECONDS),
+                http_client=httpx.AsyncClient(timeout=config.get_request_timeout_seconds()),
             )
             logger.info(f"OpenAICompatibleService initialized for provider '{self.provider_name}' with base URL '{self.base_url}'")
         except Exception as e:
@@ -97,7 +97,7 @@ class OpenAICompatibleService:
                     "stream": use_streaming,
                 }
                 # Use per-request timeout or fallback to global default
-                timeout_value = request_timeout if request_timeout is not None else config.REQUEST_TIMEOUT_SECONDS
+                timeout_value = request_timeout if request_timeout is not None else config.get_request_timeout_seconds()
                 api_kwargs["timeout"] = timeout_value
 
                 if use_streaming:

@@ -35,7 +35,7 @@ async def generate_response(model: str, prompt: str, context_history: Optional[L
             response_stream = await gemini_model.generate_content_async(
                 contents=full_prompt,
                 stream=True,
-                request_options={'timeout': request_timeout or config.REQUEST_TIMEOUT_SECONDS}
+                request_options={'timeout': request_timeout or config.get_request_timeout_seconds()}
             )
 
             async for chunk in response_stream:
@@ -93,7 +93,7 @@ async def generate_concurrent_responses(prompt: str, context_history: Optional[L
     keys = config.GEMINI_API_KEYS
     if not keys:
         return {"error": "[Error: Gemini API keys not configured]"}
-    if not config.GEMINI_ASK_ALL_MODELS:
+    if not config.get_gemini_ask_all_models():
         return {"error": "[Error: No models configured for concurrent generation]"}
 
     working_key = None
@@ -109,7 +109,7 @@ async def generate_concurrent_responses(prompt: str, context_history: Optional[L
     
     if not working_key:
         logger.error("No working Gemini key found for concurrent requests.")
-        return {model: "[Error: No available API keys]" for model in config.GEMINI_ASK_ALL_MODELS}
+        return {model: "[Error: No available API keys]" for model in config.get_gemini_ask_all_models()}
 
     async def _concurrent_task(model_name: str) -> str:
         try:
@@ -117,17 +117,17 @@ async def generate_concurrent_responses(prompt: str, context_history: Optional[L
             full_prompt = (context_history or []) + [{'role': 'user', 'parts': [prompt]}]
             response = await asyncio.wait_for(
                 asyncio.to_thread(gemini_model.generate_content, contents=full_prompt),
-                timeout=config.REQUEST_TIMEOUT_SECONDS
+                timeout=config.get_request_timeout_seconds()
             )
             return response.text.strip() if hasattr(response, 'text') else "[Empty Response]"
         except Exception as e:
             logger.error(f"Error during concurrent Gemini generation for model {model_name}: {e}")
             return f"[Error: {e}]"
 
-    tasks = [_concurrent_task(model) for model in config.GEMINI_ASK_ALL_MODELS]
+    tasks = [_concurrent_task(model) for model in config.get_gemini_ask_all_models()]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    return {model: res for model, res in zip(config.GEMINI_ASK_ALL_MODELS, results)}
+    return {model: res for model, res in zip(config.get_gemini_ask_all_models(), results)}
 
 # Example usage (for testing purposes)
 async def _test():
@@ -141,7 +141,7 @@ async def _test():
         return
     print(f"Found {len(models)} models. Connection successful.")
 
-    test_model_single = config.DEFAULT_GEMINI_MODEL
+    test_model_single = config.get_default_gemini_model()
     print(f"\nTesting single response streaming with model: {test_model_single}")
     prompt_single = "Why is the sky blue?"
     print(f"Prompt: {prompt_single}")
@@ -151,8 +151,8 @@ async def _test():
         full_response_single += chunk
     print("\n--- End of Single Generation ---")
 
-    if config.GEMINI_ASK_ALL_MODELS:
-        print(f"\nTesting concurrent generation with models: {config.GEMINI_ASK_ALL_MODELS}")
+    if config.get_gemini_ask_all_models():
+        print(f"\nTesting concurrent generation with models: {config.get_gemini_ask_all_models()}")
         prompt_concurrent = "Write a short poem about a cat."
         print(f"Prompt: {prompt_concurrent}")
         concurrent_results = await generate_concurrent_responses(prompt=prompt_concurrent)

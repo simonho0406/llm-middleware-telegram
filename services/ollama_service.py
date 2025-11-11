@@ -155,7 +155,7 @@ async def _test():
         print("No models found. Cannot test generation.")
         return
 
-    test_model = config.DEFAULT_OLLAMA_MODEL
+    test_model = config.get_default_ollama_model()
     if test_model not in models:
         print(f"Default model '{test_model}' not found in available models: {models}. Using first available model.")
         test_model = models[0]

@@ -288,7 +288,7 @@ def deep_merge_configs(base_config: dict, user_overrides: dict) -> dict:
 
 async def load_panel_config(chat_id: int) -> dict:
     import copy
-    default_config = copy.deepcopy(config.EXPERT_PANEL_CONFIG)
+    default_config = copy.deepcopy(config.get_expert_panel_config())
     try:
         custom_overrides_json = await storage_manager.get_user_setting(chat_id, 'panel_config', None)
         if custom_overrides_json:

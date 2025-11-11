@@ -21,7 +21,7 @@ async def generate_response(
         return
 
     headers = {
-        "HTTP-Referer": config.OPENROUTER_HTTP_REFERER,  # Use configured HTTP Referer
+        "HTTP-Referer": config.get_openrouter_http_referer(),
         "Authorization": f"Bearer {config.OPENROUTER_API_KEY}",
         "Content-Type": "application/json"
     }
@@ -55,6 +55,11 @@ async def generate_response(
                 headers=headers,
                 json=data
             ) as response:
+
+                if response.status_code == 429 or response.status_code == 403:
+                    logger.warning(f"OpenRouter rate limit or key limit exceeded (Status: {response.status_code}).")
+                    yield "[Error: The API provider is temporarily rate-limited or the key has exceeded its limit. Please try again in a few moments.]"
+                    return
 
                 if response.status_code != 200:
                     try:
@@ -167,7 +172,7 @@ async def _generate_single_model_non_streaming(model_id: str, prompt: str, conte
         return "[Error: OpenRouter API Key not configured]"
 
     headers = {
-        "HTTP-Referer": config.OPENROUTER_HTTP_REFERER, # Use configured HTTP Referer
+        "HTTP-Referer": config.get_openrouter_http_referer(), # Use configured HTTP Referer
         "Authorization": f"Bearer {config.OPENROUTER_API_KEY}",
         "Content-Type": "application/json"
     }

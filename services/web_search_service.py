@@ -7,13 +7,13 @@ logger = logging.getLogger(__name__)
 
 TAVILY_API_URL = "https://api.tavily.com/search"
 
-async def perform_search(query: str) -> str:
+async def _tavily_search(query: str) -> dict:
     """
     Performs a web search using the Tavily API and returns a formatted string of results.
     """
     if not config.TAVILY_API_KEY:
         logger.warning("Tavily API key is not configured.")
-        return "Error: Web search functionality is not configured."
+        return {'status': 'error', 'message': "Tavily search is not configured. Please set TAVILY_API_KEY."}
 
     payload = {
         "api_key": config.TAVILY_API_KEY,
@@ -30,7 +30,7 @@ async def perform_search(query: str) -> str:
             results = response.json()
 
             if not results.get("results"):
-                return "No search results found."
+                return {'status': 'success', 'content': "No search results found."}
 
             # Format the results into a string for the LLM context
             formatted_results = []
@@ -40,11 +40,68 @@ async def perform_search(query: str) -> str:
                     f"Content: {result.get('content')}"
                 )
             
-            return "\n\n---\n\n".join(formatted_results)
+            return {'status': 'success', 'content': "\n\n---\n\n".join(formatted_results)}
 
     except httpx.HTTPStatusError as e:
         logger.error(f"Tavily API error: {e.response.status_code} - {e.response.text}")
-        return f"Error: Web search failed with status {e.response.status_code}."
+        return {'status': 'error', 'message': f"Web search failed with status {e.response.status_code}."}
     except Exception as e:
         logger.exception(f"An unexpected error occurred during web search: {e}")
-        return "Error: An unexpected error occurred during the web search."
+        return {'status': 'error', 'message': "An unexpected error occurred during the web search."}
+
+async def _google_search(query: str) -> dict:
+    """
+    Performs a web search using the Google Custom Search Engine API.
+    """
+    if not config.GOOGLE_API_KEY or not config.GOOGLE_CSE_ID:
+        logger.warning("Google API key or CSE ID are not configured.")
+        return {'status': 'error', 'message': "Google Search is not configured. Please set GOOGLE_API_KEY and GOOGLE_CSE_ID."}
+
+    GOOGLE_CSE_API_URL = "https://www.googleapis.com/customsearch/v1"
+    params = {
+        "key": config.GOOGLE_API_KEY,
+        "cx": config.GOOGLE_CSE_ID,
+        "q": query
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.get(GOOGLE_CSE_API_URL, params=params, timeout=30.0)
+            response.raise_for_status()
+            results = response.json()
+
+            if "items" not in results or not results["items"]:
+                return {'status': 'success', 'content': "No search results found."}
+
+            formatted_results = []
+            for i, item in enumerate(results["items"]):
+                link = item.get("link")
+                snippet = item.get("snippet")
+                formatted_results.append(
+                    f"Source {i+1}: {link}\n"
+                    f"Content: {snippet}"
+                )
+            
+            return {'status': 'success', 'content': "\n\n---\n\n".join(formatted_results)}
+
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Google CSE API error: {e.response.status_code} - {e.response.text}")
+        return {'status': 'error', 'message': f"Google Search failed with status {e.response.status_code}."}
+    except Exception as e:
+        logger.exception(f"An unexpected error occurred during Google Search: {e}")
+        return {'status': 'error', 'message': "An unexpected error occurred during the Google search."}
+
+async def perform_search(query: str) -> dict:
+    """
+    Dispatcher function to perform a web search using the configured provider.
+    """
+    provider = config.get_web_search_provider().lower()
+    logger.info(f"Performing web search for '{query}' using provider: {provider}")
+
+    if provider == "tavily":
+        return await _tavily_search(query)
+    elif provider == "google":
+        return await _google_search(query)
+    else:
+        logger.error(f"Unsupported web search provider: {provider}")
+        return {'status': 'error', 'message': f"Unsupported web search provider '{provider}'."}

@@ -25,6 +25,7 @@ from bot import providers
 from storage import storage_manager
 from bot.messaging import send_safe_message
 from services import web_search_service
+from bot.response_generator import _generate_and_send_response
 
 logger = logging.getLogger(__name__)
 
@@ -88,16 +89,25 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
     query = " ".join(context.args)
     logger.info(f"{log_prefix}User {user_id} initiated /search with query: '{query}'")
 
-    if placeholder_message is None:
-        placeholder_message = await context.bot.send_message(chat_id, f"Searching the web for: \"{query}\"...", parse_mode=None)
-    else:
-        await placeholder_message.edit_text(f"Searching the web for: \"{query}\"...", parse_mode=None)
-        
-    search_results = await web_search_service.perform_search(query)
-
-    if search_results.startswith("Error:"):
-        await placeholder_message.edit_text(search_results, parse_mode=None)
+    try:
+        if placeholder_message is None:
+            placeholder_message = await context.bot.send_message(chat_id, f'Searching the web for: "{query}"...', parse_mode=None)
+        else:
+            await placeholder_message.edit_text(f'Searching the web for: "{query}"...', parse_mode=None)
+    except telegram.error.NetworkError as e:
+        logger.error(f"Network error while sending initial message in search_command: {e}")
+        try:
+            await send_safe_message(context, update, "A network error occurred, please try again.")
+        except Exception as e_inner:
+            logger.error(f"Failed to send network error message to user: {e_inner}")
         return
+
+    search_response = await web_search_service.perform_search(query)
+
+    if search_response['status'] == 'error':
+        await placeholder_message.edit_text(f"⚠️ Web search failed: {search_response['message']}", parse_mode=None)
+        return
+    search_results = search_response['content']
 
     augmented_prompt = (
         f"Based on the following web search results, please provide a comprehensive answer to the user's query.\n\n"
@@ -105,9 +115,9 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
         f"--- WEB SEARCH RESULTS ---\n{search_results}"
     )
 
-    session_provider = await storage_manager.get_thread_key(chat_id, 'provider', config.DEFAULT_PROVIDER)
+    session_provider = await storage_manager.get_thread_key(chat_id, 'provider', config.get_default_provider())
     provider_details = providers.get_provider_details()
-    provider_config = provider_details.get(session_provider, provider_details[config.DEFAULT_PROVIDER])
+    provider_config = provider_details.get(session_provider, provider_details[config.get_default_provider()])
     
     service = provider_config['service']
     model_to_use = await storage_manager.get_thread_key(chat_id, 'model', provider_config['default_model'])
@@ -146,7 +156,7 @@ async def new_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await storage_manager.create_thread(chat_id, new_thread_id)
         await storage_manager.set_current_thread_id(chat_id, new_thread_id)
         await storage_manager.set_thread_history(chat_id, [])
-        default_provider = config.DEFAULT_PROVIDER
+        default_provider = config.get_default_provider()
         await storage_manager.set_thread_key(chat_id, 'provider', default_provider)
         provider_config = providers.get_config_for_provider(default_provider)
         if provider_config:
@@ -162,7 +172,7 @@ async def new_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 async def provider_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Shows current provider and buttons to switch."""
     chat_id = update.effective_chat.id
-    current_provider = await storage_manager.get_thread_key(chat_id, 'provider', config.DEFAULT_PROVIDER)
+    current_provider = await storage_manager.get_thread_key(chat_id, 'provider', config.get_default_provider())
     available_providers = providers.get_available_provider_names()
     if not available_providers:
          await send_safe_message(context, update, "Error: No providers available.")
@@ -219,7 +229,7 @@ async def list_threads_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def model_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
-    provider_name = await storage_manager.get_thread_key(chat_id, 'provider', config.DEFAULT_PROVIDER)
+    provider_name = await storage_manager.get_thread_key(chat_id, 'provider', config.get_default_provider())
     provider_config = providers.get_config_for_provider(provider_name)
     current_model = await storage_manager.get_thread_key(chat_id, 'model', provider_config['default_model'])
 
@@ -229,7 +239,7 @@ async def model_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def list_models_command(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 1, provider_name_from_callback: str | None = None) -> None:
     """Lists available/allowed models for the current provider with pagination."""
     chat_id = update.effective_chat.id
-    provider_name = provider_name_from_callback or await storage_manager.get_thread_key(chat_id, 'provider', config.DEFAULT_PROVIDER)
+    provider_name = provider_name_from_callback or await storage_manager.get_thread_key(chat_id, 'provider', config.get_default_provider())
     
     provider_config = providers.get_config_for_provider(provider_name)
     if not provider_config:
@@ -338,7 +348,7 @@ async def set_model_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def set_model_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Starts the conversation to set a model by typing."""
     chat_id = update.effective_chat.id
-    provider_name = await storage_manager.get_thread_key(chat_id, 'provider', config.DEFAULT_PROVIDER)
+    provider_name = await storage_manager.get_thread_key(chat_id, 'provider', config.get_default_provider())
     await send_safe_message(context, update, f"Please type the name of the model for *{provider_name}*.")
     return SET_MODEL_TYPING
 
@@ -346,7 +356,7 @@ async def set_model_typed(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     """Handles user typing a model name."""
     chat_id = update.effective_chat.id
     model_name = update.message.text.strip()
-    provider_name = await storage_manager.get_thread_key(chat_id, 'provider', config.DEFAULT_PROVIDER)
+    provider_name = await storage_manager.get_thread_key(chat_id, 'provider', config.get_default_provider())
     provider_config = providers.get_config_for_provider(provider_name)
     if provider_config:
         await storage_manager.set_thread_key(chat_id, 'model', model_name)
@@ -424,7 +434,7 @@ async def delete_thread_command(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def reroll_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Regenerates the last AI response."""
-    from bot.handlers.chat import _generate_and_send_response  # Import here to avoid circular import
+
 
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id

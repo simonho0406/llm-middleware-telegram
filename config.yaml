@@ -3,6 +3,9 @@
 # Clean rebuild with verified free models (2025-09-20)
 # =====================================
 
+# --- Storage Backend ---
+storage_backend: "database" # Options: "database", "file"
+
 # --- Primary Provider Settings ---
 default_provider: "openrouter"
 default_ollama_model: "qwq"
@@ -93,6 +96,10 @@ expert_panel:
       provider: "openrouter"
       model: "qwen/qwen3-coder:free"
       request_timeout_seconds: 600
+
+# --- Web Search Configuration ---
+web_search:
+  provider: "tavily"
 
 # --- Rate Limiting Configuration ---
 # Conservative limits to respect free tier quotas

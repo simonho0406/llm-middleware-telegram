@@ -16,8 +16,7 @@ async def init_file_storage():
     await asyncio.to_thread(_load_sessions_from_file)
     logger.info("File storage initialized.")
 
-# Ensure the data directory exists
-DATA_DIR = os.path.dirname(config.SESSION_FILE_PATH)
+DATA_DIR = os.path.dirname(config.get_session_file_path())
 if DATA_DIR and not os.path.exists(DATA_DIR):
     try:
         os.makedirs(DATA_DIR)
@@ -35,7 +34,7 @@ _DEFAULT_THREAD_ID = "default"
 def _load_sessions_from_file() -> None:
     """Loads all sessions from the JSON file into the memory cache."""
     global _sessions
-    file_path = config.SESSION_FILE_PATH
+    file_path = config.get_session_file_path()
     
     if not os.path.exists(file_path):
         logger.info(f"Session file '{file_path}' not found. Starting with empty sessions.")
@@ -80,7 +79,7 @@ import aiofiles
 
 async def _save_sessions_to_file() -> None:
     """Saves the current in-memory sessions to the JSON file atomically."""
-    temp_path = f"{config.SESSION_FILE_PATH}.tmp"
+    temp_path = f"{config.get_session_file_path()}.tmp"
     try:
         # Copy sessions under lock to avoid race conditions
         async with _lock:
@@ -95,9 +94,9 @@ async def _save_sessions_to_file() -> None:
             await f.flush()
             
         # Atomically replace the old file
-        await asyncio.to_thread(os.replace, temp_path, config.SESSION_FILE_PATH)
+        await asyncio.to_thread(os.replace, temp_path, config.get_session_file_path())
         logger.info(
-            f"Saved {total_chats} chats with {total_threads} total threads to '{config.SESSION_FILE_PATH}'"
+            f"Saved {total_chats} chats with {total_threads} total threads to '{config.get_session_file_path()}'"
             f" ({len(content)} bytes)"
         )
     except Exception as e:
@@ -370,10 +369,10 @@ async def _test():
 if __name__ == "__main__":
     import asyncio
     # Ensure data dir exists for test
-    DATA_DIR = os.path.dirname(config.SESSION_FILE_PATH)
+    DATA_DIR = os.path.dirname(config.get_session_file_path())
     if DATA_DIR and not os.path.exists(DATA_DIR):
         os.makedirs(DATA_DIR)
     # Clear session file for clean test run? Optional.
-    # if os.path.exists(config.SESSION_FILE_PATH):
-    #     os.remove(config.SESSION_FILE_PATH)
+    # if os.path.exists(config.get_session_file_path()):
+    #     os.remove(config.get_session_file_path())
     asyncio.run(_test())

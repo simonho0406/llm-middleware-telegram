@@ -10,4 +10,5 @@ tiktoken
 aiosqlite
 backoff
 pytest
-mistletoe-ebp  # AST-based Markdown parser with table extensions
+pytest-asyncio
+markdown-it-py

@@ -11,7 +11,6 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-from telegram.helpers import escape_markdown
 from typing import List, Dict, Any # Import missing types
 from hashlib import sha256 # Import sha256
 from urllib.parse import quote # Import quote
@@ -19,6 +18,7 @@ from urllib.parse import quote # Import quote
 import config
 from services import ollama_service, gemini_service, openrouter_service, openai_compatible_service
 from storage import storage_manager
+from bot.messaging import send_safe_message
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +116,7 @@ async def ask_selected_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     logger.info(f"Starting /ask_selected conversation for chat_id: {chat_id}")
 
     if not context.args:
-        await update.message.reply_text("Please provide a prompt\\. Usage: /ask_selected <your prompt>\\.")
+        await update.message.reply_text("Please provide a prompt\. Usage: /ask_selected <your prompt>\.")
         return ConversationHandler.END
 
     context.user_data['ask_selected_prompt'] = " ".join(context.args)
@@ -139,9 +139,6 @@ async def select_provider_callback(update: Update, context: ContextTypes.DEFAULT
 
     message_text = f"Select models from {provider} (Tap to toggle)"
     parse_mode = None
-    if provider == "openrouter": # Example: OpenRouter might need specific formatting
-        message_text = escape_markdown(message_text, version=2)
-        parse_mode = 'MarkdownV2'
 
     await query.edit_message_text(
         message_text,
@@ -266,7 +263,7 @@ async def done_selecting_callback(update: Update, context: ContextTypes.DEFAULT_
 
     try:
         await query.edit_message_text(
-            f"Asking selected models: {escape_markdown(', '.join(display_names), version=2)}\\.\\.\\.",
+            f"Asking selected models: {escape_markdown_v2(', '.join(display_names))}\.\.\.",
             parse_mode='MarkdownV2'
         )
     except BadRequest as e:
@@ -354,9 +351,6 @@ async def done_selecting_callback(update: Update, context: ContextTypes.DEFAULT_
             results[model_key_display] = str(result_data)
 
     # --- Format and Send Final Response Using AST Pipeline ---
-    from utils.text_processing import parse_markdown_to_ast, split_document_ast_aware, render_ast_to_telegram_v2, render_ast_to_plain_text
-    from telegram import constants
-
     # Generate clean markdown content
     response_parts = [f"**Responses for prompt:** {prompt}"]
     sorted_results = sorted(results.items())
@@ -369,37 +363,7 @@ async def done_selecting_callback(update: Update, context: ContextTypes.DEFAULT_
     # Delete the placeholder "Asking..." message
     await placeholder_message.delete()
 
-    # AST-Based Architecture: Parse, Split, and Send
-    try:
-        # Step 1: Parse Markdown to AST
-        document = parse_markdown_to_ast(final_response_markdown)
-
-        # Step 2: Split AST into logical chunks
-        ast_chunks = split_document_ast_aware(document)
-
-        # Step 3: Send each chunk with proper fallback
-        for i, chunk_doc in enumerate(ast_chunks):
-            try:
-                # Render AST chunk to MarkdownV2
-                telegram_safe_text = render_ast_to_telegram_v2(chunk_doc)
-                await context.bot.send_message(chat_id, text=telegram_safe_text, parse_mode=constants.ParseMode.MARKDOWN_V2)
-            except BadRequest as e:
-                logger.warning(f"Chunk {i+1} MarkdownV2 failed in ask_selected: {e}. Rendering same AST chunk as plain text.")
-                try:
-                    # Render the same AST chunk as clean plain text
-                    plain_text = render_ast_to_plain_text(chunk_doc)
-                    await context.bot.send_message(chat_id, text=f"⚠️ This section could not be formatted correctly.\n\n{plain_text}", parse_mode=None)
-                except BadRequest as final_error:
-                    logger.error(f"Final attempt for chunk {i+1} failed in ask_selected: {final_error}. Skipping chunk.")
-
-    except Exception as ast_error:
-        logger.error(f"AST processing failed in ask_selected: {ast_error}. Using emergency fallback.")
-        # Emergency: Send as single plain text message
-        emergency_content = f"⚠️ Content formatting failed.\n\n{final_response_markdown}"
-        try:
-            await context.bot.send_message(chat_id, text=emergency_content, parse_mode=None)
-        except Exception as emergency_error:
-            logger.error(f"Emergency fallback failed in ask_selected: {emergency_error}. Critical failure.")
+    await send_safe_message(context, update, final_response_markdown)
 
 
     # Clean up user_data
@@ -414,7 +378,7 @@ async def cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     """Cancels the conversation."""
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("Selection cancelled\\.")
+    await query.edit_message_text("Selection cancelled\.")
     # Clean up user_data
     context.user_data.pop('ask_selected_prompt', None)
     context.user_data.pop('ask_selected_models', None)
