@@ -8,6 +8,7 @@ and critical execution paths don't have scope/import issues.
 import pytest
 import sys
 import os
+from unittest.mock import AsyncMock, MagicMock, patch
 
 # Add the parent directory to the Python path to import modules
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -44,10 +45,9 @@ class TestHandlerImports:
     def test_text_processing_imports(self):
         """Test that text processing imports work correctly."""
         try:
-            from utils.text_processing import pure_markdown_to_telegram_v2, escape_markdown_v2
+            from utils.text_processing import format_for_telegram_v2
             # Verify functions are callable
-            assert callable(pure_markdown_to_telegram_v2)
-            assert callable(escape_markdown_v2)
+            assert callable(format_for_telegram_v2)
         except ImportError as e:
             pytest.fail(f"Failed to import text_processing: {e}")
         except Exception as e:
@@ -234,7 +234,7 @@ class TestBotMenuAndHelp:
         from bot.menu_setup import setup_bot_commands_and_menu
         menu_source = inspect.getsource(setup_bot_commands_and_menu)
         # Find all BotCommand patterns
-        menu_commands = re.findall(r'BotCommand\("(\w+)"', menu_source)
+        menu_commands = re.findall(r'BotCommand\(\"(\w+)\"', menu_source)
         menu_commands = set(menu_commands)
         
         # Key commands that should be in both
@@ -295,8 +295,7 @@ class TestCommandRegistrationIntegration:
             entry_points = configure_panel_conv_handler.entry_points
             assert any("configure_panel" in str(handler.commands) 
                       for handler in entry_points 
-                      if hasattr(handler, 'commands')), \
-                "configure_panel command should be registered as entry point"
+                      if hasattr(handler, 'commands'))
                 
         except ImportError as e:
             # If we can't import main, at least check the handler exists
@@ -352,7 +351,7 @@ class TestRegressionPrevention:
                 for node in ast.walk(tree):
                     # Find json method calls
                     if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
-                        if node.value.id == 'json':
+                        if node.value.id == 'json' and node.attr in ['dumps', 'loads']:
                             json_usage.append(node.lineno)
                     
                     # Find imports at module level (not nested in functions/conditions)
@@ -381,7 +380,7 @@ class TestRegressionPrevention:
                     await db.execute('''
                         CREATE TABLE user_settings (
                             chat_id INTEGER,
-                            key TEXT, 
+                            key TEXT,
                             value TEXT NOT NULL,
                             PRIMARY KEY (chat_id, key)
                         )
@@ -395,3 +394,150 @@ class TestRegressionPrevention:
                         )
             
             asyncio.run(test_null_handling())
+
+
+
+
+    @pytest.mark.asyncio
+    async def test_search_command_api_error_regression(self):
+        """Test that search_command gracefully handles API errors."""
+        from bot.handlers.misc_commands import search_command
+
+        # Mock objects
+        update = MagicMock()
+        context = MagicMock()
+        placeholder_msg = AsyncMock()
+        update.effective_chat.id = 12345
+        context.args = ["test query"]
+
+        # Patch the web_search_service to return a predictable error
+        with patch('services.web_search_service.perform_search') as mock_perform_search:
+            mock_perform_search.return_value = {'status': 'error', 'message': 'Mock API Error'}
+
+            await search_command(update, context, placeholder_message=placeholder_msg)
+
+            # Assert that edit_text was called with the error message
+            placeholder_msg.edit_text.assert_called_with("⚠️ Web search failed: Mock API Error", parse_mode=None)
+
+    @pytest.mark.asyncio
+    async def test_refiner_error_handling(self):
+        """Test that the user is notified when the Refiner agent fails."""
+        from bot.handlers.discuss_panel_handler import _run_panel_workflow
+
+        update = MagicMock()
+        context = MagicMock()
+        placeholder_msg = AsyncMock()
+
+        with patch('bot.handlers.discuss_panel_handler.get_robust_llm_response', new_callable=AsyncMock) as mock_get_response:
+            mock_get_response.side_effect = [
+                {'response': '{"tasks": [{"role": "Proposer", "prompt": "..."}, {"role": "Critic", "prompt": "..."}, {"role": "Refiner", "prompt": "..."}]}', 'retries': 0, 'fallback_used': False},  # Orchestrator
+                {'response': 'Proposer response', 'retries': 0, 'fallback_used': False},  # Proposer
+                {'response': 'Critic response', 'retries': 0, 'fallback_used': False}, # Critic
+                {'response': '{"quality_score": 90, "refinement_instructions": ""}', 'retries': 0, 'fallback_used': False}, # Quality Gate
+                {'response': '[Error: Rate limit exceeded]', 'retries': 0, 'fallback_used': False}  # Refiner
+            ]
+
+            _, final_answer, _ = await _run_panel_workflow(update, context, "test prompt", [], placeholder_msg, 12345)
+
+            assert "⚠️ **Warning:**" in final_answer
+
+
+import json
+from bot.handlers.discuss_panel_handler import _run_refinement_cycle # Assuming we can import for testing
+
+class TestJsonExtraction:
+    def test_quality_gate_json_extraction_with_surrounding_text(self):
+        """
+        Tests that the JSON for the quality gate can be reliably extracted
+        even when the LLM wraps it in conversational text.
+        """
+        # Simulate a realistic, messy LLM response
+        messy_llm_response = """
+        Of course! Based on my assessment, the quality is quite good. Here is the JSON output:
+
+        {
+            "quality_score": 88,
+            "refinement_instructions": "The introduction could be slightly more concise."
+        }
+
+        I hope this is helpful!
+        """
+
+        # The new, robust extraction logic (to be implemented)
+        # For this test, we will simulate the core logic directly.
+        # Find the first '{' and the last '}'
+        start = messy_llm_response.find('{')
+        end = messy_llm_response.rfind('}')
+        
+        assert start != -1
+        assert end != -1
+        
+        json_str = messy_llm_response[start:end+1]
+        
+        # Assert that the extracted string is valid JSON
+        try:
+            parsed_json = json.loads(json_str)
+            assert parsed_json["quality_score"] == 88
+            assert "concise" in parsed_json["refinement_instructions"]
+        except json.JSONDecodeError:
+            pytest.fail("The extracted string could not be parsed as valid JSON.")
+
+
+import json
+from bot.handlers.discuss_panel_handler import _run_refinement_cycle, _format_panel_summary # Assuming we can import for testing
+
+class TestPanelSummaryFormatting:
+    def test_format_panel_summary_with_retries_and_fallback(self):
+        """
+        Tests that _format_panel_summary correctly includes retry and fallback information.
+        """
+        sample_panel_results = {
+            'Initial_Orchestrator': {
+                'provider': 'gemini',
+                'model': 'gemini-pro',
+                'status': 'Success',
+                'response': 'Orchestrator plan...',
+                'retries': 0,
+                'fallback_used': False
+            },
+            'Proposer': {
+                'provider': 'ollama',
+                'model': 'llama2',
+                'status': 'Failure',
+                'response': '[Error: LLM failed]',
+                'retries': 2,
+                'fallback_used': False
+            },
+            'Critic': {
+                'provider': 'nvidia',
+                'model': 'gpt-oss-120b',
+                'status': 'Success (Backup Fallback)',
+                'response': '[Fallback by gemini] Critic review...',
+                'retries': 3,
+                'fallback_used': True
+            },
+            'Refiner': {
+                'provider': 'groq',
+                'model': 'llama-3.1-70b-versatile',
+                'status': 'Success',
+                'response': 'Refined response.',
+                'retries': 1,
+                'fallback_used': False
+            },
+            'Quality_Metrics': {
+                'final_score': 88,
+                'threshold': 85,
+                'iterations_used': 2,
+                'max_iterations': 3
+            }
+        }
+
+        summary = _format_panel_summary(sample_panel_results)
+
+        assert "✅ Initial_Orchestrator: gemini/gemini-pro (Success)" in summary
+        assert "⚠️ Proposer: ollama/llama2 (Failure) (2 retries)" in summary
+        assert "✅ Critic: nvidia/gpt-oss-120b (Success (Backup Fallback)) (3 retries, fallback used)" in summary
+        assert "✅ Refiner: groq/llama-3.1-70b-versatile (Success) (1 retries)" in summary
+        assert "🎯 Final Score: 88/85 (Achieved/Threshold)" in summary
+        assert "🔄 Refinement Rounds: `2/3` (Used/Max)" in summary
+

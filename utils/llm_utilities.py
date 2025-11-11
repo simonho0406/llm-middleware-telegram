@@ -14,7 +14,9 @@ import logging
 from typing import List, Dict, Any, Optional, AsyncGenerator
 
 from bot import providers
-from config import EXPERT_PANEL_CONFIG
+from config import get_expert_panel_config
+from config import get_expert_panel_config
+
 
 logger = logging.getLogger(__name__)
 
@@ -30,35 +32,22 @@ async def get_robust_llm_response(
     request_timeout: Optional[int] = None,
     fallback_provider: Optional[str] = None,
     fallback_model: Optional[str] = None
-) -> str:
+) -> Dict[str, Any]:
     """
     Centralized, robust LLM response function with built-in retry logic and fallback handling.
     
-    This function provides consistent error handling across all LLM calls in the application:
-    - Makes the primary API call to the specified provider/model
-    - Includes comprehensive error handling for timeouts and provider failures  
-    - Automatically falls back to fallback provider when primary provider fails
-    - Implements retry logic with configurable attempts and delays
-    - Returns either a successful response or a detailed error message
-    
-    Args:
-        provider_name: Primary provider to use (e.g., "ollama", "gemini", "nvidia")
-        model: Model name for the primary provider
-        prompt: The prompt to send to the LLM
-        history: Optional conversation history for context
-        role_name: Descriptive name for logging purposes
-        max_retries: Maximum number of retry attempts (default: 3)
-        retry_delay: Delay between retries in seconds (default: 1)
-        request_timeout: Optional timeout in seconds
-        fallback_provider: Optional fallback provider name
-        fallback_model: Optional fallback model name
-        
     Returns:
-        str: Either the LLM response or a formatted error message starting with "[Error:"
+        Dict[str, Any]: A dictionary containing:
+            - 'response': The LLM's response string or an error message.
+            - 'retries': The number of retries used.
+            - 'fallback_used': A boolean indicating if the fallback provider was used.
     """
     last_error = None
+    retries = 0
+    fallback_used = False
     
     for attempt in range(max_retries):
+        retries = attempt
         try:
             logger.debug(f"Attempting {role_name} call (attempt {attempt + 1}/{max_retries})")
             
@@ -84,7 +73,7 @@ async def get_robust_llm_response(
                 raise ValueError(f"Provider returned error: {response}")
             
             logger.debug(f"{role_name} call succeeded on attempt {attempt + 1}")
-            return response
+            return {'response': response, 'retries': retries, 'fallback_used': fallback_used}
             
         except asyncio.TimeoutError as e:
             last_error = f"Timeout after {request_timeout}s: {str(e)}"
@@ -100,6 +89,7 @@ async def get_robust_llm_response(
     
     # All primary attempts failed - try fallback if configured
     if fallback_provider and fallback_model:
+        fallback_used = True
         logger.info(f"Primary {role_name} failed after {max_retries} attempts. Trying fallback: {fallback_provider}/{fallback_model}")
         
         try:
@@ -118,7 +108,7 @@ async def get_robust_llm_response(
                 
                 if not response.startswith("[Error:") and not response.startswith("Error:"):
                     logger.info(f"{role_name} fallback succeeded")
-                    return f"[Fallback by {fallback_provider}] {response}"
+                    return {'response': f"[Fallback by {fallback_provider}] {response}", 'retries': retries, 'fallback_used': fallback_used}
                     
         except Exception as fallback_error:
             logger.error(f"{role_name} fallback also failed: {fallback_error}")
@@ -126,7 +116,7 @@ async def get_robust_llm_response(
     # Both primary and fallback failed
     error_msg = f"[Error: {role_name} failed after {max_retries} attempts. Last error: {last_error}]"
     logger.error(error_msg)
-    return error_msg
+    return {'response': error_msg, 'retries': retries, 'fallback_used': fallback_used}
 
 
 async def get_streaming_llm_response(
@@ -179,7 +169,7 @@ def get_expert_panel_fallback_config() -> tuple[Optional[str], Optional[str]]:
     Returns:
         tuple: (fallback_provider, fallback_model) or (None, None) if not configured
     """
-    orchestrator_config = EXPERT_PANEL_CONFIG.get('orchestrator', {})
+    orchestrator_config = get_expert_panel_config().get('orchestrator', {})
     fallback_provider = orchestrator_config.get('fallback_provider')
     fallback_model = orchestrator_config.get('fallback_model')
     
@@ -240,7 +230,7 @@ Output the properly escaped text only:"""
 
     try:
         # Use robust LLM response with dynamic timeout
-        formatted_response = await get_robust_llm_response(
+        formatter_llm_result = await get_robust_llm_response(
             provider_name=formatter_provider,
             model=formatter_model,
             prompt=formatter_prompt,
@@ -250,6 +240,8 @@ Output the properly escaped text only:"""
             retry_delay=1,
             request_timeout=dynamic_timeout  # Dynamic timeout based on text length
         )
+        formatted_response = formatter_llm_result['response']
+        # We don't need to store retries/fallback for the formatter agent in panel_results
         
         # Check if formatting was successful
         if not formatted_response.strip() or formatted_response.startswith("[Error:"):

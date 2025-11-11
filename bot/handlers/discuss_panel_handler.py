@@ -8,10 +8,8 @@ from telegram.error import TimedOut
 from httpx import ConnectTimeout
 from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, MessageHandler, filters
 from telegram import BotCommandScopeChat
-from utils.text_processing import (
-    escape_markdown_v2,
-    parse_markdown_to_ast, split_document_ast_aware, render_ast_to_telegram_v2, render_ast_to_plain_text
-)
+# force rebuild
+from utils import text_processing
 from utils.llm_utilities import get_robust_llm_response, get_expert_panel_fallback_config
 from telegram import constants
 import config
@@ -20,6 +18,7 @@ from services import web_search_service
 from bot.menu_setup import setup_bot_commands_and_menu
 from storage import storage_manager
 from bot.settings import USER_SETTINGS  # Added for settings access
+from bot.messaging import send_safe_message
 from .misc_commands import cancel_command
 from bot.errors import ProviderUnavailableError
 
@@ -30,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 async def _run_refinement_cycle(
-    proposer_task, critic_task, user_prompt, full_history, placeholder_msg, panel_results,
+    update: Update, context: ContextTypes.DEFAULT_TYPE, proposer_task, critic_task, user_prompt, full_history, placeholder_msg, panel_results,
     orchestrator_service, orchestrator_model, orchestrator_timeout, orchestrator_config, panel_config: dict
 ):
     """
@@ -62,31 +61,45 @@ async def _run_refinement_cycle(
     quality_score = 0
     proposer_response = ""
     
+    # Stateful Persona History
+    proposer_history = []
+    critic_history = []
+    quality_gate_history = []
+
     # Iterative refinement loop
     for iteration in range(1, max_iterations + 1):
-        await placeholder_msg.edit_text(f"Round {iteration}/{max_iterations}: Proposer is working...", parse_mode=None)
+        try:
+            await placeholder_msg.edit_text(f"Round {iteration}/{max_iterations}: Proposer is working...", parse_mode=None)
+        except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
+            logger.warning(f"Failed to update placeholder message (Proposer working): {e}")
         
         # Execute Proposer
         fallback_provider, fallback_model = get_expert_panel_fallback_config()
-        proposer_response = await get_robust_llm_response(
+        proposer_llm_result = await get_robust_llm_response(
             provider_name=proposer_provider,
             model=proposer_model,
             prompt=current_proposer_prompt,
-            history=full_history,
+            history=proposer_history,
             role_name='Proposer',
             request_timeout=proposer_role_config.get('request_timeout_seconds'),
             fallback_provider=fallback_provider,
             fallback_model=fallback_model
         )
-        
+        proposer_response = proposer_llm_result['response']
+        proposer_retries = proposer_llm_result['retries']
+        proposer_fallback_used = proposer_llm_result['fallback_used']
+
+        proposer_history.append({"role": "user", "content": current_proposer_prompt})
+        proposer_history.append({"role": "assistant", "content": proposer_response})
+
         # Update panel results with Proposer response
-        proposer_fallback = "[Fallback by Orchestrator" in proposer_response
         panel_results['Proposer'] = {
             'provider': proposer_provider,
             'model': proposer_model,
             'status': 'Success' if "[Error:" not in proposer_response else 'Failure',
             'response': proposer_response,
-            'fallback': proposer_fallback
+            'retries': proposer_retries,
+            'fallback_used': proposer_fallback_used
         }
         
         if "[Error:" in proposer_response:
@@ -95,25 +108,26 @@ async def _run_refinement_cycle(
 
             # Use the Orchestrator's backup (fallback_provider/fallback_model) - proper hierarchy
             if fallback_provider and fallback_model:
-                fallback_proposer_prompt = f"""You are acting as a backup Proposer to replace a failed primary Proposer.
-
-Original Proposer Task: {proposer_task.get('description', '')}
-
-User's Request: {user_prompt}
-
-Please provide a direct, comprehensive response to the user's request. Focus on being practical and helpful."""
+                proposer_template = config.PROMPTS.get_prompt('panel_proposer')
+                fallback_proposer_prompt = proposer_template.format(
+                    description=proposer_task.get('description', ''),
+                    user_prompt=user_prompt
+                )
 
                 try:
-                    fallback_response = await get_robust_llm_response(
+                    fallback_llm_result = await get_robust_llm_response(
                         provider_name=fallback_provider,
                         model=fallback_model,
                         prompt=fallback_proposer_prompt,
-                        history=full_history,
+                        history=proposer_history,
                         role_name='Backup Proposer',
                         request_timeout=orchestrator_timeout,
                         fallback_provider=None,  # No further fallback for backup
                         fallback_model=None
                     )
+                    fallback_response = fallback_llm_result['response']
+                    fallback_retries = fallback_llm_result['retries']
+                    fallback_fallback_used = fallback_llm_result['fallback_used'] # This will always be False here
 
                     if "[Error:" not in fallback_response:
                         logger.info("Orchestrator's backup successfully provided fallback response")
@@ -123,7 +137,8 @@ Please provide a direct, comprehensive response to the user's request. Focus on 
                             'model': fallback_model,
                             'status': 'Success (Backup Fallback)',
                             'response': fallback_response,
-                            'fallback': True
+                            'retries': fallback_retries,
+                            'fallback_used': True # Explicitly set to True as this is a fallback
                         }
                         proposer_response = fallback_response
                     else:
@@ -142,50 +157,43 @@ Please provide a direct, comprehensive response to the user's request. Focus on 
                 placeholder_msg.edit_text(f"Round {iteration}/{max_iterations}: Critic is reviewing...", parse_mode=None),
                 timeout=8.0
             )
-        except (asyncio.TimeoutError, telegram.error.TimedOut) as e:
+        except (asyncio.TimeoutError, telegram.error.TimedOut, telegram.error.NetworkError) as e:
             logger.warning(f"Timeout updating status to 'Critic reviewing' in round {iteration}: {e}")
         except Exception as e:
             logger.warning(f"Failed to update status to 'Critic reviewing' in round {iteration}: {e}")
         
         # Execute Critic
-        enhanced_critic_prompt = f"""
-        {critic_prompt_template}
+        critic_template = config.PROMPTS.get_prompt('panel_critic')
+        enhanced_critic_prompt = critic_template.format(
+            critic_prompt_template=critic_prompt_template,
+            proposer_response=proposer_response,
+            user_prompt=user_prompt
+        )
         
-        **Current Response to Evaluate:**
-        --- PROPOSER'S RESPONSE ---
-        {proposer_response}
-        --- END RESPONSE ---
-        
-        **Original User Query:**
-        {user_prompt}
-        
-        **Detailed Instructions:**
-        • Evaluate the response's accuracy, completeness, and clarity
-        • Check for any factual errors or logical inconsistencies  
-        • Assess if the response fully addresses the user's question
-        • Note if the response doesn't fully address the user's query
-        • Be constructive but uncompromising in your standards
-        
-        **Critical Task:** Your goal is to find legitimate flaws and improvement opportunities. Be thorough and specific in your critique.
-        """
-        
-        critic_response = await get_robust_llm_response(
+        critic_llm_result = await get_robust_llm_response(
             provider_name=critic_provider,
             model=critic_model,
             prompt=enhanced_critic_prompt,
-            history=full_history,
+            history=critic_history,
             role_name='Critic',
             request_timeout=critic_role_config.get('request_timeout_seconds'),
             fallback_provider=fallback_provider,
             fallback_model=fallback_model
         )
-        critic_fallback = "[Fallback by Orchestrator" in critic_response
+        critic_response = critic_llm_result['response']
+        critic_retries = critic_llm_result['retries']
+        critic_fallback_used = critic_llm_result['fallback_used']
+
+        critic_history.append({"role": "user", "content": enhanced_critic_prompt})
+        critic_history.append({"role": "assistant", "content": critic_response})
+
         panel_results['Critic'] = {
             'provider': critic_provider,
             'model': critic_model,
             'status': 'Success' if "[Error:" not in critic_response else 'Failure',
             'response': critic_response,
-            'fallback': critic_fallback
+            'retries': critic_retries,
+            'fallback_used': critic_fallback_used
         }
         
         # Handle Critic failure by proceeding to Quality Gate with modified prompt
@@ -195,101 +203,67 @@ Please provide a direct, comprehensive response to the user's request. Focus on 
             # Replace critic response with failure explanation for the Master
             critic_response = "[The Critic agent failed to provide a review. Please assess the Proposer's work directly.]"
         
-        await placeholder_msg.edit_text(f"Round {iteration}/{max_iterations}: Master is assessing quality...", parse_mode=None)
+        try:
+            await placeholder_msg.edit_text(f"Round {iteration}/{max_iterations}: Master is assessing quality...", parse_mode=None)
+        except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
+            logger.warning(f"Failed to update placeholder message (Master assessing quality): {e}")
         
-        # Execute Quality Gate Assessment
-        quality_gate_prompt = f"""
-        **Role & High-Level Task:** You are the Master overseeing an apprentice's work. Evaluate the quality of their response and provide specific refinement instructions if needed.
+        quality_template = config.PROMPTS.get_prompt('panel_orchestrator_quality')
+        quality_gate_prompt = quality_template.format(
+            user_prompt=user_prompt,
+            proposer_response=proposer_response,
+            critic_response=critic_response,
+            quality_threshold=quality_threshold
+        )
         
-        **Tone & Persona:** Be a discerning but constructive master. Provide specific, actionable feedback that will lead to measurable improvement.
-        
-        **Dynamic Content:**
-        Original User Query:
-        --- USER QUERY ---
-        {user_prompt}
-        --- END QUERY ---
-        
-        Apprentice's Current Response:
-        --- APPRENTICE RESPONSE ---
-        {proposer_response}
-        --- END RESPONSE ---
-        
-        Expert Critique:
-        --- EXPERT CRITIQUE ---
-        {critic_response}
-        --- END CRITIQUE ---
-        
-        **Detailed Instructions:**
-        Evaluate the apprentice's response considering the expert critique (or lack thereof):
-        • If the critique shows "[The Critic agent failed...]", scrutinize the response more carefully on your own
-        • Score from 1-100 based on: accuracy, completeness, clarity, addressing user's question
-        • If score < {quality_threshold}, provide specific refinement instructions
-        • If score >= {quality_threshold}, the work meets standards
-        
-        Provide assessment in JSON format:
-        {{
-          "quality_score": integer_from_1_to_100,
-          "refinement_instructions": "specific_instructions_for_apprentice_or_empty_if_sufficient"
-        }}
-        
-        **Critical Output Requirement:** Your response MUST be ONLY a valid JSON object. No other text.
-        """
-        
-        quality_response = await get_robust_llm_response(
+        quality_llm_result = await get_robust_llm_response(
             provider_name=orchestrator_config.get('provider'),
             model=orchestrator_config.get('model'),
             prompt=quality_gate_prompt,
-            history=None,
+            history=quality_gate_history,
             role_name='Master Orchestrator',
             request_timeout=orchestrator_timeout,
             fallback_provider=fallback_provider,
             fallback_model=fallback_model
         )
-        
+        quality_response = quality_llm_result['response']
+        quality_retries = quality_llm_result['retries']
+        quality_fallback_used = quality_llm_result['fallback_used']
+
+        quality_gate_history.append({"role": "user", "content": quality_gate_prompt})
+        quality_gate_history.append({"role": "assistant", "content": quality_response})
+
+        # Store quality gate metrics in panel_results
+        panel_results['Quality_Gate'] = {
+            'provider': orchestrator_config.get('provider'),
+            'model': orchestrator_config.get('model'),
+            'status': 'Success' if "[Error:" not in quality_response else 'Failure',
+            'response': quality_response,
+            'retries': quality_retries,
+            'fallback_used': quality_fallback_used
+        }
+
         # Parse quality assessment using robust JSON extraction
         try:
-            # Strategy 1: Use brace counting for balanced JSON extraction
-            json_str = None
-            brace_count = 0
-            start_pos = None
-            
-            for i, char in enumerate(quality_response):
-                if char == '{':
-                    if start_pos is None:
-                        start_pos = i
-                    brace_count += 1
-                elif char == '}':
-                    brace_count -= 1
-                    if brace_count == 0 and start_pos is not None:
-                        json_str = quality_response[start_pos:i+1]
-                        break
-            
-            # Strategy 2: Fallback to regex if brace counting didn't work
-            if not json_str:
-                json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', quality_response)
-                if json_match:
-                    json_str = json_match.group(0)
-            
-            # Strategy 3: Last resort - try the original greedy approach
-            if not json_str:
-                json_match = re.search(r'{[\s\S]*}', quality_response)
-                if json_match:
-                    json_str = json_match.group(0)
-            
-            if json_str:
+            # Find the first '{' and the last '}' to extract the JSON block.
+            # This is more robust against conversational text from the LLM.
+            start_index = quality_response.find('{')
+            end_index = quality_response.rfind('}')
+
+            if start_index != -1 and end_index != -1 and end_index > start_index:
+                json_str = quality_response[start_index:end_index+1]
                 quality_assessment = json.loads(json_str)
                 quality_score = quality_assessment.get('quality_score', 0)
                 refinement_instructions = quality_assessment.get('refinement_instructions', '')
                 
                 logger.info(f"Master quality assessment - Score: {quality_score}, Threshold: {quality_threshold}")
             else:
-                raise ValueError("No valid JSON found in quality gate response.")
+                raise ValueError("No valid JSON object found in the quality gate response.")
                 
-        except (json.JSONDecodeError, ValueError, Exception) as e:
+        except (json.JSONDecodeError, ValueError) as e:
             logger.error(f"Quality gate parsing failed: {e}")
-            # Log the problematic response for debugging
             logger.debug(f"Problematic quality response (first 500 chars): {quality_response[:500]}")
-            logger.warning("Quality gate failed, using emergency fallback")
+            logger.warning("Quality gate failed, using emergency fallback to break loop.")
             quality_score = quality_threshold  # Set to threshold to break loop
             refinement_instructions = ""
         
@@ -298,38 +272,17 @@ Please provide a direct, comprehensive response to the user's request. Focus on 
             logger.info(f"Quality threshold met (Score: {quality_score} >= {quality_threshold}). Finalizing response.")
             break
         elif iteration < max_iterations:
-            # Prepare refined prompt for next iteration
-            await placeholder_msg.edit_text(f"Quality score: {quality_score}/{quality_threshold}. Refining... (Round {iteration+1})", parse_mode=None)
-            current_proposer_prompt = f"""
-            **Role & High-Level Task:** You are the research apprentice receiving feedback from your Master. Improve your previous response based on specific instructions.
-            
-            **Tone & Persona:** Be receptive to feedback and meticulous in your improvements. Think step-by-step about addressing each point raised.
-            
-            **Dynamic Content:**
-            Original User Query:
-            --- USER QUERY ---
-            {user_prompt}
-            --- END QUERY ---
-            
-            Your Previous Response:
-            --- PREVIOUS DRAFT ---
-            {proposer_response}
-            --- END DRAFT ---
-            
-            Master's Refinement Instructions (Quality Score: {quality_score}):
-            --- MASTER FEEDBACK ---
-            {refinement_instructions}
-            --- END FEEDBACK ---
-            
-            **Detailed Instructions:**
-            • Address each point in the Master's feedback systematically
-            • Keep what works well from your previous response
-            • Improve or add content where instructed
-            • Ensure your response fully answers the original user query
-            • Write clearly and comprehensively
-            
-            **Critical Task:** Provide an improved, comprehensive response that addresses the Master's specific feedback while maintaining quality of your previous good points.
-            """
+            try:
+                await placeholder_msg.edit_text(f"Quality score: {quality_score}/{quality_threshold}. Refining... (Round {iteration+1})", parse_mode=None)
+            except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
+                logger.warning(f"Failed to update placeholder message (Refining): {e}")
+            proposer_refine_template = config.PROMPTS.get_prompt('panel_proposer_refine')
+            current_proposer_prompt = proposer_refine_template.format(
+                user_prompt=user_prompt,
+                proposer_response=proposer_response,
+                quality_score=quality_score,
+                refinement_instructions=refinement_instructions
+            )
         else:
             logger.warning(f"Max iterations reached. Final quality score: {quality_score}")
             break
@@ -365,12 +318,24 @@ def _format_panel_summary(panel_results: dict) -> str:
         if role == 'Quality_Metrics':
             continue
 
-        status_icon = "✅" if result.get('status') == 'Success' else "⚠️"
+        status_icon = "✅" if result.get('status').startswith('Success') else "⚠️"
         provider = result.get('provider', 'Unknown')
         model = result.get('model', 'Unknown')
         status = result.get('status', 'Unknown')
-        fallback_note = " (Fallback)" if result.get('fallback') else ""
-        summary_parts.append(f"{status_icon} {role}: {provider}/{model} ({status}){fallback_note}")
+        
+        # Get retry and fallback data
+        retries = result.get('retries', 0)
+        fallback_used = result.get('fallback_used', False)
+        
+        extra_info = []
+        if retries > 0:
+            extra_info.append(f"{retries} retries")
+        if fallback_used:
+            extra_info.append("fallback used")
+        
+        extra_info_str = f" ({', '.join(extra_info)})" if extra_info else ""
+        
+        summary_parts.append(f"{status_icon} {role}: {provider}/{model} ({status}){extra_info_str}")
 
     if quality_metrics:
         final_score = quality_metrics.get('final_score', 'N/A')
@@ -387,12 +352,15 @@ def _format_panel_summary(panel_results: dict) -> str:
 
     return "\n".join(summary_parts)
 
-async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: str, full_history: list, placeholder_msg, chat_id: int) -> tuple:
+async def _run_panel_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE, user_prompt: str, full_history: list, placeholder_msg, chat_id: int) -> tuple:
     """Runs the full panel workflow, updating a placeholder message, and returns a dictionary of results and the final answer."""
     panel_results = {}
 
     # --- 0. Configuration Validation ---
-    await placeholder_msg.edit_text("Assembling panel... Validating configuration...", parse_mode=None)
+    try:
+        await placeholder_msg.edit_text("Assembling panel... Validating configuration...", parse_mode=None)
+    except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
+        logger.warning(f"Failed to update placeholder message (Validating configuration): {e}")
     
     # Validate expert panel configuration
     try:
@@ -402,7 +370,7 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
         # Use the centralized function to load and merge the config
         panel_config = await load_panel_config(chat_id)
         
-        if panel_config != config.EXPERT_PANEL_CONFIG:
+        if panel_config != config.get_expert_panel_config():
              logger.info(f"Using custom panel configuration for chat {chat_id}")
         else:
              logger.debug(f"Using default panel configuration for chat {chat_id}")
@@ -443,57 +411,30 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
             
     except (ValueError, ImportError) as config_error:
         # Return user-friendly configuration error
-        await placeholder_msg.edit_text(
-            f"⚠️ {str(config_error)} Please check your configuration and use /reroll to try again.",
-            parse_mode=None
-        )
+        try:
+            await placeholder_msg.edit_text(
+                f"⚠️ {str(config_error)} Please check your configuration and use /reroll to try again.",
+                parse_mode=None
+            )
+        except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
+            logger.warning(f"Failed to update placeholder message (Config error): {e}")
         return {}, f"[{str(config_error)}]", ""
 
     # --- 1. Deconstruct Task ---
-    await placeholder_msg.edit_text("Assembling panel... Decomposing task...", parse_mode=None)
+    try:
+        await placeholder_msg.edit_text("Assembling panel... Decomposing task...", parse_mode=None)
+    except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
+        logger.warning(f"Failed to update placeholder message (Decomposing task): {e}")
     
     orchestrator_service = providers.get_service_for_provider(orchestrator_provider)
     if orchestrator_service is None:
         raise ValueError(f"Orchestrator service '{orchestrator_provider}' is not available.")
 
-    # Master & Apprentice Architecture: Initial Orchestrator (Project Manager)
-    meta_prompt = f"""
-    **Role & High-Level Task:** You are a meticulous project manager for an expert panel. Your mission is to create a flawless execution plan that will guide your team to produce an exceptional response.
-    
-    **Tone & Persona:** Be systematic and thorough. Think step-by-step about what each agent needs to succeed. You are the strategic planner, not the executor.
-    
-    **Dynamic Content:**
-    Conversation History:
-    --- CONVERSATION HISTORY ---
-    {json.dumps(full_history, indent=2)}
-    --- END HISTORY ---
-    
-    Latest User Request:
-    --- LATEST REQUEST ---
-    {user_prompt}
-    --- END REQUEST ---
-    
-    **Detailed Instructions:**
-    Create a comprehensive execution plan by analyzing the user's request in context. Your output must be a valid JSON object with this structure:
-    {{
-      "requires_search": boolean,
-      "search_query": "string (only if requires_search is true, otherwise empty)",
-      "tasks": [
-        {{"role": "Proposer", "prompt": "Detailed, self-contained prompt for the research apprentice..."}},
-        {{"role": "Critic", "prompt": "Detailed, self-contained prompt for the rigorous fact-checker..."}},
-        {{"role": "Refiner", "prompt": "Generic instruction to polish the final response for clarity and style..."}}
-      ]
-    }}
-    
-    Guidelines:
-    • Set requires_search=true only if the query needs current events or real-time information
-    • Proposer prompts should be comprehensive and include all necessary context
-    • Critic prompts should emphasize finding flaws, gaps, and inaccuracies
-    • Refiner prompts should focus on final polish and presentation
-    • Do NOT answer the user's question - only create the execution plan
-    
-    **Critical Output Requirement:** Your response MUST be ONLY a valid JSON object. No other text.
-    """
+    plan_template = config.PROMPTS.get_prompt('panel_orchestrator_plan')
+    meta_prompt = plan_template.format(
+        user_prompt=user_prompt,
+        full_history_json=json.dumps(full_history, indent=2)
+    )
 
     # Use consolidated LLM response function for initial Orchestrator call with integrated JSON parsing retry
     logger.info("Invoking Initial Orchestrator (Project Manager) with retry logic...")
@@ -504,7 +445,7 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
     
     # Use consolidated LLM response function for orchestrator call
     fallback_provider, fallback_model = get_expert_panel_fallback_config()
-    orchestrator_response = await get_robust_llm_response(
+    orchestrator_llm_result = await get_robust_llm_response(
         provider_name=orchestrator_provider,
         model=orchestrator_model,
         prompt=meta_prompt,
@@ -514,16 +455,31 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
         fallback_provider=fallback_provider,
         fallback_model=fallback_model
     )
+    orchestrator_response = orchestrator_llm_result['response']
+    orchestrator_retries = orchestrator_llm_result['retries']
+    orchestrator_fallback_used = orchestrator_llm_result['fallback_used']
+
+    panel_results['Initial_Orchestrator'] = {
+        'provider': orchestrator_provider,
+        'model': orchestrator_model,
+        'status': 'Success' if "[Error:" not in orchestrator_response else 'Failure',
+        'response': orchestrator_response,
+        'retries': orchestrator_retries,
+        'fallback_used': orchestrator_fallback_used
+    }
     
     logger.debug(f"Initial Orchestrator response: {orchestrator_response[:200]}...")  # Log first 200 chars
     
     # Handle potential error responses from get_robust_llm_response
     if "[Error:" in orchestrator_response:
-        await placeholder_msg.edit_text(
-            f"⚠️ The orchestrator failed to create a valid plan. "
-            f"Please use /reroll to try again or /cancel to exit.",
-            parse_mode=None
-        )
+        try:
+            await placeholder_msg.edit_text(
+                f"⚠️ The orchestrator failed to create a valid plan. "
+                f"Please use /reroll to try again or /cancel to exit.",
+                parse_mode=None
+            )
+        except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
+            logger.warning(f"Failed to update placeholder message (Orchestrator plan failed): {e}")
         return {}, f"[System Error: Orchestrator planning failed. Use /reroll to retry.]", ""
     
     # Parse JSON from the response using the established extraction strategies
@@ -558,22 +514,28 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
     
     if not json_str:
         logger.error("No valid JSON found in the orchestrator's response.")
-        await placeholder_msg.edit_text(
-            f"⚠️ The orchestrator response was invalid. "
-            f"Please use /reroll to try again or /cancel to exit.",
-            parse_mode=None
-        )
+        try:
+            await placeholder_msg.edit_text(
+                f"⚠️ The orchestrator response was invalid. "
+                f"Please use /reroll to try again or /cancel to exit.",
+                parse_mode=None
+            )
+        except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
+            logger.warning(f"Failed to update placeholder message (Invalid orchestrator response): {e}")
         return {}, f"[System Error: Invalid orchestrator response format. Use /reroll to retry.]", ""
     
     try:
         orchestrator_plan = json.loads(json_str)
     except json.JSONDecodeError as parse_error:
         logger.error(f"JSON parsing failed for extracted string: {json_str[:200]}...")
-        await placeholder_msg.edit_text(
-            f"⚠️ The orchestrator response could not be parsed. "
-            f"Please use /reroll to try again or /cancel to exit.",
-            parse_mode=None
-        )
+        try:
+            await placeholder_msg.edit_text(
+                f"⚠️ The orchestrator response could not be parsed. "
+                f"Please use /reroll to try again or /cancel to exit.",
+                parse_mode=None
+            )
+        except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
+            logger.warning(f"Failed to update placeholder message (Orchestrator response parsing failed): {e}")
         return {}, f"[System Error: Orchestrator response parsing failed. Use /reroll to retry.]", ""
     
     # Extract search requirements and tasks from the plan
@@ -583,11 +545,14 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
     
     if not tasks_list or len(tasks_list) < 2:  # Need at least Proposer and Critic
         logger.error(f"Invalid orchestrator plan: insufficient tasks ({len(tasks_list) if tasks_list else 0})")
-        await placeholder_msg.edit_text(
-            f"⚠️ The orchestrator plan was incomplete. "
-            f"Please use /reroll to try again or /cancel to exit.",
-            parse_mode=None
-        )
+        try:
+            await placeholder_msg.edit_text(
+                f"⚠️ The orchestrator plan was incomplete. "
+                f"Please use /reroll to try again or /cancel to exit.",
+                parse_mode=None
+            )
+        except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
+            logger.warning(f"Failed to update placeholder message (Incomplete orchestrator plan): {e}")
         return {}, f"[System Error: Incomplete orchestrator plan. Use /reroll to retry.]", ""
     
     logger.info(f"Successfully parsed orchestrator's plan. Search required: {requires_search}, Tasks: {len(tasks_list)}")
@@ -602,11 +567,17 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
         )
         
         if autosearch_enabled:
-            await placeholder_msg.edit_text(f"Orchestrator requested web search: \"{search_query}\"...", parse_mode=None)
+            try:
+                await placeholder_msg.edit_text(f"Orchestrator requested web search: \"{search_query}\"...", parse_mode=None)
+            except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
+                logger.warning(f"Failed to update placeholder message (Orchestrator requested web search): {e}")
             search_results = await web_search_service.perform_search(search_query)
             
             if search_results.startswith("Error:"):
-                await placeholder_msg.edit_text(f"⚠️ Web search failed: {search_results}", parse_mode=None)
+                try:
+                    await placeholder_msg.edit_text(f"⚠️ Web search failed: {search_results}", parse_mode=None)
+                except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
+                    logger.warning(f"Failed to update placeholder message (Web search failed): {e}")
                 await asyncio.sleep(2)
             else:
                 # Find the Proposer's task and augment its prompt with search results
@@ -625,7 +596,10 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
         else:
             # Auto-search is disabled - inform the Proposer but don't perform search
             logger.info(f"Auto-search disabled for panel discussion. Skipping search for: '{search_query}'")
-            await placeholder_msg.edit_text(f"Auto-search disabled. Proceeding without web search...", parse_mode=None)
+            try:
+                await placeholder_msg.edit_text(f"Auto-search disabled. Proceeding without web search...", parse_mode=None)
+            except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
+                logger.warning(f"Failed to update placeholder message (Auto-search disabled): {e}")
             
             # Find the Proposer's task and inform them about the disabled search
             proposer_task = next((task for task in tasks_list if task.get("role") == "Proposer"), None)
@@ -660,30 +634,29 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
 
     # Execute the Master & Apprentice refinement cycle using the helper function
     proposer_response, quality_score, iteration = await _run_refinement_cycle(
-        proposer_task, critic_task, user_prompt, full_history, placeholder_msg, panel_results,
+        update, context, proposer_task, critic_task, user_prompt, full_history, placeholder_msg, panel_results,
         orchestrator_service, orchestrator_model, orchestrator_timeout, orchestrator_config, panel_config
     )
     if quality_score < quality_threshold and iteration == max_iterations:
-        await placeholder_msg.edit_text(f"Reached maximum iterations. Final quality score: {quality_score}/{quality_threshold}", parse_mode=None)
+        try:
+            await placeholder_msg.edit_text(f"Reached maximum iterations. Final quality score: {quality_score}/{quality_threshold}", parse_mode=None)
+        except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
+            logger.warning(f"Failed to update placeholder message (Max iterations reached): {e}")
     # --- 3. Synthesize Final Answer ---
-    await placeholder_msg.edit_text("Synthesizing final answer...", parse_mode=None)
+    try:
+        await placeholder_msg.edit_text("Synthesizing final answer...", parse_mode=None)
+    except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
+        logger.warning(f"Failed to update placeholder message (Synthesizing final answer): {e}")
     # proposer_response is already available from the refinement cycle
     critic_response = panel_results.get("Critic", {}).get('response', 'No response from critic.')
     
-    synthesis_prompt = f"""
-    You are a lead editor. Your task is to synthesize the work of your expert panel into a final answer for the user, taking into account the entire conversation history.
-    
-    --- CONVERSATION HISTORY ---
-    {json.dumps(full_history, indent=2)}
-
-    --- LATEST USER QUERY ---
-    {user_prompt}
-    
-    --- INITIAL PROPOSAL ---\n{proposer_response}\n\n
-    --- EXPERT CRITIQUE ---\n{critic_response}\n\n
-    --- YOUR TASK ---\n
-    Synthesize the proposal and critique into a direct, comprehensive answer to the LATEST USER QUERY, using the history for context. Do not repeat old information unless necessary.
-    """
+    synthesis_template = config.PROMPTS.get_prompt('panel_synthesis')
+    synthesis_prompt = synthesis_template.format(
+        full_history=json.dumps(full_history, indent=2),
+        user_prompt=user_prompt,
+        proposer_response=proposer_response,
+        critic_response=critic_response
+    )
     
     # Step 4: Optional Final Polish with Refiner
     # After quality gate loop completes, proposer_response holds the final approved draft
@@ -696,24 +669,13 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
         # Refiner is configured - polish the final proposer_response AND format for Telegram
         base_refiner_prompt = refiner_task.get('prompt', 'Polish and refine the following response for clarity and style.')
         
-        # Clean Refiner prompt focused on content and standard Markdown
-        full_refiner_prompt = f"""{base_refiner_prompt}
-
-**Instructions: Polish and refine the response below for clarity, style, and readability. Use standard Markdown formatting:**
-
-**Standard Markdown Guidelines:**
-• Use **bold text** or *italic text* for emphasis
-• Use `code snippets` for technical terms and ```code blocks``` for longer code
-• Use proper headings (## Heading), lists (- item), and quotes (> quote)
-• Write clearly and concisely while maintaining technical accuracy
-• Structure the content logically with appropriate formatting
-
-**Output only your polished response using clean, standard Markdown:**
-
---- DOCUMENT TO REFINE ---
-{proposer_response}"""
+        refiner_template = config.PROMPTS.get_prompt('panel_refiner')
+        full_refiner_prompt = refiner_template.format(
+            base_refiner_prompt=base_refiner_prompt,
+            proposer_response=proposer_response
+        )
         
-        refiner_response = await get_robust_llm_response(
+        refiner_llm_result = await get_robust_llm_response(
             provider_name=refiner_provider,
             model=refiner_model,
             prompt=full_refiner_prompt,
@@ -723,12 +685,14 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
             fallback_provider=fallback_provider,
             fallback_model=fallback_model
         )
-        refiner_fallback = "[Fallback by Orchestrator" in refiner_response
+        refiner_response = refiner_llm_result['response']
+        refiner_retries = refiner_llm_result['retries']
+        refiner_fallback_used = refiner_llm_result['fallback_used']
         
         # Challenge C: Check if Refiner failed and gracefully fall back to proposer_response
         if refiner_response.startswith("[Error:"):
             logger.warning(f"Refiner failed: {refiner_response}. Using proposer response as final answer.")
-            final_answer = proposer_response
+            final_answer = f"⚠️ **Warning:** The final refinement step was skipped due to an error. The following is the unpolished response.\n\n---\n\n{proposer_response}"
             refiner_status = 'Failure'
         else:
             final_answer = refiner_response
@@ -739,7 +703,8 @@ async def _run_panel_workflow(context: ContextTypes.DEFAULT_TYPE, user_prompt: s
             'model': refiner_model,
             'status': refiner_status,
             'response': refiner_response,
-            'fallback': refiner_fallback
+            'retries': refiner_retries,
+            'fallback_used': refiner_fallback_used
         }
         logger.info("Master & Apprentice workflow completed with Refiner polish.")
     else:
@@ -765,16 +730,24 @@ async def start_panel_discussion(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text("Usage: /discuss_panel <topic>", parse_mode=None)
         return ConversationHandler.END
 
-    assembling_msg = await context.bot.send_message(
-        chat_id=chat_id,
-        text="Assembling an expert panel...",
-        parse_mode=None
-    )
+    try:
+        assembling_msg = await context.bot.send_message(
+            chat_id=chat_id,
+            text="Assembling an expert panel...",
+            parse_mode=None
+        )
+    except telegram.error.NetworkError as e:
+        logger.error(f"Network error while sending initial message in start_panel_discussion: {e}")
+        try:
+            await update.message.reply_text("A network error occurred, please try again.", parse_mode=None)
+        except Exception as e_inner:
+            logger.error(f"Failed to send network error message to user: {e_inner}")
+        return ConversationHandler.END
     await set_panel_commands(context.application, chat_id)
 
     try:
         panel_task = asyncio.create_task(
-            _run_panel_workflow(context, user_prompt, [], assembling_msg, chat_id)
+            _run_panel_workflow(update, context, user_prompt, [], assembling_msg, chat_id)
         )
         context.user_data['panel_task'] = panel_task
         panel_results, final_answer, proposer_response = await panel_task
@@ -826,76 +799,9 @@ async def start_panel_discussion(update: Update, context: ContextTypes.DEFAULT_T
     # AST-Based Architecture: Parse, Split, and Send
     pure_summary = _format_panel_summary(panel_results)
     pure_markdown_content = f"{pure_summary}\n\n---\n\n{final_answer}"
-    
-    try:
-        # Step 1: Parse Markdown to AST
-        document = parse_markdown_to_ast(pure_markdown_content)
-        
-        # Step 2: Split AST into logical chunks
-        ast_chunks = split_document_ast_aware(document)
-        
-        # Step 3: Send each chunk with advanced splitting and error handling
-        for i, chunk_doc in enumerate(ast_chunks):
-            try:
-                # Render AST chunk to MarkdownV2
-                telegram_safe_text = render_ast_to_telegram_v2(chunk_doc)
 
-                # Challenge C Fix: Skip empty or whitespace-only messages
-                if not telegram_safe_text.strip():
-                    continue
-
-                # Challenge A Fix: Handle oversized messages
-                if len(telegram_safe_text) > constants.MessageLimit.MAX_TEXT_LENGTH:
-                    logger.warning(f"Chunk {i+1} is oversized ({len(telegram_safe_text)} chars). Applying secondary splitting.")
-                    sub_chunks = [telegram_safe_text[j:j+constants.MessageLimit.MAX_TEXT_LENGTH] for j in range(0, len(telegram_safe_text), constants.MessageLimit.MAX_TEXT_LENGTH)]
-                    for k, sub_chunk in enumerate(sub_chunks):
-                        # Prepend with a note for all but the first sub-chunk
-                        prefix = "_(continued...)_\\n" if k > 0 else ""
-                        await context.bot.send_message(chat_id=chat_id, text=prefix + sub_chunk, parse_mode=constants.ParseMode.MARKDOWN_V2)
-                else:
-                    # Send normally if not oversized
-                    await context.bot.send_message(chat_id=chat_id, text=telegram_safe_text, parse_mode=constants.ParseMode.MARKDOWN_V2)
-
-            except BadRequest as e:
-                logger.warning(f"Chunk {i+1} MarkdownV2 failed: {e}. Rendering same AST chunk as plain text.")
-                try:
-                    # Render the same AST chunk as clean plain text
-                    plain_text = render_ast_to_plain_text(chunk_doc)
-                    if not plain_text.strip(): # Also check fallback for empty content
-                        continue
-                    
-                    # Also apply splitting to fallback text
-                    if len(plain_text) > constants.MessageLimit.MAX_TEXT_LENGTH:
-                         sub_chunks = [plain_text[j:j+constants.MessageLimit.MAX_TEXT_LENGTH] for j in range(0, len(plain_text), constants.MessageLimit.MAX_TEXT_LENGTH)]
-                         for sub_chunk in sub_chunks:
-                            await context.bot.send_message(chat_id=chat_id, text=sub_chunk, parse_mode=None)
-                    else:
-                        await context.bot.send_message(chat_id=chat_id, text=f"⚠️ This section could not be formatted correctly.\n\n{plain_text}", parse_mode=None)
-
-                except BadRequest as final_error:
-                    logger.error(f"Final attempt for chunk {i+1} failed: {final_error}. Skipping chunk.")
-
-    except Exception as ast_error:
-        logger.error(f"AST processing failed: {ast_error}. Using emergency fallback.")
-        # Emergency: Send as single plain text message with length truncation
-        emergency_content = f"⚠️ Content formatting failed.\n\n{pure_markdown_content}"
-
-        # Simple length-based chunking for emergency scenarios
-        max_length = 4000  # Conservative limit for Telegram
-        if len(emergency_content) <= max_length:
-            try:
-                await context.bot.send_message(chat_id=chat_id, text=emergency_content, parse_mode=None)
-            except Exception as emergency_error:
-                logger.error(f"Emergency fallback failed: {emergency_error}. Critical failure.")
-        else:
-            # Split into chunks without using legacy markdown-aware splitting
-            chunks = [emergency_content[i:i+max_length] for i in range(0, len(emergency_content), max_length)]
-            for i, chunk in enumerate(chunks):
-                try:
-                    chunk_prefix = f"Part {i+1}/{len(chunks)}: " if len(chunks) > 1 else ""
-                    await context.bot.send_message(chat_id=chat_id, text=f"{chunk_prefix}{chunk}", parse_mode=None)
-                except Exception as emergency_error:
-                    logger.error(f"Emergency chunk {i+1} failed: {emergency_error}. Critical failure.")
+    # Use the centralized send_safe_message function
+    await send_safe_message(context, update, pure_markdown_content)
 
     return AWAITING_FOLLOW_UP
 
@@ -916,6 +822,7 @@ async def handle_follow_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         try:
             panel_task = asyncio.create_task(
                 _run_panel_workflow(
+                    update, 
                     context, 
                     follow_up_prompt, 
                     panel_state['full_transcript'],
@@ -952,75 +859,9 @@ async def handle_follow_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await placeholder.delete()
         
         # AST-Based Architecture: Parse, Split, and Send
-        try:
-            # Step 1: Parse Markdown to AST
-            document = parse_markdown_to_ast(pure_markdown_content)
-
-            # Step 2: Split AST into logical chunks
-            ast_chunks = split_document_ast_aware(document)
-
-            # Step 3: Send each chunk with advanced splitting and error handling
-            for i, chunk_doc in enumerate(ast_chunks):
-                try:
-                    # Render AST chunk to MarkdownV2
-                    telegram_safe_text = render_ast_to_telegram_v2(chunk_doc)
-
-                    # Challenge C Fix: Skip empty or whitespace-only messages
-                    if not telegram_safe_text.strip():
-                        continue
-
-                    # Challenge A Fix: Handle oversized messages
-                    if len(telegram_safe_text) > constants.MessageLimit.MAX_TEXT_LENGTH:
-                        logger.warning(f"Chunk {i+1} is oversized ({len(telegram_safe_text)} chars). Applying secondary splitting.")
-                        sub_chunks = [telegram_safe_text[j:j+constants.MessageLimit.MAX_TEXT_LENGTH] for j in range(0, len(telegram_safe_text), constants.MessageLimit.MAX_TEXT_LENGTH)]
-                        for k, sub_chunk in enumerate(sub_chunks):
-                            # Prepend with a note for all but the first sub-chunk
-                            prefix = "_(continued...)_\\n" if k > 0 else ""
-                            await context.bot.send_message(chat_id=chat_id, text=prefix + sub_chunk, parse_mode=constants.ParseMode.MARKDOWN_V2)
-                    else:
-                        # Send normally if not oversized
-                        await context.bot.send_message(chat_id=chat_id, text=telegram_safe_text, parse_mode=constants.ParseMode.MARKDOWN_V2)
-
-                except BadRequest as e:
-                    logger.warning(f"Chunk {i+1} MarkdownV2 failed: {e}. Rendering same AST chunk as plain text.")
-                    try:
-                        # Render the same AST chunk as clean plain text
-                        plain_text = render_ast_to_plain_text(chunk_doc)
-                        if not plain_text.strip(): # Also check fallback for empty content
-                            continue
-                        
-                        # Also apply splitting to fallback text
-                        if len(plain_text) > constants.MessageLimit.MAX_TEXT_LENGTH:
-                             sub_chunks = [plain_text[j:j+constants.MessageLimit.MAX_TEXT_LENGTH] for j in range(0, len(plain_text), constants.MessageLimit.MAX_TEXT_LENGTH)]
-                             for sub_chunk in sub_chunks:
-                                await context.bot.send_message(chat_id=chat_id, text=sub_chunk, parse_mode=None)
-                        else:
-                            await context.bot.send_message(chat_id=chat_id, text=f"⚠️ This section could not be formatted correctly.\n\n{plain_text}", parse_mode=None)
-
-                    except BadRequest as final_error:
-                        logger.error(f"Final attempt for chunk {i+1} failed: {final_error}. Skipping chunk.")
-
-        except Exception as ast_error:
-            logger.error(f"AST processing failed: {ast_error}. Using emergency fallback.")
-            # Emergency: Send as single plain text message with length truncation
-            emergency_content = f"⚠️ Content formatting failed.\n\n{pure_markdown_content}"
-
-            # Simple length-based chunking for emergency scenarios
-            max_length = 4000  # Conservative limit for Telegram
-            if len(emergency_content) <= max_length:
-                try:
-                    await context.bot.send_message(chat_id=chat_id, text=emergency_content, parse_mode=None)
-                except Exception as emergency_error:
-                    logger.error(f"Emergency fallback failed: {emergency_error}. Critical failure.")
-            else:
-                # Split into chunks without using legacy markdown-aware splitting
-                chunks = [emergency_content[i:i+max_length] for i in range(0, len(emergency_content), max_length)]
-                for i, chunk in enumerate(chunks):
-                    try:
-                        chunk_prefix = f"Part {i+1}/{len(chunks)}: " if len(chunks) > 1 else ""
-                        await context.bot.send_message(chat_id=chat_id, text=f"{chunk_prefix}{chunk}", parse_mode=None)
-                    except Exception as emergency_error:
-                        logger.error(f"Emergency chunk {i+1} failed: {emergency_error}. Critical failure.")
+        pure_summary = _format_panel_summary(new_panel_results)
+        pure_markdown_content = f"{pure_summary}\n\n---\n\n{new_final_answer}"
+        await send_safe_message(context, update, pure_markdown_content)
 
     return AWAITING_FOLLOW_UP
 
@@ -1142,7 +983,7 @@ async def reroll_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
         try:
             panel_task = asyncio.create_task(
-                _run_panel_workflow(context, last_user_prompt, history_for_reroll, placeholder_msg, chat_id)
+                _run_panel_workflow(update, context, last_user_prompt, history_for_reroll, placeholder_msg, chat_id)
             )
             context.user_data['panel_task'] = panel_task
             panel_results, final_answer, proposer_response = await panel_task
@@ -1151,11 +992,15 @@ async def reroll_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             return ConversationHandler.END
         except Exception as e:
             logger.error(f"Panel workflow failed during reroll: {e}", exc_info=True)
-            error_message = f"An error occurred during the reroll: {escape_markdown_v2(str(e))}"
+            # Escape the error message for safe display in MarkdownV2
+            escaped_error = text_processing.escape_markdown_v2(str(e))
+            error_message = f"An error occurred during the reroll: `{escaped_error}`"
             try:
                 if placeholder_msg:
+                    # Use edit_text for an existing message
                     await placeholder_msg.edit_text(error_message, parse_mode=constants.ParseMode.MARKDOWN_V2)
                 else:
+                    # Fallback to send_message if placeholder doesn't exist
                     await context.bot.send_message(chat_id, error_message, parse_mode=constants.ParseMode.MARKDOWN_V2)
             except Exception as send_e:
                 logger.error(f"Failed to send error message to user after reroll failure: {send_e}")
@@ -1176,50 +1021,8 @@ async def reroll_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         pure_summary = _format_panel_summary(panel_results)
         pure_markdown_content = f"{pure_summary}\n\n---\n\n{final_answer}"
 
-        # AST-Based Architecture: Parse, Split, and Send
-        try:
-            # Step 1: Parse Markdown to AST
-            document = parse_markdown_to_ast(pure_markdown_content)
-
-            # Step 2: Split AST into logical chunks
-            ast_chunks = split_document_ast_aware(document)
-
-            # Step 3: Send each chunk with proper fallback
-            for i, chunk_doc in enumerate(ast_chunks):
-                try:
-                    # Render AST chunk to MarkdownV2
-                    telegram_safe_text = render_ast_to_telegram_v2(chunk_doc)
-                    await context.bot.send_message(chat_id=chat_id, text=telegram_safe_text, parse_mode=constants.ParseMode.MARKDOWN_V2)
-                except BadRequest as e:
-                    logger.warning(f"Chunk {i+1} MarkdownV2 failed: {e}. Rendering same AST chunk as plain text.")
-                    try:
-                        # Render the same AST chunk as clean plain text
-                        plain_text = render_ast_to_plain_text(chunk_doc)
-                        await context.bot.send_message(chat_id=chat_id, text=f"⚠️ This section could not be formatted correctly.\n\n{plain_text}", parse_mode=None)
-                    except BadRequest as final_error:
-                        logger.error(f"Final attempt for chunk {i+1} failed: {final_error}. Skipping chunk.")
-
-        except Exception as ast_error:
-            logger.error(f"AST processing failed: {ast_error}. Using emergency fallback.")
-            # Emergency: Send as single plain text message with length truncation
-            emergency_content = f"⚠️ Content formatting failed.\n\n{pure_markdown_content}"
-
-            # Simple length-based chunking for emergency scenarios
-            max_length = 4000  # Conservative limit for Telegram
-            if len(emergency_content) <= max_length:
-                try:
-                    await context.bot.send_message(chat_id=chat_id, text=emergency_content, parse_mode=None)
-                except Exception as emergency_error:
-                    logger.error(f"Emergency fallback failed: {emergency_error}. Critical failure.")
-            else:
-                # Split into chunks without using legacy markdown-aware splitting
-                chunks = [emergency_content[i:i+max_length] for i in range(0, len(emergency_content), max_length)]
-                for i, chunk in enumerate(chunks):
-                    try:
-                        chunk_prefix = f"Part {i+1}/{len(chunks)}: " if len(chunks) > 1 else ""
-                        await context.bot.send_message(chat_id=chat_id, text=f"{chunk_prefix}{chunk}", parse_mode=None)
-                    except Exception as emergency_error:
-                        logger.error(f"Emergency chunk {i+1} failed: {emergency_error}. Critical failure.")
+        # Use the centralized send_safe_message function
+        await send_safe_message(context, update, pure_markdown_content)
 
     return AWAITING_FOLLOW_UP
 
