@@ -103,30 +103,11 @@ async def generate_response(
         yield f"[Error: Unexpected error - {str(e)}]"
 
 
-async def check_connection() -> bool:
-    """Checks if the OpenRouter API key is valid by fetching available models."""
-    if not config.OPENROUTER_API_KEY or config.OPENROUTER_API_KEY == "YOUR_OPENROUTER_API_KEY":
-        logger.warning("OpenRouter API Key not configured, skipping connection check.")
-        return False # Cannot check without a key
-
-    headers = {
-        "Authorization": f"Bearer {config.OPENROUTER_API_KEY}",
-    }
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get("https://openrouter.ai/api/v1/models", headers=headers)
-            response.raise_for_status() # Raises exception for 4xx/5xx errors
-            logger.info("OpenRouter connection check successful (fetched models).")
-            return True
-    except httpx.HTTPStatusError as http_err:
-        logger.error(f"OpenRouter connection check failed: HTTP Error {http_err.response.status_code}")
-        return False
-    except httpx.RequestError as req_err:
-        logger.error(f"OpenRouter connection check failed: Request Error {req_err}")
-        return False
-    except Exception as e:
-        logger.exception("Unexpected error during OpenRouter connection check")
-        return False
+async def check_status() -> (bool, str):
+    """Checks if the OpenRouter API key is configured."""
+    is_configured = bool(config.OPENROUTER_API_KEY and config.OPENROUTER_API_KEY != "YOUR_OPENROUTER_API_KEY")
+    message = "API key is configured." if is_configured else "API key is not configured."
+    return is_configured, message
 
 async def list_models() -> List[Dict[str, Any]]:
     """Fetches the list of models from OpenRouter and filters for free ones."""

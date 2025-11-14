@@ -23,6 +23,31 @@ This Telegram bot connects to various Large Language Model (LLM) backends like O
     *   API keys for any providers you wish to use (Gemini, OpenRouter, Groq, etc.).
 *   **Ollama:** A running instance if you intend to use the Ollama provider.
 
+## Configuration
+
+Setting up the bot involves two main files: `.env` for your secret keys and `config.yaml` for public settings.
+
+### 1. Environment Variables (`.env`)
+
+This file stores all your secret API keys and tokens. It should never be committed to version control.
+
+1.  **Create the file:** Copy the example file to a new file named `.env`:
+    ```bash
+    cp .env.example .env
+    ```
+2.  **Edit the file:** Open `.env` and fill in the required values.
+    *   `TELEGRAM_BOT_TOKEN` is **required**.
+    *   Fill in the API keys for any providers you want to use (e.g., `GEMINI_API_KEYS`, `OPENROUTER_API_KEY`). If you don't add a key for a provider, you won't be able to use its models.
+
+### 2. YAML Configuration (`config.yaml`)
+
+This file controls the bot's behavior, default models, and provider definitions. You can edit it to:
+*   Set the `default_provider` and default models for each service.
+*   Define custom OpenAI-compatible providers. The `api_key` field for a custom provider must match the name of the environment variable you created in your `.env` file.
+*   Configure the Expert Panel agents and quality thresholds.
+
+> **A Note for Docker Users:** If you are running services like Ollama on your host machine (outside of Docker), you cannot use `localhost` in your `.env` file to connect to them from the bot's container. You must use the special DNS name `host.docker.internal`. For example: `OLLAMA_HOST=http://host.docker.internal:11434`.
+
 ## Setup Instructions
 
 1.  **Clone the repository:**
@@ -31,17 +56,9 @@ This Telegram bot connects to various Large Language Model (LLM) backends like O
     cd llm-middleware-telegram
     ```
 
-2.  **Create and configure the environment file:**
-    ```bash
-    cp .env.example .env
-    ```
-    Edit the `.env` file and add your actual API keys and tokens. See `.env.example` for the required format.
+2.  **Configure the bot** by following the steps in the "Configuration" section above.
 
-3.  **Configure `config.yaml`:**
-    *   Review `config.yaml` to set default providers, models, and custom provider endpoints.
-    *   For custom OpenAI-compatible providers, ensure you define the `name`, `base_url`, and `default_model`. The corresponding API key must be set in `.env` (e.g., a provider named "groq" requires `GROQ_API_KEY` in the `.env` file).
-
-4.  **Build and Run with Docker Compose:**
+3.  **Build and Run with Docker Compose:**
     ```bash
     docker compose up --build -d
     ```

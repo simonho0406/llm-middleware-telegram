@@ -181,6 +181,12 @@ class OpenAICompatibleService:
     def get_default_model(self) -> str:
         return self.default_model
 
+    async def check_status(self) -> (bool, str):
+        """Checks if the provider is configured."""
+        is_configured = bool(self.api_key and self.api_key != "YOUR_API_KEY")
+        message = "API key is configured." if is_configured else "API key is not configured."
+        return is_configured, message
+
     async def count_tokens(self, content: list) -> int:
         try:
             encoding = tiktoken.get_encoding("cl100k_base")

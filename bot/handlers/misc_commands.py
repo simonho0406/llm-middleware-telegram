@@ -62,7 +62,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 ├ /provider - Show/switch AI provider
 ├ /model - Show current model
 ├ /list_models - List available models for the provider
-└ /set_model `<model_name>` - Set a new model
+├ /set_model `<model_name>` - Set a new model
+└ /provider_status - Check the status of all configured providers
 
 *Thread Management*:
 ├ /threads - List and manage conversation threads
@@ -471,6 +472,29 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     else:
         await send_safe_message(context, update, "There is no active response generation to cancel.")
 
+async def provider_status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Checks the status of all configured AI providers."""
+    statuses = []
+    all_providers = providers.get_provider_details()
+
+    for provider_name, provider_config in all_providers.items():
+        service = provider_config.get('service')
+        status_message = f"❓ {provider_name.capitalize()}: Status check not implemented."
+
+        if service and hasattr(service, 'check_status'):
+            is_ok, message = await service.check_status()
+            icon = "✅" if is_ok else "❌"
+            status_message = f"{icon} {provider_name.capitalize()}: {message}"
+        
+        statuses.append(status_message)
+
+    if not statuses:
+        message = "No providers are configured."
+    else:
+        message = "Provider Status:\n\n" + "\n".join(sorted(statuses))
+        
+    await send_safe_message(context, update, message)
+
 misc_handlers = [
     CommandHandler("help", help_command),
     CommandHandler("search", search_command),
@@ -488,4 +512,5 @@ misc_handlers = [
     CallbackQueryHandler(thread_callback_handler, pattern="^(switch_thread:|delete_thread:).*"),
     CommandHandler("rename_thread", rename_thread_command),
     CommandHandler("cancel", cancel_command),
+    CommandHandler("provider_status", provider_status_command),
 ]

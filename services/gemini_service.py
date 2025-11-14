@@ -129,6 +129,12 @@ async def generate_concurrent_responses(prompt: str, context_history: Optional[L
 
     return {model: res for model, res in zip(config.get_gemini_ask_all_models(), results)}
 
+async def check_status() -> (bool, str):
+    """Checks if the Gemini service is configured."""
+    is_configured = bool(config.GEMINI_API_KEYS)
+    message = "API keys are configured." if is_configured else "API key is not configured."
+    return is_configured, message
+
 # Example usage (for testing purposes)
 async def _test():
     print("Testing Gemini Service...")

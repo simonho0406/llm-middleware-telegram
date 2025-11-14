@@ -5,7 +5,12 @@ from telegram import Update, constants
 from telegram.ext import ContextTypes
 from telegram.error import BadRequest
 
-from utils.text_processing import split_document_ast_aware, parse_markdown_to_ast, render_ast_to_telegram_v2
+from utils.text_processing import (
+    split_document_ast_aware, 
+    parse_markdown_to_ast, 
+    render_ast_to_telegram_v2,
+    replace_html_tags # Import the new function
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +49,11 @@ async def send_safe_message(
     reply_to_msg_id = update.effective_message.message_id if update.effective_message else None
 
     try:
+        # 0. Replace HTML tags globally.
+        processed_text = replace_html_tags(text)
+        
         # 1. Parse the entire text to an AST Document once.
-        doc = parse_markdown_to_ast(escape_meta_tags(text))
+        doc = parse_markdown_to_ast(escape_meta_tags(processed_text))
         
         # 2. Split the AST Document into a list of smaller AST Documents.
         doc_chunks = split_document_ast_aware(doc)

@@ -25,8 +25,8 @@ async def run_startup_checks(application: Application) -> None:
     from services import ollama_service, gemini_service, openrouter_service
 
     results = await asyncio.gather(
-        ollama_service.check_connection(),
-        openrouter_service.check_connection(),
+        ollama_service.check_status(),
+        openrouter_service.check_status(),
         return_exceptions=True
     )
     

@@ -1,5 +1,6 @@
 import re
 import logging
+import telegram # Add this import
 from typing import List, Dict, Any
 from markdown_it import MarkdownIt
 
@@ -7,7 +8,27 @@ logger = logging.getLogger(__name__)
 
 md = MarkdownIt("commonmark", {"breaks": True, "html": False}).enable('table')
 
-from telegram.helpers import escape_markdown
+def sanitize_text_characters(text: str) -> str:
+    """
+    Replaces various Unicode characters with their standard ASCII equivalents.
+    This should only be applied to plain text, not code blocks.
+    """
+    if not isinstance(text, str):
+        return text
+    
+    replacements = {
+        '‑': '-',  # Non-breaking hyphen to standard hyphen
+        '•': '- ',
+        ' ': ' ',  # Narrow no-break space to standard space
+        '“': '"',  # Smart quote to standard quote
+        '”': '"',  # Smart quote to standard quote
+        '‘': "'",  # Smart quote to standard quote
+        '’': "'",  # Smart quote to standard quote
+    }
+    for unicode_char, ascii_char in replacements.items():
+        text = text.replace(unicode_char, ascii_char)
+        
+    return text
 
 class TelegramV2Renderer:
     def __init__(self):
@@ -32,7 +53,8 @@ class TelegramV2Renderer:
                 handler(child, token.children, -1)
 
     def render_text(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
-        self.text += escape_markdown(token.content, version=2)
+        sanitized_content = sanitize_text_characters(token.content)
+        self.text += telegram.helpers.escape_markdown(sanitized_content, version=2)
 
     def render_paragraph_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): pass
     def render_paragraph_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
@@ -68,6 +90,9 @@ class TelegramV2Renderer:
             self.text += '\\- ' # Escaped hyphen for unordered list
     def render_list_item_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self.text += '\n'
 
+    def render_softbreak(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
+        self.text += '\n'
+
     def render_inline(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self.render_default(token, tokens, index)
 
     def render_strong_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self.text += '*'
@@ -77,7 +102,7 @@ class TelegramV2Renderer:
     def render_em_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self.text += '_'
 
     def render_code_inline(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
-        self.text += f'`{escape_markdown(token.content, version=2)}`'
+        self.text += f'`{telegram.helpers.escape_markdown(token.content, version=2)}`'
 
     def render_fence(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
         lang = token.info.split()[0] if token.info else ''
@@ -89,7 +114,7 @@ class TelegramV2Renderer:
         self.link_href = token.attrs.get('href', '')
     def render_link_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
         href = self.link_href or ''
-        self.text += f']({escape_markdown(href, version=2)})'
+        self.text += f']({telegram.helpers.escape_markdown(href, version=2)})'
         self.link_href = None
 
 def format_for_telegram_v2(markdown_text: str) -> str:
@@ -101,6 +126,17 @@ def parse_markdown_to_ast(markdown_text: str) -> List[Dict[str, Any]]:
 
 def render_ast_to_telegram_v2(tokens: List[Dict[str, Any]]) -> str:
     return TelegramV2Renderer().render(tokens)
+
+def replace_html_tags(text: str) -> str:
+    """
+    Replaces <br> tags with newlines.
+    """
+    if not isinstance(text, str):
+        return text
+
+    # Replace <br> tags with newlines
+    text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
+    return text
 
 def split_document_ast_aware(tokens: List, max_len: int = 4096) -> List[List]:
     """

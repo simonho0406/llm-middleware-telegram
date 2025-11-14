@@ -36,10 +36,22 @@ default_max_context_tokens: 100000
 context_token_output_buffer: 10000
 
 # --- Custom OpenAI-Compatible Providers ---
+#
+# This section allows you to add any provider that uses the OpenAI API format.
+# For each provider, you need to define its 'name', 'base_url', 'default_model',
+# and the 'api_key' environment variable that holds the authentication token.
+#
+# The 'api_key' value should be the NAME of the environment variable you set in your .env file.
+# For example, if you have 'CUSTOM_PROVIDER_API_KEY_GROQ' in your .env file, you would put:
+#   api_key: "CUSTOM_PROVIDER_API_KEY_GROQ"
+#
+# The 'base_url' is the entry point for the provider's API.
+#
 custom_openai_providers:
   # Groq - Free tier with fast inference
   - name: "groq"
     base_url: "https://api.groq.com/openai/v1"
+    api_key: "CUSTOM_PROVIDER_API_KEY_GROQ" # Matches the variable in .env.example
     default_model: "llama-3.3-70b-versatile"
     enable_streaming: true
     allowed_models:
@@ -51,18 +63,21 @@ custom_openai_providers:
   # NVIDIA NIM - Free tier with 1000 credits
   - name: "nvidia"
     base_url: "https://integrate.api.nvidia.com/v1"
+    api_key: "CUSTOM_PROVIDER_API_KEY_NVIDIA" # Matches the variable in .env.example
     default_model: "nvidia/llama-3.3-nemotron-70b-instruct"
     enable_streaming: false  # Disable streaming for stability
     allowed_models:
-      - "nvidia/llama-3.3-nemotron-70b-instruct"
+      - "nvidia/llama-3.3-nemotron-super-49b-v1.5"
       - "meta/llama3-70b-instruct"
       - "meta/llama3-8b-instruct"
 
-  # Requesty - DISABLED for development (paid service)
-  # - name: "requesty"
-  #   base_url: "https://router.requesty.ai/v1"
-  #   default_model: "openai/gpt-4o"
-  #   enabled: false
+  # --- Example of a disabled provider ---
+  # - name: "anyscale"
+  #   base_url: "https://api.endpoints.anyscale.com/v1"
+  #   api_key: "CUSTOM_PROVIDER_API_KEY_ANYSCALE"
+  #   default_model: "mistralai/Mixtral-8x7B-Instruct-v0.1"
+  #   enabled: false # This provider will be ignored by the bot
+
 
 # --- Expert Panel Configuration ---
 expert_panel:
