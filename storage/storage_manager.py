@@ -15,7 +15,7 @@ else:
     from . import database_storage as backend
 
 # Expose the functions from the chosen backend
-init = backend.init
+init = backend.init_database
 save_message = backend.save_message
 get_thread_history = backend.get_thread_history
 set_thread_history = backend.set_thread_history

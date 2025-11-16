@@ -12,6 +12,7 @@ default_ollama_model: "qwq"
 
 # --- Gemini Configuration (Free Tier: 5 RPM / 25 RPD) ---
 default_gemini_model: "gemini-1.5-flash-latest"  # Using flash for better free tier compatibility
+max_output_tokens: 8192
 gemini_ask_all_models:
   - "gemini-1.5-flash-latest"
   - "gemini-1.5-pro-latest"
@@ -81,6 +82,9 @@ custom_openai_providers:
 
 # --- Expert Panel Configuration ---
 expert_panel:
+  # Enable/disable the advanced "Conversational Research" feature
+  advanced_search_panel: false
+  
   # Master & Apprentice Architecture Quality Settings
   quality_threshold: 85
   max_refinement_iterations: 3
@@ -114,7 +118,7 @@ expert_panel:
 
 # --- Web Search Configuration ---
 web_search:
-  provider: "tavily"
+  provider: "google"
 
 # --- Rate Limiting Configuration ---
 # Conservative limits to respect free tier quotas

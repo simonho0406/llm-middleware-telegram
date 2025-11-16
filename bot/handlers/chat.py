@@ -1,7 +1,7 @@
 import logging
 import asyncio
 import re
-from telegram import Update, constants
+from telegram import Update, constants, error
 from telegram.ext import MessageHandler, filters, ContextTypes
 import config
 from storage import storage_manager
@@ -61,7 +61,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             prompt=message_text,
             current_thread_id=current_thread_id,
         )
-    except telegram.error.NetworkError as e:
+    except error.NetworkError as e:
         logger.error(f"Network error in handle_message: {e}")
         try:
             await send_safe_message(context, update, "A network error occurred, please try again.")

@@ -8,7 +8,7 @@ from telegram.error import TimedOut
 from httpx import ConnectTimeout
 from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, MessageHandler, filters
 from telegram import BotCommandScopeChat
-# force rebuild
+
 from utils import text_processing
 from utils.llm_utilities import get_robust_llm_response, get_expert_panel_fallback_config
 from telegram import constants
@@ -27,6 +27,78 @@ AWAITING_FOLLOW_UP, PANEL_IN_PROGRESS = range(2)
 
 logger = logging.getLogger(__name__)
 
+
+async def _plan_deep_dive_searches(
+    orchestrator_provider: str,
+    orchestrator_model: str,
+    user_prompt: str,
+    original_query: str,
+    initial_results: str,
+    timeout: int,
+    fallback_provider: str,
+    fallback_model: str
+) -> list[str]:
+    """
+    Uses an LLM to plan deep-dive search queries based on initial search results.
+    """
+    logger.info("Planning deep-dive searches...")
+    plan_prompt_template = config.PROMPTS.get_prompt('panel_orchestrator_analyze')
+    plan_prompt = plan_prompt_template.format(
+        user_prompt=user_prompt,
+        original_query=original_query,
+        tavily_results=initial_results
+    )
+
+    llm_result = await get_robust_llm_response(
+        provider_name=orchestrator_provider,
+        model=orchestrator_model,
+        prompt=plan_prompt,
+        history=None,
+        role_name='Deep Dive Planner',
+        request_timeout=timeout,
+        fallback_provider=fallback_provider,
+        fallback_model=fallback_model
+    )
+    
+    response_text = llm_result['response']
+    if "[Error:" in response_text:
+        logger.error(f"Deep-dive planning failed: {response_text}")
+        return []
+
+    try:
+        # Strategy 1: Look for a JSON array within a markdown code block
+        match = re.search(r"```json\s*(\[.*?\])\s*```", response_text, re.DOTALL)
+        if not match:
+            # Try without the json specifier
+            match = re.search(r"```\s*(\[.*?\])\s*```", response_text, re.DOTALL)
+
+        json_str = ""
+        if match:
+            json_str = match.group(1)
+        else:
+            # Strategy 2: Fallback to finding the first '[' and last ']'
+            start_index = response_text.find('[')
+            end_index = response_text.rfind(']')
+            if start_index != -1 and end_index != -1 and end_index > start_index:
+                json_str = response_text[start_index:end_index+1]
+
+        if not json_str:
+            # If no JSON is found, log and return empty list
+            logger.error("No valid JSON array found in the planner's response.")
+            logger.debug(f"Problematic response: {response_text}")
+            return []
+
+        # The response is expected to be a JSON list of strings
+        deep_dive_queries = json.loads(json_str)
+        if isinstance(deep_dive_queries, list) and all(isinstance(q, str) for q in deep_dive_queries):
+            logger.info(f"Planned {len(deep_dive_queries)} deep-dive searches.")
+            return deep_dive_queries
+        else:
+            logger.error(f"Deep-dive planning returned invalid format: {json_str}")
+            return []
+    except json.JSONDecodeError:
+        logger.error(f"Failed to decode JSON from deep-dive planner: {json_str}")
+        return []
 
 async def _run_refinement_cycle(
     update: Update, context: ContextTypes.DEFAULT_TYPE, proposer_task, critic_task, user_prompt, full_history, placeholder_msg, panel_results,
@@ -426,9 +498,20 @@ async def _run_panel_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE
     except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
         logger.warning(f"Failed to update placeholder message (Decomposing task): {e}")
     
-    orchestrator_service = providers.get_service_for_provider(orchestrator_provider)
-    if orchestrator_service is None:
-        raise ValueError(f"Orchestrator service '{orchestrator_provider}' is not available.")
+    try:
+        orchestrator_service = providers.get_service_for_provider(orchestrator_provider)
+        if orchestrator_service is None:
+            raise ValueError(f"Orchestrator service '{orchestrator_provider}' is not available.")
+    except ValueError as e:
+        logger.error(f"Configuration error: {e}")
+        try:
+            await placeholder_msg.edit_text(
+                f"⚠️ Configuration Error: {e}. Please check your panel configuration.",
+                parse_mode=None
+            )
+        except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
+            logger.warning(f"Failed to update placeholder message (Config error): {e}")
+        return {}, f"[System Error: {e}]", ""
 
     plan_template = config.PROMPTS.get_prompt('panel_orchestrator_plan')
     meta_prompt = plan_template.format(
@@ -559,62 +642,134 @@ async def _run_panel_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     # If search is required, check user setting and conditionally perform it
     if requires_search and search_query:
-        # Check if auto-search is enabled for panel discussions
-        autosearch_enabled = await storage_manager.get_user_setting(
-            chat_id, 
-            'autosearch_panel_discussion', 
-            USER_SETTINGS['autosearch_panel_discussion']['default']
-        )
-        
-        if autosearch_enabled:
-            try:
-                await placeholder_msg.edit_text(f"Orchestrator requested web search: \"{search_query}\"...", parse_mode=None)
-            except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
-                logger.warning(f"Failed to update placeholder message (Orchestrator requested web search): {e}")
-            search_results = await web_search_service.perform_search(search_query)
-            
-            if search_results.startswith("Error:"):
-                try:
-                    await placeholder_msg.edit_text(f"⚠️ Web search failed: {search_results}", parse_mode=None)
-                except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
-                    logger.warning(f"Failed to update placeholder message (Web search failed): {e}")
-                await asyncio.sleep(2)
-            else:
-                # Find the Proposer's task and augment its prompt with search results
-                proposer_task = next((task for task in tasks_list if task.get("role") == "Proposer"), None)
-                if proposer_task:
-                    original_prompt = proposer_task.get("prompt", "")
-                    augmented_prompt = (
-                        f"Based on the following fresh web search results, please address the user's original query.\n\n"
-                        f"--- WEB SEARCH RESULTS ---\n{search_results}\n\n"
-                        f"--- ORIGINAL TASK ---\n{original_prompt}"
-                    )
-                    proposer_task["prompt"] = augmented_prompt
-                    logger.info("Augmented Proposer's prompt with web search results.")
-                else:
-                    logger.warning("Could not find Proposer task to augment with search results.")
-        else:
-            # Auto-search is disabled - inform the Proposer but don't perform search
-            logger.info(f"Auto-search disabled for panel discussion. Skipping search for: '{search_query}'")
-            try:
-                await placeholder_msg.edit_text(f"Auto-search disabled. Proceeding without web search...", parse_mode=None)
-            except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
-                logger.warning(f"Failed to update placeholder message (Auto-search disabled): {e}")
-            
-            # Find the Proposer's task and inform them about the disabled search
-            proposer_task = next((task for task in tasks_list if task.get("role") == "Proposer"), None)
-            if proposer_task:
-                original_prompt = proposer_task.get("prompt", "")
-                informed_prompt = (
-                    f"Note: The orchestrator suggested searching for '{search_query}' but auto-search is disabled. "
-                    f"Please provide your best answer based on existing knowledge.\n\n"
-                    f"--- ORIGINAL TASK ---\n{original_prompt}"
-                )
-                proposer_task["prompt"] = informed_prompt
-                logger.info("Informed Proposer about disabled search.")
-            await asyncio.sleep(1)  # Brief pause for user feedback
+                        # Check if advanced search is enabled for panel discussions
+                        advanced_search_enabled = await storage_manager.get_user_setting(
+                            chat_id,
+                            'advanced_search_panel',
+                            USER_SETTINGS['advanced_search_panel']['default']
+                        )
+                
+                        # Check if basic auto-search is enabled (if advanced is not)
+                        autosearch_enabled = await storage_manager.get_user_setting(
+                            chat_id,
+                            'autosearch_panel',
+                            USER_SETTINGS['autosearch_panel']['default']
+                        )
+                
 
-    # The retry logic and error handling is now handled by get_robust_llm_response
+                
+
+                        if advanced_search_enabled:
+                            try:
+                                await placeholder_msg.edit_text(f"Orchestrator requested advanced web search: \"{search_query}\"...", parse_mode=None)
+                            except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
+                                logger.warning(f"Failed to update placeholder message (Orchestrator requested advanced web search): {e}")
+                            
+                            # Perform initial search
+                            initial_search_results_data = await web_search_service.perform_search(search_query)
+                            
+                            if initial_search_results_data.get('status') == 'error':
+                                error_message = initial_search_results_data.get('message', 'Unknown error')
+                                logger.error(f"Initial web search failed: {error_message}")
+                                try:
+                                    await placeholder_msg.edit_text(f"⚠️ Initial web search failed: {error_message}", parse_mode=None)
+                                except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
+                                    logger.warning(f"Failed to update placeholder message (Initial web search failed): {e}")
+                                await asyncio.sleep(2)
+                                # Proceed without search results if initial search fails
+                                initial_search_results = ""
+                            else:
+                                initial_search_results = initial_search_results_data.get('content', '')
+
+                            # Plan deep-dive searches
+                            deep_dive_queries = await _plan_deep_dive_searches(
+                                orchestrator_provider, orchestrator_model, user_prompt, search_query, initial_search_results, orchestrator_timeout, fallback_provider, fallback_model
+                            )
+                            
+                            deep_dive_results = {}
+                            if deep_dive_queries:
+                                try:
+                                    await placeholder_msg.edit_text(f"Executing {len(deep_dive_queries)} parallel deep-dive searches...", parse_mode=None)
+                                except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
+                                    logger.warning(f"Failed to update placeholder message (Executing deep-dive searches): {e}")
+                                deep_dive_results = await web_search_service.execute_parallel_google_searches(deep_dive_queries)
+                                logger.info(f"Completed {len(deep_dive_results)} deep-dive searches.")
+                            
+                            # Combine all search results into a single dossier
+                            research_dossier_parts = []
+                            if initial_search_results:
+                                research_dossier_parts.append(f"--- INITIAL WEB SEARCH RESULTS ---\n{initial_search_results}")
+                            if deep_dive_results:
+                                for query, result in deep_dive_results.items():
+                                    research_dossier_parts.append(f"--- DEEP DIVE SEARCH: {query} ---\n{result}")
+                            
+                            research_dossier = "\n\n".join(research_dossier_parts)
+                            
+                            # Augment Proposer's prompt with the combined research dossier
+                            proposer_task = next((task for task in tasks_list if task.get("role") == "Proposer"), None)
+                            if proposer_task:
+                                original_prompt = proposer_task.get("prompt", "")
+                                augmented_prompt = (
+                                    f"Based on the following comprehensive research dossier, please address the user's original query.\n\n"
+                                    f"--- RESEARCH DOSSIER ---\n{research_dossier}\n\n"
+                                    f"--- ORIGINAL TASK ---\n{original_prompt}"
+                                )
+                                proposer_task["prompt"] = augmented_prompt
+                                logger.info("Augmented Proposer's prompt with comprehensive research dossier.")
+                                logger.info("Successfully created research dossier.") # Log for test assertion
+                            else:
+                                logger.warning("Could not find Proposer task to augment with research dossier.")
+
+                        elif autosearch_enabled: # Only basic auto-search is enabled
+                            try:
+                                await placeholder_msg.edit_text(f"Orchestrator requested web search: \"{search_query}\"...", parse_mode=None)
+                            except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
+                                logger.warning(f"Failed to update placeholder message (Orchestrator requested web search): {e}")
+                            search_results_data = await web_search_service.perform_search(search_query)
+                            
+                            if search_results_data.get('status') == 'error':
+                                error_message = search_results_data.get('message', 'Unknown error')
+                                logger.error(f"Web search failed: {error_message}")
+                                try:
+                                    await placeholder_msg.edit_text(f"⚠️ Web search failed: {error_message}", parse_mode=None)
+                                except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
+                                    logger.warning(f"Failed to update placeholder message (Web search failed): {e}")
+                                await asyncio.sleep(2)
+                            else:
+                                search_results = search_results_data.get('content', '')
+                                # Find the Proposer's task and augment its prompt with search results
+                                proposer_task = next((task for task in tasks_list if task.get("role") == "Proposer"), None)
+                                if proposer_task:
+                                    original_prompt = proposer_task.get("prompt", "")
+                                    augmented_prompt = (
+                                        f"Based on the following fresh web search results, please address the user's original query.\n\n"
+                                        f"--- WEB SEARCH RESULTS ---\n{search_results}\n\n"
+                                        f"--- ORIGINAL TASK ---\n{original_prompt}"
+                                    )
+                                    proposer_task["prompt"] = augmented_prompt
+                                    logger.info("Augmented Proposer's prompt with web search results.")
+                                else:
+                                    logger.warning("Could not find Proposer task to augment with search results.")
+                        else:
+                            # Auto-search is disabled - inform the Proposer but don't perform search
+                            logger.info(f"Auto-search disabled for panel discussion. Skipping search for: '{search_query}'")
+                            try:
+                                await placeholder_msg.edit_text(f"Auto-search disabled. Proceeding without web search...", parse_mode=None)
+                            except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
+                                logger.warning(f"Failed to update placeholder message (Auto-search disabled): {e}")
+                            
+                            # Find the Proposer's task and inform them about the disabled search
+                            proposer_task = next((task for task in tasks_list if task.get("role") == "Proposer"), None)
+                            if proposer_task:
+                                original_prompt = proposer_task.get("prompt", "")
+                                informed_prompt = (
+                                    f"Note: The orchestrator suggested searching for '{search_query}' but auto-search is disabled. "
+                                    f"Please provide your best answer based on existing knowledge.\n\n"
+                                    f"--- ORIGINAL TASK ---\n{original_prompt}"
+                                )
+                                proposer_task["prompt"] = informed_prompt
+                                logger.info("Informed Proposer about disabled search.")
+                            await asyncio.sleep(1)  # Brief pause for user feedback    # The retry logic and error handling is now handled by get_robust_llm_response
 
     # --- 2. Master & Apprentice Architecture: Iterative Quality Loop ---
     quality_threshold = panel_config.get('quality_threshold', 85)

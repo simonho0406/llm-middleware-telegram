@@ -91,6 +91,24 @@ async def _google_search(query: str) -> dict:
         logger.exception(f"An unexpected error occurred during Google Search: {e}")
         return {'status': 'error', 'message': "An unexpected error occurred during the Google search."}
 
+import asyncio
+
+async def execute_parallel_google_searches(queries: list[str]) -> dict:
+    """
+    Executes multiple Google searches concurrently and returns a dictionary of successful results.
+    """
+    tasks = [_google_search(query) for query in queries]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    successful_results = {}
+    for query, result in zip(queries, results):
+        if not isinstance(result, Exception) and result.get('status') == 'success':
+            successful_results[query] = result['content']
+        elif isinstance(result, Exception):
+            logger.error(f"Error during parallel Google search for '{query}': {result}", exc_info=True)
+            
+    return successful_results
+
 async def perform_search(query: str) -> dict:
     """
     Dispatcher function to perform a web search using the configured provider.

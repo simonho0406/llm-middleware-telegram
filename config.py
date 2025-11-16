@@ -89,6 +89,9 @@ def get_default_ollama_model():
 def get_default_gemini_model():
     return _yaml_config.get("default_gemini_model", "gemini-1.5-pro-latest")
 
+def get_gemini_max_output_tokens():
+    return _yaml_config.get("gemini", {}).get("max_output_tokens", 8192)
+
 def get_default_openrouter_model():
     return _yaml_config.get("default_openrouter_model", "mistralai/mistral-7b-instruct")
 

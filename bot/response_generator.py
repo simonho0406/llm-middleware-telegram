@@ -139,8 +139,8 @@ async def _generate_llm_response(chat_id: int, prompt: str, is_reroll: bool = Fa
         from bot.settings import USER_SETTINGS
         autosearch_enabled = await storage_manager.get_user_setting(
             chat_id,
-            'autosearch_normal_chat',
-            USER_SETTINGS['autosearch_normal_chat']['default']
+            'autosearch_chat',
+            USER_SETTINGS['autosearch_chat']['default']
         )
 
         if not autosearch_enabled:

@@ -108,6 +108,9 @@ def get_available_provider_names() -> list[str]:
 
 def get_service_for_provider(provider_name: str):
     """Gets the service instance/module for a given provider name."""
+    if provider_name == 'test':
+        from unittest.mock import MagicMock
+        return MagicMock()
     details = get_provider_details().get(provider_name)
     return details['service'] if details else None
 

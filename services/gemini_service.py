@@ -32,9 +32,14 @@ async def generate_response(model: str, prompt: str, context_history: Optional[L
             genai.configure(api_key=key)
             gemini_model = genai.GenerativeModel(model)
             
+            generation_config = {
+                "max_output_tokens": config.get_gemini_max_output_tokens(),
+            }
+
             response_stream = await gemini_model.generate_content_async(
                 contents=full_prompt,
                 stream=True,
+                generation_config=generation_config,
                 request_options={'timeout': request_timeout or config.get_request_timeout_seconds()}
             )
 

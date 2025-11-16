@@ -2,6 +2,7 @@ import logging
 import asyncio
 import time
 import hashlib
+import telegram
 
 from telegram import (
     Update,
