@@ -22,11 +22,14 @@ class OpenAICompatibleService:
         if not self.allowed_models:
             logger.warning(f"Allowed models not configured for provider '{self.provider_name}'. Using default empty list.")
 
+        self.api_version = provider_config.get('api_version')
+
         try:
             self.client = AsyncOpenAI(
                 base_url=self.base_url,
                 api_key=self.api_key,
                 http_client=httpx.AsyncClient(timeout=config.get_request_timeout_seconds()),
+                default_headers={"OpenAI-Version": self.api_version} if self.api_version else None,
             )
             logger.info(f"OpenAICompatibleService initialized for provider '{self.provider_name}' with base URL '{self.base_url}'")
         except Exception as e:
