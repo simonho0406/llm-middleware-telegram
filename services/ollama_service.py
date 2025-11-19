@@ -109,7 +109,8 @@ async def generate_response(model: str, prompt: str, context_history: Optional[L
     messages = []
     if context_history:
         messages.extend(context_history)
-    messages.append({'role': 'user', 'content': prompt})
+    if prompt:
+        messages.append({'role': 'user', 'content': prompt})
 
     logger.info(f"Sending request to Ollama model '{model}'")
     try:

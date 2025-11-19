@@ -83,7 +83,8 @@ class OpenAICompatibleService:
         messages = []
         if context_history:
             messages.extend(context_history)
-        messages.append({"role": "user", "content": prompt})
+        if prompt:
+            messages.append({"role": "user", "content": prompt})
 
         logger.debug(f"[{self.provider_name}] Sending request to model '{model}' with {len(messages)} messages.")
         retries = self.max_retries

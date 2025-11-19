@@ -9,6 +9,7 @@ from telegram.ext import (
     ContextTypes,
 )
 from telegram.error import BadRequest
+from telegram.helpers import escape_markdown
 from bot.providers import get_available_provider_names, get_service_for_provider
 from utils.text_processing import parse_markdown_to_ast, split_document_ast_aware, render_ast_to_telegram_v2
 from bot.messaging import send_safe_message
@@ -219,7 +220,7 @@ async def run_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 discussion_transcript.append({"role": "assistant", "content": f"Error: Could not find service for provider '{provider_name}'."})
                 continue
 
-            turn_info = f"Turn {i+1}/{len(selected_models)}: `{escape_markdown_v2(model_info['name'])}` is thinking..."
+            turn_info = f"Turn {i+1}/{len(selected_models)}: `{escape_markdown(model_info['name'], version=2)}` is thinking..."
             await send_safe_message(context, update, turn_info, is_edit=True)
 
             # Create temporary history copy

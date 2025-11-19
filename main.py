@@ -31,9 +31,18 @@ async def run_startup_checks(application: Application) -> None:
     )
     
     service_names = ["Ollama", "OpenRouter"]
+    service_names = ["Ollama", "OpenRouter"]
     for name, result in zip(service_names, results):
-        if isinstance(result, Exception) or not result:
-            logger.warning(f"{name} connection check failed. Features may be limited. Error: {result}")
+        if isinstance(result, Exception):
+            logger.warning(f"{name} connection check failed with exception: {result}")
+        elif isinstance(result, tuple) and len(result) == 2:
+            is_healthy, message = result
+            if not is_healthy:
+                 logger.warning(f"{name} connection check failed. Features may be limited. Message: {message}")
+            else:
+                 logger.info(f"{name} connection check successful. Message: {message}")
+        elif not result:
+            logger.warning(f"{name} connection check failed. Result: {result}")
         else:
             logger.info(f"{name} connection check successful.")
 

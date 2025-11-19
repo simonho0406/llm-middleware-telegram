@@ -68,28 +68,54 @@ def count_tokens(text: str) -> int:
         # Emergency fallback
         return len(text) // 4
 
+import config
+
 def get_model_context_limits(model: str, provider: str) -> ModelContextLimits:
-    """Get context limits for a specific model and provider."""
-    # Try exact model match first
+    """
+    Get context limits for a specific model and provider.
+    Respects the global default_max_context_tokens from config as a hard cap.
+    """
+    # 1. Determine the physical/theoretical limits of the model
     if model in MODEL_CONTEXT_LIMITS:
-        return MODEL_CONTEXT_LIMITS[model]
+        base_limits = MODEL_CONTEXT_LIMITS[model]
+    else:
+        # Unknown model: Assume it supports exactly what the user configured
+        # This allows the user_max_tokens to be the sole limiting factor
+        logger.info(f"No hardcoded limits for {model}, defaulting to user configuration.")
+        
+        # Use values directly from config.yaml
+        # This ensures no hardcoded magic numbers dictate the fallback behavior
+        user_max_tokens_config = config.get_default_max_context_tokens()
+        user_buffer_config = config.get_context_token_output_buffer()
+        
+        base_limits = ModelContextLimits(
+            max_context_tokens=user_max_tokens_config,
+            max_completion_tokens=user_buffer_config,
+            buffer_tokens=user_buffer_config,
+            supports_long_context=True
+        )
 
-    # Try provider-specific defaults
-    provider_defaults = {
-        "groq": ModelContextLimits(32768, 4096, 4096, False),
-        "openrouter": ModelContextLimits(32768, 4096, 4096, False),
-        "nvidia": ModelContextLimits(131072, 8192, 8192, True),
-        "gemini": ModelContextLimits(1048576, 8192, 8192, True),
-        "ollama": ModelContextLimits(32768, 4096, 4096, False)
-    }
-
-    if provider in provider_defaults:
-        logger.info(f"Using provider default context limits for {provider}/{model}")
-        return provider_defaults[provider]
-
-    # Final fallback
-    logger.warning(f"No context limits found for {provider}/{model}, using default")
-    return MODEL_CONTEXT_LIMITS["_default"]
+    # 2. Apply User Configuration Cap
+    # We want to use the SMALLER of the model's physical limit or the user's configured limit.
+    # e.g. Model supports 2M, User wants 100k -> Use 100k
+    # e.g. Model supports 8k, User wants 100k -> Use 8k (physical limit)
+    
+    user_max_tokens = config.get_default_max_context_tokens()
+    
+    # Create a new object to avoid mutating the global constants
+    effective_max_context = min(base_limits.max_context_tokens, user_max_tokens)
+    
+    # Ensure buffer doesn't swallow the whole context if user sets a very low limit
+    effective_buffer = base_limits.buffer_tokens
+    if effective_buffer >= effective_max_context:
+        effective_buffer = int(effective_max_context * 0.2) # Reduce buffer to 20% if it's too large
+        
+    return ModelContextLimits(
+        max_context_tokens=effective_max_context,
+        max_completion_tokens=base_limits.max_completion_tokens,
+        buffer_tokens=effective_buffer,
+        supports_long_context=base_limits.supports_long_context
+    )
 
 # Removed complex user strategy selection - now using simple automatic truncation
 

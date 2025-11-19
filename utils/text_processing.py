@@ -78,7 +78,8 @@ class TelegramV2Renderer:
         self.is_ordered_list = True # Set flag for ordered list
     def render_ordered_list_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
         self.list_level -= 1
-        self.ordered_list_stack.pop()
+        if self.ordered_list_stack:
+            self.ordered_list_stack.pop()
         if self.list_level == 0: self.text += '\n'
 
     def render_list_item_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):

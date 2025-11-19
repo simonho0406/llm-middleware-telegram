@@ -24,7 +24,9 @@ async def generate_response(model: str, prompt: str, context_history: Optional[L
             content = msg.get('content', '')
             gemini_history.append({'role': role, 'parts': [content]})
     
-    full_prompt = gemini_history + [{'role': 'user', 'parts': [prompt]}]
+    full_prompt = gemini_history
+    if prompt:
+        full_prompt.append({'role': 'user', 'parts': [prompt]})
 
     for i, key in enumerate(keys):
         try:
