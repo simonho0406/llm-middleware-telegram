@@ -94,6 +94,9 @@ class TelegramV2Renderer:
     def render_softbreak(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
         self.text += '\n'
 
+    def render_hardbreak(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
+        self.text += '\n'
+
     def render_inline(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self.render_default(token, tokens, index)
 
     def render_strong_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self.text += '*'

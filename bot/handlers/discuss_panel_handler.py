@@ -1,6 +1,7 @@
 import logging
 import re
 import asyncio
+import telegram
 import json
 from telegram import Update, BotCommand
 from telegram.error import BadRequest
@@ -1148,7 +1149,7 @@ async def reroll_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         except Exception as e:
             logger.error(f"Panel workflow failed during reroll: {e}", exc_info=True)
             # Escape the error message for safe display in MarkdownV2
-            escaped_error = text_processing.escape_markdown_v2(str(e))
+            escaped_error = telegram.helpers.escape_markdown(str(e), version=2)
             error_message = f"An error occurred during the reroll: `{escaped_error}`"
             try:
                 if placeholder_msg:
@@ -1160,8 +1161,8 @@ async def reroll_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             except Exception as send_e:
                 logger.error(f"Failed to send error message to user after reroll failure: {send_e}")
             
-            await _cleanup_discussion_state(context, chat_id)
-            return ConversationHandler.END
+            # Do not end the conversation on reroll error, allow user to retry
+            return AWAITING_FOLLOW_UP
 
         if panel_state['full_transcript'] and panel_state['full_transcript'][-1]['role'] == 'assistant':
             panel_state['full_transcript'].pop()
@@ -1186,6 +1187,16 @@ async def timeout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     chat_id = context.job.chat_id
     logger.info(f"Panel discussion timed out for chat {chat_id}.")
     if 'panel_state' in context.user_data:
+        # Attempt to save whatever final answer we have before timing out
+        panel_state = context.user_data['panel_state']
+        final_answer = panel_state.get("final_answer")
+        if final_answer:
+            try:
+                await storage_manager.save_message(chat_id, 'assistant:panel', final_answer)
+                logger.info(f"Saved final answer for timed-out panel in chat {chat_id}")
+            except Exception as e:
+                logger.error(f"Failed to save final answer during timeout for chat {chat_id}: {e}")
+
         await context.bot.send_message(chat_id, "Panel discussion has timed out due to inactivity.", parse_mode=None)
         await _cleanup_discussion_state(context, chat_id)
     return ConversationHandler.END

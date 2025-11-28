@@ -22,3 +22,4 @@ set_thread_history = backend.set_thread_history
 get_all_chat_ids = backend.get_all_chat_ids
 get_user_setting = backend.get_user_setting
 set_user_setting = backend.set_user_setting
+get_current_thread_id = backend.get_current_thread_id
