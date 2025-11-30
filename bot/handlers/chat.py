@@ -76,11 +76,13 @@ async def handle_edited_message(update: Update, context: ContextTypes.DEFAULT_TY
     if not update.edited_message:
         return
 
-    # Check if a panel discussion is active. If so, ignore the edit.
+    # Check if a panel discussion is active.
     if context.user_data and 'panel_state' in context.user_data:
         chat_id = update.effective_chat.id
         log_prefix = f"(Chat {chat_id}) "
-        logger.info(f"{log_prefix}Ignoring edit because a panel discussion is active.")
+        logger.info(f"{log_prefix}Delegating edit to panel handler.")
+        from bot.handlers import discuss_panel_handler
+        await discuss_panel_handler.handle_panel_edit(update, context)
         return
 
     chat_id = update.effective_chat.id
@@ -89,6 +91,30 @@ async def handle_edited_message(update: Update, context: ContextTypes.DEFAULT_TY
     log_prefix = f"(Chat {chat_id}) "
 
     logger.info(f"{log_prefix}User {user_id} edited a message.")
+
+    # Check if the edited message is a command
+    if edited_text.startswith('/'):
+        logger.info(f"{log_prefix}Edit detected as command: '{edited_text}'. Re-processing as new message.")
+        # Create a shallow copy of the update but treat the edited message as a new message
+        # We need to construct a new Update object to avoid modifying the original in place in a way that might confuse PTB
+        # However, PTB updates are immutable-ish.
+        # The cleanest way is to manually trigger the application's update processing with a modified update
+        
+        # Construct a new Update. We can't easily instantiate Update with all fields, 
+        # but we can try to rely on the fact that handlers look at update.message.
+        # A safer approach for PTB v20+ is to use the existing update but 'move' the edited_message to message.
+        
+        import copy
+        new_update = copy.copy(update)
+        new_update.message = update.edited_message
+        new_update.edited_message = None
+        
+        # We must ensure we don't trigger an infinite loop. 
+        # Since we set edited_message to None, the edited_message_handler shouldn't trigger.
+        # The CommandHandler or MessageHandler should trigger.
+        
+        await context.application.process_update(new_update)
+        return
 
     history = await storage_manager.get_thread_history(chat_id)
 

@@ -50,7 +50,17 @@ async def run_startup_checks(application: Application) -> None:
 
 def main() -> None:
     """Create the application, register handlers, and start the bot."""
-    logger.info("Starting bot initialization...")
+    import time
+    from telegram.error import NetworkError
+    
+    # Imports for handlers
+    from bot.handlers.misc_commands import misc_handlers
+    from bot.handlers.ask_selected_handler import ask_selected_handlers
+    from bot.handlers.chat import chat_handler, edited_message_handler
+    from bot.handlers.discuss_handler import discuss_conv_handler
+    from bot.handlers.discuss_panel_handler import discuss_panel_conv_handler
+    from bot.handlers.config_handler import config_conv_handler
+    from bot.handlers.configure_panel_handler import configure_panel_conv_handler
 
     async def post_init_with_commands(application: Application):
         logger.info("Initializing provider details...")
@@ -62,26 +72,18 @@ def main() -> None:
         await storage_manager.init()
         logger.info("Storage initialization complete.")
         
-        # Clean up any lingering conversation states that might interfere with ConversationHandlers
+        # Clean up any lingering conversation states
         logger.info("Cleaning up persistent conversation states...")
         try:
-            # PTB stores conversation states in memory but can have stale states after restarts
-            # Clear all user_data that might contain persistent panel_state or other conversation remnants
-            # This is critical for resolving callback query routing failures
-            
-            # Get all active chats to clean their user_data
             all_chat_ids = await storage_manager.get_all_chat_ids()
             if all_chat_ids:
                 for chat_id in all_chat_ids:
-                    # Clear any persistent user_data that might interfere with ConversationHandlers
-                    # This includes panel_state, conversation states, and other cached data
                     if chat_id in application.user_data:
                         old_data = application.user_data[chat_id].copy()
                         application.user_data[chat_id].clear()
                         if old_data:
                             logger.info(f"Cleared persistent user_data for chat {chat_id}: {list(old_data.keys())}")
                     
-                    # Also clear any chat_data that might contain stale states
                     if chat_id in application.chat_data:
                         old_chat_data = application.chat_data[chat_id].copy()
                         application.chat_data[chat_id].clear()
@@ -112,7 +114,7 @@ def main() -> None:
 
         # Run connection checks and set up the new global commands/menu
         await run_startup_checks(application)
-        await setup_bot_commands_and_menu(application) # This now includes the temporary fix
+        await setup_bot_commands_and_menu(application)
 
         try:
             bot_info = await application.bot.get_me()
@@ -121,48 +123,11 @@ def main() -> None:
         except Exception as e:
             logger.error(f"Failed to get bot info: {e}")
 
-    try:
-        app = create_application(post_init_hook=post_init_with_commands)
-
-    except ValueError as e:
-        logger.critical(f"Failed to create Telegram application: {e}. Exiting.")
-        return
-    except Exception as e:
-        logger.critical(f"An unexpected error occurred during application creation: {e}. Exiting.")
-        return
-
-    # --- Register Handlers ---
-    from bot.handlers.misc_commands import misc_handlers
-    from bot.handlers.ask_selected_handler import ask_selected_handlers
-    from bot.handlers.chat import chat_handler, edited_message_handler
-    from bot.handlers.discuss_handler import discuss_conv_handler
-    from bot.handlers.discuss_panel_handler import discuss_panel_conv_handler
-    from bot.handlers.config_handler import config_conv_handler
-    from bot.handlers.configure_panel_handler import configure_panel_conv_handler
-
-    # High-priority group for conversation handlers (group=0)
-    app.add_handler(config_conv_handler, group=0)
-    app.add_handler(discuss_conv_handler, group=0)
-    app.add_handler(discuss_panel_conv_handler, group=0)
-    app.add_handler(configure_panel_conv_handler, group=0)
-    app.add_handler(edited_message_handler, group=0)
-    app.add_handler(chat_handler, group=0)
-    for handler in ask_selected_handlers:
-        app.add_handler(handler, group=0)
-    
-    # Lower-priority group for command handlers (group=1)
-    for handler in misc_handlers:
-        app.add_handler(handler, group=1)
-
-    
-    logger.info("Registered handlers with priority groups")
-
     async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error("Exception while handling an update:", exc_info=context.error)
         if isinstance(update, Update) and update.effective_message:
             error_msg = "Sorry, an internal error occurred. The developers have been notified."
             try:
-                # Try with timeout protection
                 await asyncio.wait_for(
                     update.effective_message.reply_text(error_msg, parse_mode=None),
                     timeout=10.0
@@ -170,7 +135,6 @@ def main() -> None:
             except (asyncio.TimeoutError, Exception) as e:
                 logger.error(f"Failed to send error notification to user: {e}")
                 try:
-                    # Fallback: direct send if reply fails
                     chat_id = update.effective_chat.id if update.effective_chat else None
                     if chat_id:
                         await asyncio.wait_for(
@@ -180,18 +144,38 @@ def main() -> None:
                 except (asyncio.TimeoutError, Exception) as fallback_error:
                     logger.error(f"Fallback error notification also failed: {fallback_error}")
 
-    app.add_error_handler(error_handler)
-    logger.info("Registered global error handler.")
-
-    import time
-    from telegram.error import NetworkError
-
-    logger.info("Starting bot polling...")
+    logger.info("Starting bot polling loop...")
     while True:
         try:
+            logger.info("Creating application...")
+            app = create_application(post_init_hook=post_init_with_commands)
+
+            # Register Handlers
+            # High-priority group for conversation handlers (group=0)
+            app.add_handler(config_conv_handler, group=0)
+            app.add_handler(discuss_conv_handler, group=0)
+            app.add_handler(discuss_panel_conv_handler, group=0)
+            app.add_handler(configure_panel_conv_handler, group=0)
+            app.add_handler(edited_message_handler, group=0)
+            app.add_handler(chat_handler, group=0)
+            for handler in ask_selected_handlers:
+                app.add_handler(handler, group=0)
+            
+            # Lower-priority group for command handlers (group=1)
+            for handler in misc_handlers:
+                app.add_handler(handler, group=1)
+
+            app.add_error_handler(error_handler)
+            logger.info("Registered handlers and error handler.")
+
+            logger.info("Starting polling...")
             app.run_polling(allowed_updates=Update.ALL_TYPES)
             logger.info("Bot stopped normally.")
             break  # Exit loop if stopped normally
+
+        except ValueError as e:
+            logger.critical(f"Failed to create Telegram application: {e}. Exiting.")
+            return
         except NetworkError as e:
             logger.error(f"Telegram NetworkError: {e}. Reconnecting in 10 seconds...")
             time.sleep(10)

@@ -91,6 +91,9 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
     query = " ".join(context.args)
     logger.info(f"{log_prefix}User {user_id} initiated /search with query: '{query}'")
 
+    # Register task for cancellation
+    context.chat_data['llm_task'] = asyncio.current_task()
+
     try:
         if placeholder_message is None:
             placeholder_message = await context.bot.send_message(chat_id, f'Searching the web for: "{query}"...', parse_mode=None)
@@ -107,7 +110,17 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
     search_response = await web_search_service.perform_search(query)
 
     if search_response['status'] == 'error':
-        await placeholder_message.edit_text(f"⚠️ Web search failed: {search_response['message']}", parse_mode=None)
+        keyboard = [[InlineKeyboardButton("🔄 Retry Search", callback_data="retry_search")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # Store the query in user_data for the retry callback
+        context.user_data['last_search_query'] = query
+        
+        await placeholder_message.edit_text(
+            f"⚠️ Web search failed: {search_response['message']}", 
+            parse_mode=None,
+            reply_markup=reply_markup
+        )
         return
     search_results = search_response['content']
 
@@ -147,6 +160,27 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
         logger.info(f"{log_prefix}Search command successful. History updated with original query.")
     except Exception as e:
         logger.error(f"{log_prefix}Failed to save history after search: {e}", exc_info=True)
+
+async def retry_search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles the retry search button click."""
+    query = update.callback_query
+    await query.answer()
+    
+    last_query = context.user_data.get('last_search_query')
+    if not last_query:
+        await send_safe_message(context, update, "⚠️ Could not find the original search query to retry.")
+        return
+
+    # Call search_command again with the stored query
+    # We need to mock context.args because search_command expects it
+    context.args = last_query.split()
+    
+    # Reuse the message if possible, or send a new one. 
+    # search_command sends a new placeholder.
+    # We can delete the old error message to clean up? Or just let search_command handle it.
+    # search_command sends a new message.
+    
+    await search_command(update, context)
 
 async def new_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Starts a new conversation thread with a unique ID."""
@@ -499,6 +533,7 @@ async def provider_status_command(update: Update, context: ContextTypes.DEFAULT_
 misc_handlers = [
     CommandHandler("help", help_command),
     CommandHandler("search", search_command),
+    CallbackQueryHandler(retry_search_callback, pattern="^retry_search$"),
     CommandHandler("reroll", reroll_command),
     CommandHandler("new", new_command),
     CommandHandler("provider", provider_command),

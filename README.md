@@ -73,9 +73,13 @@ This file controls the bot's behavior, default models, and provider definitions.
 *   **/provider:** Switch between configured AI providers.
 *   **/model:** Show and set the model for the current provider.
 *   **/discuss <prompt>:** Starts a sequential, multi-model discussion on a topic.
-*   **/search <query>:** Answers a query using live web search results.
+*   **/search <query>:** Answers a query using live web search results. Includes a "Retry" button for failed searches.
 *   **/threads:** List, switch between, or delete your conversation threads.
 *   **/ask_selected <prompt>:** Query multiple models concurrently with a single prompt.
+
+### Panel Discussion Features
+*   **Refinement via Edit:** You can edit your follow-up messages during a panel discussion to correct mistakes or change direction. The bot will automatically cancel the current generation and restart the round with your updated input.
+*   **Cancellation:** Use `/cancel` at any time to stop a panel discussion immediately.
 
 ## Project Roadmap & Priorities
 
@@ -124,9 +128,8 @@ Development is guided by a strategic roadmap focused on evolving the bot into a 
 *   **Cause:** Transient connectivity issues with Telegram servers or API downtime.
 *   **Impact:** Bot may temporarily stop receiving updates or sending messages.
 *   **Mitigation:**
-    *   The bot includes retry logic, but persistent issues may require manual restart.
+    *   The bot includes robust retry logic that automatically restarts the polling loop and recreates the application connection.
     *   Check your internet connection and Telegram status.
-    *   Consider adding exponential backoff and alerting for repeated failures.
 
 ### 3. HTTP Connection Failures (`httpx.ConnectError`)
 

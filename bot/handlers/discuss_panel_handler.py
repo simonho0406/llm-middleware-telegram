@@ -878,6 +878,51 @@ async def _run_panel_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     return panel_results, final_answer, proposer_response
 
+async def _run_panel_task_background(update: Update, context: ContextTypes.DEFAULT_TYPE, user_prompt: str, assembling_msg, chat_id: int):
+    """Background task wrapper for the panel workflow."""
+    try:
+        panel_results, final_answer, proposer_response = await _run_panel_workflow(
+            update, context, user_prompt, [], assembling_msg, chat_id
+        )
+        
+        # Store state
+        context.user_data['panel_state'] = {
+            "original_prompt": user_prompt,
+            "panel_results": panel_results,
+            "final_answer": final_answer,
+            "full_transcript": [
+                {"role": "user", "content": user_prompt},
+                {"role": "assistant", "content": final_answer}
+            ],
+            "lock": asyncio.Lock()
+        }
+
+        await assembling_msg.delete()
+        
+        # AST-Based Architecture: Parse, Split, and Send
+        pure_summary = _format_panel_summary(panel_results)
+        pure_markdown_content = f"{pure_summary}\n\n---\n\n{final_answer}"
+
+        # Use the centralized send_safe_message function
+        await send_safe_message(context, update, pure_markdown_content)
+        
+    except asyncio.CancelledError:
+        logger.warning(f"Panel workflow in background task for chat {chat_id} was cancelled.")
+        await _cleanup_discussion_state(context, chat_id, assembling_msg)
+    except Exception as e:
+        logger.error(f"Panel workflow failed in background task: {e}", exc_info=True)
+        
+        error_message = f"An error occurred: {str(e)}"
+        try:
+            if assembling_msg:
+                await assembling_msg.edit_text(error_message, parse_mode=None)
+            else:
+                await context.bot.send_message(chat_id=chat_id, text=error_message, parse_mode=None)
+        except Exception as send_error:
+            logger.error(f"Failed to send error message: {send_error}")
+            
+        await _cleanup_discussion_state(context, chat_id, assembling_msg)
+
 async def start_panel_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Entry point for the /discuss_panel command."""
     chat_id = update.effective_chat.id
@@ -899,66 +944,16 @@ async def start_panel_discussion(update: Update, context: ContextTypes.DEFAULT_T
         except Exception as e_inner:
             logger.error(f"Failed to send network error message to user: {e_inner}")
         return ConversationHandler.END
+    
     await set_panel_commands(context.application, chat_id)
 
-    try:
-        panel_task = asyncio.create_task(
-            _run_panel_workflow(update, context, user_prompt, [], assembling_msg, chat_id)
-        )
-        context.user_data['panel_task'] = panel_task
-        panel_results, final_answer, proposer_response = await panel_task
-    except asyncio.CancelledError:
-        logger.warning(f"Panel workflow in start_panel_discussion for chat {chat_id} was cancelled.")
-        await _cleanup_discussion_state(context, chat_id, assembling_msg)
-        return ConversationHandler.END
-    except Exception as e:
-        logger.error(f"Panel workflow failed in start_panel_discussion: {e}", exc_info=True)
-
-        # Robust error handling with timeout protection
-        error_message = f"An error occurred: {str(e)}"
-        try:
-            # Try to edit the assembling message with a shorter timeout
-            if assembling_msg:
-                await asyncio.wait_for(
-                    assembling_msg.edit_text(error_message, parse_mode=None),
-                    timeout=8.0
-                )
-        except (asyncio.TimeoutError, Exception) as edit_error:
-            logger.warning(f"Failed to edit assembling message due to: {edit_error}")
-            try:
-                # Fallback: Try to send a new message if editing fails
-                await asyncio.wait_for(
-                    context.bot.send_message(chat_id=chat_id, text=error_message, parse_mode=None),
-                    timeout=10.0
-                )
-            except (asyncio.TimeoutError, Exception) as send_error:
-                logger.error(f"Failed to send error message via fallback: {send_error}")
-                # Last resort: just log the error
-                pass
-
-        await _cleanup_discussion_state(context, chat_id, assembling_msg)
-        return ConversationHandler.END
-
-    context.user_data['panel_state'] = {
-        "original_prompt": user_prompt,
-        "panel_results": panel_results,
-        "final_answer": final_answer,
-        "full_transcript": [
-            {"role": "user", "content": user_prompt},
-            {"role": "assistant", "content": final_answer}
-        ],
-        "lock": asyncio.Lock()
-    }
-
-    await assembling_msg.delete()
+    # Create and store task, but DO NOT await it
+    panel_task = asyncio.create_task(
+        _run_panel_task_background(update, context, user_prompt, assembling_msg, chat_id)
+    )
+    context.user_data['panel_task'] = panel_task
     
-    # AST-Based Architecture: Parse, Split, and Send
-    pure_summary = _format_panel_summary(panel_results)
-    pure_markdown_content = f"{pure_summary}\n\n---\n\n{final_answer}"
-
-    # Use the centralized send_safe_message function
-    await send_safe_message(context, update, pure_markdown_content)
-
+    # Return immediately to allow ConversationHandler to enter state
     return AWAITING_FOLLOW_UP
 
 async def handle_follow_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1113,6 +1108,122 @@ async def search_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     return AWAITING_FOLLOW_UP
 
+async def handle_panel_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Handles edited messages during a panel discussion.
+    Cancels current run, updates transcript, and restarts workflow.
+    """
+    chat_id = update.effective_chat.id
+    edited_text = update.edited_message.text
+    message_id = update.edited_message.message_id
+    
+    panel_state = context.user_data.get('panel_state')
+    if not panel_state:
+        return
+
+    logger.info(f"(Chat {chat_id}) Handling panel edit for message {message_id}")
+
+    # 1. Cancel any running task
+    panel_task = context.user_data.get('panel_task')
+    if panel_task and not panel_task.done():
+        panel_task.cancel()
+        logger.info(f"(Chat {chat_id}) Cancelled active panel task due to edit.")
+        try:
+            await panel_task
+        except asyncio.CancelledError:
+            pass
+    
+    # 2. Update Transcript
+    full_transcript = panel_state.get('full_transcript', [])
+    
+    # Find the message in the transcript
+    # We assume the transcript stores message_ids if possible, or we rely on position?
+    # The current implementation of `_run_panel_workflow` appends to `full_transcript`.
+    # But `full_transcript` in `panel_state` is a list of dicts.
+    # We need to find the user message that matches.
+    # If we can't find by ID (because we might not be storing it), we assume it's the LAST user message?
+    # Let's assume it's the last user message for now, as that's the most common edit case.
+    
+    target_index = -1
+    for i in range(len(full_transcript) - 1, -1, -1):
+        if full_transcript[i]['role'] == 'user':
+            # If we stored message_id, check it. If not, assume last user msg.
+            # The current `full_transcript` structure is just {'role':..., 'content':...}
+            # So we assume last user message.
+            target_index = i
+            break
+            
+    if target_index == -1:
+        logger.warning(f"(Chat {chat_id}) Could not find user message to edit in panel transcript.")
+        return
+
+    # Update content
+    full_transcript[target_index]['content'] = edited_text
+    
+    # Truncate anything after this message (e.g. old assistant response)
+    panel_state['full_transcript'] = full_transcript[:target_index + 1]
+    
+    logger.info(f"(Chat {chat_id}) Updated panel transcript and truncated history.")
+    
+    # 3. Restart Workflow
+    placeholder_msg = context.user_data.get('panel_placeholder')
+    if not placeholder_msg:
+         # If no placeholder, send a new one
+         placeholder_msg = await send_safe_message(context, update, "🔄 Restarting panel due to edit...")
+         context.user_data['panel_placeholder'] = placeholder_msg
+    else:
+        try:
+            await placeholder_msg.edit_text("🔄 Restarting panel due to edit...", parse_mode=None)
+        except Exception:
+             placeholder_msg = await send_safe_message(context, update, "🔄 Restarting panel due to edit...")
+             context.user_data['panel_placeholder'] = placeholder_msg
+
+    # Re-run the workflow
+    # We need to wrap it in a task like in `start_panel_discussion` or `handle_follow_up`
+    # But `handle_follow_up` logic is complex.
+    # We can reuse `_run_panel_workflow` but we need to handle the result (save to history etc).
+    # Actually, `reroll_discussion` does exactly this: calls `_run_panel_workflow` and handles result.
+    # But `reroll_discussion` expects to be called as a command.
+    # We can extract the "run and handle result" logic or just call `_run_panel_workflow` 
+    # and duplicate the result handling (which is short).
+    
+    # Let's duplicate the result handling for safety and clarity, similar to `reroll_discussion`
+    
+    async def _run_and_handle():
+        try:
+            panel_results, final_answer, proposer_response = await _run_panel_workflow(
+                update, context, edited_text, panel_state['full_transcript'], placeholder_msg, chat_id
+            )
+            
+            # Update transcript with final answer
+            panel_state['full_transcript'].append({'role': 'assistant', 'content': final_answer})
+            
+            # Send final answer
+            await send_safe_message(context, update, final_answer)
+            
+            # Update placeholder with summary
+            summary = _format_panel_summary(panel_results)
+            try:
+                await placeholder_msg.edit_text(summary, parse_mode=constants.ParseMode.MARKDOWN_V2)
+            except Exception as e:
+                logger.warning(f"Failed to update summary: {e}")
+                
+        except asyncio.CancelledError:
+            logger.info("Panel task cancelled.")
+            raise
+        except Exception as e:
+            logger.error(f"Error in panel edit workflow: {e}", exc_info=True)
+            await send_safe_message(context, update, "An error occurred during the panel discussion.")
+
+    # Create and store task
+    task = asyncio.create_task(_run_and_handle())
+    context.user_data['panel_task'] = task
+    
+    # Ensure we await the task if we are in a test environment? 
+    # No, in production it runs in background.
+    # But for the test to pass, we might need to await it?
+    # The test mocks `_run_panel_workflow` so it finishes instantly.
+
 async def reroll_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handles the /reroll command within a panel discussion."""
     chat_id = update.effective_chat.id
@@ -1211,6 +1322,21 @@ async def blocked_command_handler(update: Update, context: ContextTypes.DEFAULT_
     )
     return AWAITING_FOLLOW_UP
 
+async def panel_cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Cancels the current panel discussion and ends the conversation."""
+    chat_id = update.effective_chat.id
+    logger.info(f"(Chat {chat_id}) User cancelled panel discussion.")
+    
+    # Cancel any running panel task
+    panel_task = context.user_data.get('panel_task')
+    if panel_task and not panel_task.done():
+        panel_task.cancel()
+        logger.info(f"(Chat {chat_id}) Cancelled active panel task.")
+    
+    await send_safe_message(context, update, "Panel discussion cancelled.")
+    await _cleanup_discussion_state(context, chat_id)
+    return ConversationHandler.END
+
 discuss_panel_conv_handler = ConversationHandler(
     entry_points=[CommandHandler('discuss_panel', start_panel_discussion)],
     states={
@@ -1223,9 +1349,10 @@ discuss_panel_conv_handler = ConversationHandler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_follow_up),
         ],
     },
-    fallbacks=[CommandHandler('end_discussion', end_discussion), CommandHandler('cancel', cancel_command), CommandHandler('timeout', timeout_handler)],
+    fallbacks=[CommandHandler('end_discussion', end_discussion), CommandHandler('cancel', panel_cancel_command), CommandHandler('timeout', timeout_handler)],
     per_user=True,
     per_chat=True,
     block=True,
-    per_message=False
+    per_message=False,
+    allow_reentry=True
 )
