@@ -56,7 +56,7 @@ async def _generate_llm_response(chat_id: int, prompt: str, is_reroll: bool = Fa
             except (json.JSONDecodeError, TypeError):
                 processed_history.append({'role': 'assistant', 'content': "[A complex panel discussion occurred previously.]"})
         elif role == 'assistant:panel': # New format (full answer)
-            processed_history.append({'role': 'assistant', 'content': content})
+            processed_history.append({'role': 'assistant', 'content': f"**[Previous Expert Panel Discussion Result]**\n\n{content}"})
         else:
             processed_history.append(message)
 
@@ -104,6 +104,14 @@ async def _generate_llm_response(chat_id: int, prompt: str, is_reroll: bool = Fa
 
     truncated_history = final_history
 
+    # Check if auto-search is enabled
+    from bot.settings import USER_SETTINGS
+    autosearch_enabled = await storage_manager.get_user_setting(
+        chat_id,
+        'autosearch_chat',
+        USER_SETTINGS['autosearch_chat']['default']
+    )
+
     # Generate LLM response
     raw_full_llm_response = ""
     llm_error_reported_by_model = False
@@ -111,8 +119,11 @@ async def _generate_llm_response(chat_id: int, prompt: str, is_reroll: bool = Fa
     try:
         logger.info(f"{log_prefix}Starting LLM generation...")
 
-        search_instruction = "If you need to perform a web search for current information, include the search query inside <search> tags like <search>latest news on the Artemis mission</search>, but ALWAYS also provide your best answer based on your existing knowledge after the search tags."
-        augmented_prompt = f"{search_instruction}\n\n{prompt}"
+        if autosearch_enabled:
+             search_instruction = "If you need to perform a web search for current information, include the search query inside <search> tags like <search>latest news on the Artemis mission</search>, but ALWAYS also provide your best answer based on your existing knowledge after the search tags."
+             augmented_prompt = f"{search_instruction}\n\n{prompt}"
+        else:
+             augmented_prompt = prompt
 
         async for chunk in service.generate_response(model=model_to_use, prompt=augmented_prompt, context_history=truncated_history):
             if chunk.startswith("[Error:") or chunk.startswith("Error:"):
@@ -134,14 +145,6 @@ async def _generate_llm_response(chat_id: int, prompt: str, is_reroll: bool = Fa
     search_tag_match = re.search(r"<search>(.*?)</search>", raw_full_llm_response, re.DOTALL)
     if search_tag_match:
         search_query = search_tag_match.group(1).strip()
-
-        # Check if auto-search is enabled
-        from bot.settings import USER_SETTINGS
-        autosearch_enabled = await storage_manager.get_user_setting(
-            chat_id,
-            'autosearch_chat',
-            USER_SETTINGS['autosearch_chat']['default']
-        )
 
         if not autosearch_enabled:
             logger.info(f"{log_prefix}Auto-search disabled. Removing search tag and providing fallback answer.")

@@ -49,48 +49,99 @@ async def generate_response(
     try:
         timeout_config = request_timeout if request_timeout is not None else 30.0
         async with httpx.AsyncClient(timeout=timeout_config) as client:
-            async with client.stream(
-                "POST",
-                "https://openrouter.ai/api/v1/chat/completions", # Use chat completions endpoint
-                headers=headers,
-                json=data
-            ) as response:
+            # Universal Reasoning Payload for OpenRouter
+            reasoning_data = data.copy()
+            reasoning_data.update({
+                "include_reasoning": True,
+                "reasoning": {"effort": "high"},
+                # "thinking": True # OpenRouter might not need this as much as 'include_reasoning', but harmless
+            })
+            
+            # Attempt 1: Try with reasoning
+            try:
+                response = await client.request(
+                    "POST",
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers=headers,
+                    json=reasoning_data,
+                    timeout=timeout_config
+                )
+                
+                # Check for 400 Bad Request regarding parameters
+                if response.status_code == 400:
+                    logger.warning(f"OpenRouter model {model} rejected reasoning params (400). Retrying without...")
+                    # Fallback to original data
+                    response = await client.request(
+                        "POST",
+                        "https://openrouter.ai/api/v1/chat/completions",
+                        headers=headers,
+                        json=data,
+                        timeout=timeout_config
+                    )
+            except httpx.RequestError as e:
+                logger.error(f"OpenRouter Connection Error: {e}")
+                yield f"[Error: OpenRouter Connection Error]"
+                return
 
-                if response.status_code == 429 or response.status_code == 403:
-                    logger.warning(f"OpenRouter rate limit or key limit exceeded (Status: {response.status_code}).")
-                    yield "[Error: The API provider is temporarily rate-limited or the key has exceeded its limit. Please try again in a few moments.]"
-                    return
+            if True: # Just to keep indentation or structure consistent with original stream context
+                pass
 
-                if response.status_code != 200:
-                    try:
-                        err_details = await response.aread()
-                        err_details = err_details.decode('utf-8')
-                        logger.error(f"OpenRouter API Error {response.status_code}: {err_details}")
-                        yield f"[Error: OpenRouter API Error {response.status_code} - See logs]"
-                    except Exception as json_e:
-                        logger.error(f"OpenRouter API Error {response.status_code} (failed to decode error details: {json_e})")
-                        yield f"[Error: OpenRouter API Error {response.status_code}]"
-                    return # Stop processing on error
+            # Since we manually requested above to check status, we now need to stream properly
+            # Actually, `client.stream` context manager enters the request. 
+            # We cannot easily "check status then stream" without re-requesting or using a different flow.
+            # Only `client.send` with `stream=True` returns a streamable response object without reading body.
+            
+            # Refactored Approach:
+            # We will use a loop to retry logic similar to OpenAI service.
+            
+            payload_to_use = reasoning_data
+            
+            # Inner function to avoid duplication? Or just simple loop.
+            async def make_stream_request(payload):
+                 return client.stream("POST", "https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload)
 
-                buffer = ""
-                async for line in response.aiter_lines():
-                    if line.startswith("data: "):
-                        line_data = line[len("data: "):].strip()
-                        if line_data == "[DONE]":
-                            break
-                        try:
-                            import json
-                            chunk_data = json.loads(line_data)
-                            if 'choices' in chunk_data and chunk_data['choices']:
-                                delta = chunk_data['choices'][0].get('delta', {})
-                                content = delta.get('content')
-                                if content:
-                                    # buffer += content # No need to accumulate here
-                                    yield content # Yield only the new content delta
-                        except json.JSONDecodeError:
-                            logger.warning(f"Received non-JSON data line: {line_data}")
-                        except Exception as e:
-                             logger.exception(f"Error processing stream chunk: {e}")
+            # We need to use manual __aenter__ because 'async with' is strict
+            # Or just use the loop strictly.
+            
+            # Let's use a simpler "Attempt with Fallback" structure that is compatible with `async with client.stream`:
+            
+            # We can't wrap `async with` easily in a try/except for status code fallbacks unless we nest or duplicate.
+            # Duplicate is safest.
+            
+            # ATTEMPT 1: Reasoning
+            try:
+                async with client.stream("POST", "https://openrouter.ai/api/v1/chat/completions", headers=headers, json=reasoning_data) as response:
+                    if response.status_code == 400:
+                         logger.warning(f"OpenRouter model {model} rejected reasoning params. Fallback triggered.")
+                         raise ValueError("fallback") # Trigger fallback
+                    
+                    # IF SUCCESS (not 400), PROCEED
+                    # We have to duplicate the processing code or put it in a function.
+                    # Since processing is complex (yields), function is tricky (async generator).
+                    # Actually, we can use `yield from process_response(response)`
+                    
+                    async for chunk in process_openrouter_response(response):
+                        yield chunk
+                    return # SUCCESS -> Exit
+            except ValueError as e:
+                if str(e) == "fallback":
+                    pass # Continue to fallback
+                else:
+                    raise e
+            except Exception as e:
+                 # Network error on first attempt?
+                 # If likely harmless, maybe retry? But let's assume network errors are handled by outer loop if we had one.
+                 # Here we just treat as error.
+                 logger.error(f"OpenRouter Error on Attempt 1: {e}")
+                 yield f"[Error: {e}]"
+                 return
+
+            # FALLBACK ATTEMPT: Standard
+            async with client.stream("POST", "https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data) as response:
+                 async for chunk in process_openrouter_response(response):
+                     yield chunk
+
+
 
     except httpx.HTTPStatusError as http_err:
         logger.error(f"HTTP Error connecting to OpenRouter: {http_err}")
@@ -103,7 +154,44 @@ async def generate_response(
         yield f"[Error: Unexpected error - {str(e)}]"
 
 
+# Helper for processing response to avoid duplication
+async def process_openrouter_response(response):
+    if response.status_code == 429 or response.status_code == 403:
+        logger.warning(f"OpenRouter rate limit or key limit exceeded (Status: {response.status_code}).")
+        yield "[Error: The API provider is temporarily rate-limited or the key has exceeded its limit. Please try again in a few moments.]"
+        return
+
+    if response.status_code != 200:
+        try:
+            err_details = await response.aread()
+            err_details = err_details.decode('utf-8')
+            logger.error(f"OpenRouter API Error {response.status_code}: {err_details}")
+            yield f"[Error: OpenRouter API Error {response.status_code} - See logs]"
+        except Exception as json_e:
+            logger.error(f"OpenRouter API Error {response.status_code} (failed to decode error details: {json_e})")
+            yield f"[Error: OpenRouter API Error {response.status_code}]"
+        return # Stop processing
+
+    async for line in response.aiter_lines():
+        if line.startswith("data: "):
+            line_data = line[len("data: "):].strip()
+            if line_data == "[DONE]":
+                break
+            try:
+                import json
+                chunk_data = json.loads(line_data)
+                if 'choices' in chunk_data and chunk_data['choices']:
+                    delta = chunk_data['choices'][0].get('delta', {})
+                    content = delta.get('content')
+                    if content:
+                        yield content
+            except json.JSONDecodeError:
+                logger.warning(f"Received non-JSON data line: {line_data}")
+            except Exception as e:
+                 logger.exception(f"Error processing stream chunk: {e}")
+
 async def check_status() -> (bool, str):
+
     """Checks if the OpenRouter API key is configured."""
     is_configured = bool(config.OPENROUTER_API_KEY and config.OPENROUTER_API_KEY != "YOUR_OPENROUTER_API_KEY")
     message = "API key is configured." if is_configured else "API key is not configured."

@@ -382,9 +382,24 @@ async def set_model_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await send_safe_message(context, update, "An error occurred while setting the model. Please try again.")
 
 async def set_model_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Starts the conversation to set a model by typing."""
+    """
+    Sets the model for the current provider.
+    Usage: /set_model <model_name>
+    If no name provided, starts interactive mode.
+    """
     chat_id = update.effective_chat.id
     provider_name = await storage_manager.get_thread_key(chat_id, 'provider', config.get_default_provider())
+    
+    if context.args:
+        model_name = " ".join(context.args).strip()
+        provider_config = providers.get_config_for_provider(provider_name)
+        
+        # Validation could trigger a fetch, but for now we trust the user or the provider to error later
+        # Ideally check if model exists if possible, but pure set is faster
+        await storage_manager.set_thread_key(chat_id, 'model', model_name)
+        await send_safe_message(context, update, f"Model for *{provider_name}* set to `{model_name}`.")
+        return ConversationHandler.END
+
     await send_safe_message(context, update, f"Please type the name of the model for *{provider_name}*.")
     return SET_MODEL_TYPING
 

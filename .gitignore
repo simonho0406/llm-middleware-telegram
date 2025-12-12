@@ -41,6 +41,8 @@ docker-compose.*.yml
 logs/
 *.sqlite
 *.db
+*.bak
+*.bak.*
 data/sessions.json
 
 ### Local Development ###

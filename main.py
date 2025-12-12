@@ -152,18 +152,21 @@ def main() -> None:
 
             # Register Handlers
             # High-priority group for conversation handlers (group=0)
+            # specific handlers first
             app.add_handler(config_conv_handler, group=0)
             app.add_handler(discuss_conv_handler, group=0)
             app.add_handler(discuss_panel_conv_handler, group=0)
             app.add_handler(configure_panel_conv_handler, group=0)
             app.add_handler(edited_message_handler, group=0)
-            app.add_handler(chat_handler, group=0)
-            for handler in ask_selected_handlers:
+            
+            for handler in misc_handlers:
                 app.add_handler(handler, group=0)
             
-            # Lower-priority group for command handlers (group=1)
-            for handler in misc_handlers:
-                app.add_handler(handler, group=1)
+            for handler in ask_selected_handlers:
+                app.add_handler(handler, group=0)
+
+            # catch-all handler last
+            app.add_handler(chat_handler, group=0)
 
             app.add_error_handler(error_handler)
             logger.info("Registered handlers and error handler.")

@@ -104,25 +104,60 @@ class OpenAICompatibleService:
                 timeout_value = request_timeout if request_timeout is not None else config.get_request_timeout_seconds()
                 api_kwargs["timeout"] = timeout_value
 
-                if use_streaming:
-                    stream = await self.client.chat.completions.create(**api_kwargs)
-                    async for chunk in stream:
-                        if chunk and hasattr(chunk, 'choices') and chunk.choices:
-                            content = chunk.choices[0].delta.content
-                            if content is not None:
-                                yield content
-                else:
-                    response = await self.client.chat.completions.create(**api_kwargs)
-                    if response and hasattr(response, 'choices') and response.choices:
-                        content = response.choices[0].message.content
-                        if content:
-                            yield content
+                # Universal Reasoning Payload: Try to enable reasoning on all providers
+                # If the provider rejects it (400 Bad Request), we fallback to clean request.
+                reasoning_payload = {
+                     "reasoning_effort": "high",  # OpenAI O1 standard
+                     "include_reasoning": True,   # DeepSeek standard
+                     "thinking": True,             # Nvidia/vLLM standard
+                }
+
+                # Attempt 1: Try with reasoning params
+                try:
+                    current_api_kwargs = api_kwargs.copy()
+                    if attempt == 0: # Only try reasoning on the very first attempt (fresh request)
+                        current_api_kwargs["extra_body"] = reasoning_payload
+                    
+                    if use_streaming:
+                        stream = await self.client.chat.completions.create(**current_api_kwargs)
+                        async for chunk in stream:
+                            if chunk and hasattr(chunk, 'choices') and chunk.choices:
+                                content = chunk.choices[0].delta.content
+                                if content is not None:
+                                    yield content
                     else:
-                        logger.error(f"[{self.provider_name}] API returned empty/invalid response")
-                        yield f"[Error: Provider returned invalid response format.]"
+                        response = await self.client.chat.completions.create(**current_api_kwargs)
+                        if response and hasattr(response, 'choices') and response.choices:
+                            content = response.choices[0].message.content
+                            if content:
+                                yield content
+                        else:
+                            logger.error(f"[{self.provider_name}] API returned empty/invalid response")
+                            yield f"[Error: Provider returned invalid response format.]"
+                            return
+                    success = True
+                    break
+
+                except (APIStatusError) as e:
+                    # Special handling for "Reasoning Not Supported" (400 Bad Request)
+                    if e.status_code == 400 and attempt == 0:
+                        logger.warning(f"[{self.provider_name}] Model rejected reasoning parameters (400 Bad Request). Retrying without reasoning...")
+                        # We do NOT increment attempt counter for this fallback, or we can just continue to next logic.
+                        # But wait, we need to retry *immediately* without params.
+                        # Ideally we do this in a nested structure, but here we can just "continue" if we ensure next loop doesn't use params.
+                        # Actually, my logic above `if attempt == 0` handles this! 
+                        # If we trigger `continue`, next attempt is 1. `attempt == 0` will be false. Params won't be added.
+                        # So we essentially just treat this as a "failed attempt" that consumes 1 retry quota.
+                        # Given we have 3 retries, this is acceptable.
+                        pass 
+                    elif "EngineCore" in str(e):
+                        logger.error(f"[{self.provider_name}] NVIDIA EngineCore Error: {e}")
+                        raise ProviderUnavailableError("NVIDIA service unavailable") from e
+                    else:
+                        logger.error(f"[{self.provider_name}] API Status Error: {e.status_code} - {e.response}")
+                        yield f"[Error: API returned an error (Status {e.status_code}). Details: {e.message}]"
                         return
-                success = True
-                break
+
             except (APIConnectionError, RateLimitError, httpx.ReadTimeout, httpx.ConnectTimeout) as e:
                 if attempt < retries:
                     logger.warning(f"[{self.provider_name}] API Error: {e}. Retrying in {delay} seconds. (Attempt {attempt + 1}/{retries})")
@@ -131,14 +166,6 @@ class OpenAICompatibleService:
                 else:
                     logger.error(f"[{self.provider_name}] API Error: {e}. No more retries left.")
                     yield f"[Error: Failed to connect after {retries} retries. Details: {e}]"
-            except APIStatusError as e:
-                if "EngineCore" in str(e):
-                    logger.error(f"[{self.provider_name}] NVIDIA EngineCore Error: {e}")
-                    raise ProviderUnavailableError("NVIDIA service unavailable") from e
-                else:
-                    logger.error(f"[{self.provider_name}] API Status Error: {e.status_code} - {e.response}")
-                    yield f"[Error: API returned an error (Status {e.status_code}). Details: {e.message}]"
-                return
             except APIError as e:
                 # Handle general API errors including streaming errors
                 error_message = str(e)

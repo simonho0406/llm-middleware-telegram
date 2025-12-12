@@ -55,7 +55,7 @@ async def test_panel_edit_flow():
 
     # Mock _run_panel_workflow
     with patch('bot.handlers.discuss_panel_handler._run_panel_workflow', new_callable=AsyncMock) as mock_run:
-        mock_run.return_value = ({}, "Final Answer")
+        mock_run.return_value = ({}, "Final Answer", [])
         
         # Call handle_edited_message (which should delegate to handle_panel_edit)
         # We need to patch chat.handle_edited_message to CALL discuss_panel_handler.handle_panel_edit
