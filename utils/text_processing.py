@@ -30,6 +30,26 @@ def sanitize_text_characters(text: str) -> str:
         
     return text
 
+def format_thinking_content(text: str) -> str:
+    """
+    detects <think>...</think> blocks and formats them as a quoted block.
+    """
+    if not isinstance(text, str):
+        return text
+    
+    # Check for <think> tags
+    pattern = r"<think>(.*?)</think>"
+    match = re.search(pattern, text, re.DOTALL)
+    if match:
+        thought_content = match.group(1).strip()
+        # Format as a blockquote with a header
+        formatted_thought = f"> **Thought Process**\n> {thought_content.replace(chr(10), chr(10) + '> ')}\n\n"
+        
+        # Replace the original tag with the formatted version
+        text = text.replace(match.group(0), formatted_thought)
+        
+    return text
+
 class TelegramV2Renderer:
     def __init__(self):
         self.text = ""
@@ -186,13 +206,17 @@ class TelegramV2Renderer:
     def render_th_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
         self.text += '*' # Bold headers
     def render_th_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
-        self.text += '* | '
+        self.text += '* \\| '
 
     def render_td_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): pass
     def render_td_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
-        self.text += ' | '
+        self.text += ' \\| '
 
 def format_for_telegram_v2(markdown_text: str) -> str:
+    # 1. Format thinking blocks (DeepSeek R1 style)
+    markdown_text = format_thinking_content(markdown_text)
+    
+    # 2. Parse Markdown
     tokens = md.parse(markdown_text)
     return TelegramV2Renderer().render(tokens)
 

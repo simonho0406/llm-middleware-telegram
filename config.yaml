@@ -91,8 +91,10 @@ expert_panel:
 
   # Orchestrator (Project Manager) - Keep original working configuration
   orchestrator:
-    provider: "nvidia"
-    model: "nvidia/llama-3.3-nemotron-super-49b-v1.5"
+    # provider: "nvidia"
+    # model: "nvidia/llama-3.3-nemotron-super-49b-v1.5"
+    provider: "openrouter"
+    model: "amazon/nova-2-lite-v1:free"
     fallback_provider: "nvidia"
     fallback_model: "openai/gpt-oss-120b"
     request_timeout_seconds: 600
@@ -100,15 +102,15 @@ expert_panel:
   # Expert Panel Roles - Restore original working models
   roles:
     Proposer:
-      provider: "openrouter"
-      model: "deepseek/deepseek-chat-v3.1:free"
+      provider: "nvidia"
+      model: "moonshotai/kimi-k2-thinking"
       fallback_provider: "nvidia"
       fallback_model: "openai/gpt-oss-120b"
       request_timeout_seconds: 600
 
     Critic:
-      provider: "openrouter"
-      model: "deepseek/deepseek-r1-0528:free"
+      provider: "nvidia"
+      model: "minimaxai/minimax-m2"
       request_timeout_seconds: 600
 
     Refiner:

@@ -104,18 +104,23 @@ class OpenAICompatibleService:
                 timeout_value = request_timeout if request_timeout is not None else config.get_request_timeout_seconds()
                 api_kwargs["timeout"] = timeout_value
 
-                # Universal Reasoning Payload: Try to enable reasoning on all providers
-                # If the provider rejects it (400 Bad Request), we fallback to clean request.
-                reasoning_payload = {
-                     "reasoning_effort": "high",  # OpenAI O1 standard
-                     "include_reasoning": True,   # DeepSeek standard
-                     "thinking": True,             # Nvidia/vLLM standard
-                }
-
-                # Attempt 1: Try with reasoning params
+                # Targeted Reasoning Payload: Only enabled for specific providers
+                # This prevents timeouts/errors on strict OpenAI-compatible endpoints (like Nvidia NIM)
+                # that do not recognize 'include_reasoning' or 'extra_body'.
+                reasoning_payload = {}
+                
+                # Check for OpenRouter
+                if "openrouter.ai" in self.base_url.lower():
+                    reasoning_payload["include_reasoning"] = True
+                
+                # Check for OpenAI (Official) - reasoning_effort only works on o1/o3
+                elif "api.openai.com" in self.base_url.lower() and model.startswith("o"):
+                    reasoning_payload["reasoning_effort"] = "high"
+                
+                # Attempt 1: Try with reasoning params (only if payload is not empty)
                 try:
                     current_api_kwargs = api_kwargs.copy()
-                    if attempt == 0: # Only try reasoning on the very first attempt (fresh request)
+                    if attempt == 0 and reasoning_payload: # Only inject if we have specific params
                         current_api_kwargs["extra_body"] = reasoning_payload
                     
                     if use_streaming:

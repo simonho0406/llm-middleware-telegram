@@ -72,7 +72,30 @@ async def test_full_user_flow_simulation():
         }
         mock_send_msg.return_value = True # Ensure message sending is successful
         
+        # Setup Job Queue Mock to capture debounce
+        mock_job_queue = MagicMock()
+        mock_context.job_queue = mock_job_queue
+        captured_jobs = []
+        
+        def side_effect_run_once(callback, interval, data, chat_id):
+            captured_jobs.append((callback, data))
+            return MagicMock() # Return a dummy job object
+            
+        mock_job_queue.run_once.side_effect = side_effect_run_once
+
         await chat.handle_message(mock_update, mock_context)
+        
+        # Manually trigger the debounced job
+        assert len(captured_jobs) == 1, "Debounce job was not scheduled"
+        callback, job_data = captured_jobs[0]
+        
+        # Setup the job context expected by process_buffered_message
+        mock_job = MagicMock()
+        mock_job.data = job_data
+        mock_context.job = mock_job
+        
+        # Run the actual processing logic
+        await callback(mock_context)
         
         # Verify response was sent
         mock_send_msg.assert_called_with(mock_context, mock_update, "Quantum computing is cool.")

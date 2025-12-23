@@ -5,76 +5,67 @@ from services.openai_compatible_service import OpenAICompatibleService
 from bot.errors import ProviderUnavailableError
 
 class TestReasoningFallback(unittest.IsolatedAsyncioTestCase):
-    async def test_universal_payload_injection(self):
-        """Test that generate_response injects the correct reasoning payload."""
+    async def test_targeted_payload_openrouter(self):
+        """Test that openrouter.ai gets include_reasoning."""
         config = {
-            "name": "test_provider",
-            "base_url": "http://test",
+            "name": "openrouter",
+            "base_url": "https://openrouter.ai/api/v1",
             "api_key": "test",
             "default_model": "test-model"
         }
         service = OpenAICompatibleService(config)
         
-        # Mock client create
         mock_create = AsyncMock()
         mock_create.return_value.choices = [MagicMock(message=MagicMock(content="Success"))]
         service.client.chat.completions.create = mock_create
         
-        # Run generation
-        async for _ in service.generate_response("test-model", "test"):
-            pass
+        async for _ in service.generate_response("test-model", "test"): pass
             
-        # Verify call args
         call_kwargs = mock_create.call_args.kwargs
         extra_body = call_kwargs.get('extra_body')
         self.assertIsNotNone(extra_body)
-        self.assertEqual(extra_body['reasoning_effort'], 'high')
-        self.assertEqual(extra_body['include_reasoning'], True)
-        self.assertEqual(extra_body['thinking'], True)
+        self.assertEqual(extra_body.get('include_reasoning'), True)
+        self.assertNotIn('reasoning_effort', extra_body)
 
-    async def test_fallback_on_400(self):
-        """Test that service retries without reasoning params on 400 error."""
+    async def test_targeted_payload_openai_o1(self):
+        """Test that openai.com o1 models get reasoning_effort."""
         config = {
-            "name": "test_provider",
-            "base_url": "http://test",
+            "name": "openai",
+            "base_url": "https://api.openai.com/v1",
             "api_key": "test",
-            "default_model": "test-model",
-            "enable_streaming": False
+            "default_model": "o1-preview"
         }
         service = OpenAICompatibleService(config)
         
-        # Mock client create to fail first, then succeed
-        from openai import APIStatusError
+        mock_create = AsyncMock()
+        mock_create.return_value.choices = [MagicMock(message=MagicMock(content="Success"))]
+        service.client.chat.completions.create = mock_create
         
-        mock_response_400 = MagicMock()
-        mock_response_400.status_code = 400
-        error_400 = APIStatusError("Bad Request", response=mock_response_400, body=None)
-        
-        mock_response_200 = MagicMock()
-        success_content = MagicMock()
-        success_content.choices = [MagicMock(message=MagicMock(content="Fallback Success"))]
-        
-        # Side effect: First call raises 400, Second call return success
-        service.client.chat.completions.create = AsyncMock(side_effect=[error_400, success_content])
-        
-        # Run generation
-        results = []
-        async for chunk in service.generate_response("test-model", "test"):
-            results.append(chunk)
+        async for _ in service.generate_response("o1-preview", "test"): pass
             
-        # Verify success
-        self.assertEqual("".join(results), "Fallback Success")
+        call_kwargs = mock_create.call_args.kwargs
+        extra_body = call_kwargs.get('extra_body')
+        self.assertIsNotNone(extra_body)
+        self.assertEqual(extra_body.get('reasoning_effort'), "high")
+
+    async def test_clean_payload_generic(self):
+        """Test that generic providers (Nvidia/Local) get NO extra params."""
+        config = {
+            "name": "nvidia",
+            "base_url": "https://integrate.api.nvidia.com/v1",
+            "api_key": "test",
+            "default_model": "deepseek-ai/deepseek-r1"
+        }
+        service = OpenAICompatibleService(config)
         
-        # Verify TWO calls
-        self.assertEqual(service.client.chat.completions.create.call_count, 2)
+        mock_create = AsyncMock()
+        mock_create.return_value.choices = [MagicMock(message=MagicMock(content="Success"))]
+        service.client.chat.completions.create = mock_create
         
-        # Verify first call HAD payload
-        args1 = service.client.chat.completions.create.call_args_list[0].kwargs
-        self.assertIn('extra_body', args1)
-        
-        # Verify second call (fallback) did NOT have payload or cleaned it
-        args2 = service.client.chat.completions.create.call_args_list[1].kwargs
-        self.assertNotIn('extra_body', args2)
+        async for _ in service.generate_response("deepseek-ai/deepseek-r1", "test"): pass
+            
+        call_kwargs = mock_create.call_args.kwargs
+        self.assertNotIn('extra_body', call_kwargs)
 
 if __name__ == '__main__':
     unittest.main()

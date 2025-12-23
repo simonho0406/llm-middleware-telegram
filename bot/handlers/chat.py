@@ -27,13 +27,58 @@ def escape_meta_tags_for_markdown_attempt(text: str) -> str:
     text = re.sub(r"<reflect>.*?</reflect>", "", text, flags=re.DOTALL | re.IGNORECASE)
     return text.strip()
 
-TELEGRAM_MAX_LEN = 4096
+DEBOUNCE_INTERVAL = 1.0
 
+async def process_buffered_message(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Processes the buffered messages after the debounce interval."""
+    job_data = context.job.data
+    chat_id = job_data['chat_id']
+    user_id = job_data['user_id']
+    update = job_data['update']
+    
+    # Cleanup job reference since it's now running
+    if 'debounce_job' in context.chat_data:
+        del context.chat_data['debounce_job']
+    
+    # Retrieve and clear the buffer
+    buffer = context.chat_data.get('message_buffer', [])
+    context.chat_data['message_buffer'] = []
+    
+    if not buffer:
+        logger.warning(f"(Chat {chat_id}) Debounce fired with empty buffer, skipping.")
+        return
 
-# --- Message Handlers ---
+    # Combine messages
+    full_message_text = " ".join(buffer)
+    log_prefix = f"(Chat {chat_id}) "
+    
+    logger.info(f"{log_prefix}Processing combined message (len: {len(full_message_text)}): '{full_message_text[:100]}...'")
+
+    try:
+        current_thread_id = await storage_manager.get_current_thread_id(chat_id)
+        await storage_manager.set_thread_key(chat_id, 'last_user_prompt', full_message_text)
+        
+        await _generate_and_send_response(
+            update=update,
+            context=context,
+            chat_id=chat_id,
+            user_id=user_id,
+            prompt=full_message_text,
+            current_thread_id=current_thread_id,
+        )
+    except error.NetworkError as e:
+        logger.error(f"Network error in process_buffered_message: {e}")
+        try:
+            await send_safe_message(context, update, "A network error occurred, please try again.")
+        except Exception as e_inner:
+            logger.error(f"Failed to send network error message to user: {e_inner}")
+    except Exception as e:
+        logger.error(f"{log_prefix}Error in process_buffered_message: {e}", exc_info=True)
+        await send_safe_message(context, update, "Sorry, a critical error occurred while handling your message.")
+
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles incoming text messages and calls the response generator."""
+    """Handles incoming text messages with debouncing."""
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
     message_text = update.message.text
@@ -42,34 +87,40 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not message_text:
         return
 
-    logger.info(f"{log_prefix}Message from User {user_id}: '{message_text[:100]}...'")
+    logger.info(f"{log_prefix}Buffering message from User {user_id}: '{message_text[:50]}...'")
 
     if config.get_allowed_chat_ids() and chat_id not in config.get_allowed_chat_ids():
         logger.warning(f"{log_prefix}Unauthorized chat ID. User: {user_id}.")
         return
 
-    try:
-        current_thread_id = await storage_manager.get_current_thread_id(chat_id)
-        await storage_manager.set_thread_key(chat_id, 'last_user_prompt', message_text)
-        logger.debug(f"{log_prefix}Saved last_user_prompt for thread {current_thread_id}.")
+    # Initialize buffer if needed
+    if 'message_buffer' not in context.chat_data:
+        context.chat_data['message_buffer'] = []
+    
+    # Append message to buffer
+    context.chat_data['message_buffer'].append(message_text)
 
-        await _generate_and_send_response(
-            update=update,
-            context=context,
-            chat_id=chat_id,
-            user_id=user_id,
-            prompt=message_text,
-            current_thread_id=current_thread_id,
-        )
-    except error.NetworkError as e:
-        logger.error(f"Network error in handle_message: {e}")
+    # Cancel existing debounce job if any
+    if 'debounce_job' in context.chat_data:
+        old_job = context.chat_data['debounce_job']
         try:
-            await send_safe_message(context, update, "A network error occurred, please try again.")
-        except Exception as e_inner:
-            logger.error(f"Failed to send network error message to user: {e_inner}")
-    except Exception as e:
-        logger.error(f"{log_prefix}Error in handle_message: {e}", exc_info=True)
-        await send_safe_message(context, update, "Sorry, a critical error occurred while handling your message.")
+            old_job.schedule_removal() # Remove the old job
+        except Exception:
+            # Job might already be gone or invalid, just ignore
+            pass
+    
+    # Schedule new job
+    # We use the JobQueue for robust scheduling
+    context.chat_data['debounce_job'] = context.job_queue.run_once(
+        process_buffered_message,
+        DEBOUNCE_INTERVAL,
+        data={
+            'chat_id': chat_id,
+            'user_id': user_id,
+            'update': update # Store the update object for the callback
+        },
+        chat_id=chat_id # Associate job with chat
+    )
 
 async def handle_edited_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles edited messages, treating them as new prompts if they were the last user message."""

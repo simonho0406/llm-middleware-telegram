@@ -32,7 +32,8 @@ def create_application(post_init_hook: PostInitFunc | None = None) -> Applicatio
     builder = (Application.builder()
                .token(config.TELEGRAM_BOT_TOKEN)
                .defaults(defaults)
-               .request(request))
+               .request(request)
+               .concurrent_updates(True))
 
     # Add the post_init hook if provided
     if post_init_hook:
