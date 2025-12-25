@@ -904,7 +904,9 @@ async def _run_panel_task_background(update: Update, context: ContextTypes.DEFAU
         pure_markdown_content = f"{pure_summary}\n\n---\n\n{final_answer}"
 
         # Use the centralized send_safe_message function
-        await send_safe_message(context, update, pure_markdown_content)
+        if await send_safe_message(context, update, pure_markdown_content):
+            # Incremental Archival: Save the panel's result immediately
+            await storage_manager.save_message(chat_id, 'assistant:panel', final_answer)
         
     except asyncio.CancelledError:
         logger.warning(f"Panel workflow in background task for chat {chat_id} was cancelled.")
@@ -1012,7 +1014,9 @@ async def handle_follow_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         # AST-Based Architecture: Parse, Split, and Send
         pure_summary = _format_panel_summary(new_panel_results)
         pure_markdown_content = f"{pure_summary}\n\n---\n\n{new_final_answer}"
-        await send_safe_message(context, update, pure_markdown_content)
+        if await send_safe_message(context, update, pure_markdown_content):
+            # Incremental Archival: Save the panel's result immediately
+            await storage_manager.save_message(chat_id, 'assistant:panel', new_final_answer)
 
     return AWAITING_FOLLOW_UP
 
@@ -1063,9 +1067,10 @@ async def end_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     if panel_state:
         # Lock is not needed here as the conversation is ending, no race conditions.
-        final_answer = panel_state.get("final_answer", "No final answer was recorded.")
-        await storage_manager.save_message(chat_id, 'assistant:panel', final_answer)
-        await update.message.reply_text("✅ Panel discussion concluded and saved.", parse_mode=None)
+        # final_answer = panel_state.get("final_answer", "No final answer was recorded.")
+        # We no longer save here to avoid duplication, as it's saved incrementally now.
+        # await storage_manager.save_message(chat_id, 'assistant:panel', final_answer)
+        await update.message.reply_text("✅ Panel discussion concluded.", parse_mode=None)
         await _cleanup_discussion_state(context, chat_id)
     else:
         await update.message.reply_text("⚠️ No active discussion to end.", parse_mode=None)
@@ -1289,7 +1294,9 @@ async def reroll_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         pure_markdown_content = f"{pure_summary}\n\n---\n\n{final_answer}"
 
         # Use the centralized send_safe_message function
-        await send_safe_message(context, update, pure_markdown_content)
+        if await send_safe_message(context, update, pure_markdown_content):
+             # Incremental Archival: Save the panel's result immediately
+            await storage_manager.save_message(chat_id, 'assistant:panel', final_answer)
 
     return AWAITING_FOLLOW_UP
 
@@ -1298,15 +1305,15 @@ async def timeout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     chat_id = context.job.chat_id
     logger.info(f"Panel discussion timed out for chat {chat_id}.")
     if 'panel_state' in context.user_data:
-        # Attempt to save whatever final answer we have before timing out
-        panel_state = context.user_data['panel_state']
-        final_answer = panel_state.get("final_answer")
-        if final_answer:
-            try:
-                await storage_manager.save_message(chat_id, 'assistant:panel', final_answer)
-                logger.info(f"Saved final answer for timed-out panel in chat {chat_id}")
-            except Exception as e:
-                logger.error(f"Failed to save final answer during timeout for chat {chat_id}: {e}")
+        # We no longer save here to avoid duplication. The last message was already saved.
+        # panel_state = context.user_data['panel_state']
+        # final_answer = panel_state.get("final_answer")
+        # if final_answer:
+        #     try:
+        #         await storage_manager.save_message(chat_id, 'assistant:panel', final_answer)
+        #         logger.info(f"Saved final answer for timed-out panel in chat {chat_id}")
+        #     except Exception as e:
+        #         logger.error(f"Failed to save final answer during timeout for chat {chat_id}: {e}")
 
         await context.bot.send_message(chat_id, "Panel discussion has timed out due to inactivity.", parse_mode=None)
         await _cleanup_discussion_state(context, chat_id)

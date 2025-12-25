@@ -17,7 +17,8 @@ class StorageManager:
             self.get_thread_key = database_storage.get_thread_key
             self.set_thread_key = database_storage.set_thread_key
             self.get_thread_history = database_storage.get_thread_history
-            self.set_thread_history = database_storage.set_thread_history
+            self.set_thread_history = database_storage.replace_thread_history_dangerous
+            self.remove_last_assistant_message = database_storage.remove_last_assistant_message
             self.create_thread = database_storage.create_thread
             self.delete_thread = database_storage.delete_thread
             self.list_threads = database_storage.list_threads

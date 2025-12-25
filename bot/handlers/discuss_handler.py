@@ -13,6 +13,7 @@ from telegram.helpers import escape_markdown
 from bot.providers import get_available_provider_names, get_service_for_provider
 from utils.text_processing import parse_markdown_to_ast, split_document_ast_aware, render_ast_to_telegram_v2
 from bot.messaging import send_safe_message
+from storage import storage_manager
 
 logger = logging.getLogger(__name__)
 
@@ -207,6 +208,14 @@ async def run_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
         placeholder = await send_safe_message(context, update, "Starting discussion...", is_edit=True)
 
+        # Fetch context history (Archival: Read)
+        # We limit to 500 to provide context without blowing up the window immediately
+        try:
+            context_history = await storage_manager.get_thread_history(chat_id, limit=500)
+        except Exception as e:
+            logger.error(f"{log_prefix} Failed to fetch thread history: {e}")
+            context_history = []
+
         discussion_transcript = [{"role": "user", "content": discussion_data['user_prompt']}]
         # Initialize main transcript with user prompt
         
@@ -223,8 +232,9 @@ async def run_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             turn_info = f"Turn {i+1}/{len(selected_models)}: `{escape_markdown(model_info['name'], version=2)}` is thinking..."
             await send_safe_message(context, update, turn_info, is_edit=True)
 
-            # Create temporary history copy
-            history_for_call = discussion_transcript.copy()
+            # Create temporary history copy with FULL CONTEXT
+            # Context History (Previous Chat) + Current Discussion So Far
+            history_for_call = context_history + discussion_transcript.copy()
             
             # Add critique prompt to temporary history if needed
             if i > 0:
@@ -239,7 +249,7 @@ async def run_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             try:
                 response = ""
                 async for chunk in service.generate_response(
-                    context_history=history_for_call,  # Use temporary history
+                    context_history=history_for_call,  # Use FULL history
                     prompt="",  # Empty prompt since instruction is in history
                     model=model_id
                 ):
@@ -283,10 +293,27 @@ async def run_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
                 await send_safe_message(context, update, telegram_safe_text, is_edit=(i==0))
 
+            # --- Archival: Save to DB ---
+            try:
+                # Save User Prompt
+                await storage_manager.save_message(chat_id, 'user', discussion_data['user_prompt'])
+                # Save Assistant Response (Full Transcript)
+                await storage_manager.save_message(chat_id, 'assistant', final_transcript)
+                logger.info(f"{log_prefix} Archived /discuss interaction.")
+            except Exception as e:
+                logger.error(f"{log_prefix} Failed to archive /discuss interaction: {e}")
+
         except Exception as ast_error:
             logger.error(f"AST processing failed: {ast_error}. Using emergency fallback.")
             # Emergency: Send as single plain text message with length truncation
             await send_safe_message(context, update, final_transcript)
+            
+            # Attempt to archive even on render error
+            try:
+                await storage_manager.save_message(chat_id, 'user', discussion_data['user_prompt'])
+                await storage_manager.save_message(chat_id, 'assistant', final_transcript)
+            except:
+                pass
 
     except Exception as e:
         logger.error(f"{log_prefix} Critical failure in run_discussion: {e}", exc_info=True)

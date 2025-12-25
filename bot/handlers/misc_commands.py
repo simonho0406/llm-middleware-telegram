@@ -137,11 +137,25 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
     service = provider_config['service']
     model_to_use = await storage_manager.get_thread_key(chat_id, 'model', provider_config['default_model'])
 
+    # Fetch history for context (limit to recent messages to avoid overload, though context checks handle this)
+    try:
+        context_history = await storage_manager.get_thread_history(chat_id, limit=500)
+    except Exception as e:
+        logger.error(f"{log_prefix}Failed to retrieve history: {e}")
+        context_history = []
+
+    # Save the user's search query to history immediately (Append-Only)
+    try:
+        await storage_manager.save_message(chat_id, 'user', query)
+    except Exception as e:
+        logger.error(f"{log_prefix}Failed to save user query: {e}")
+
     await placeholder_message.edit_text(f"Found results. Asking {session_provider.capitalize()} ({model_to_use}) for analysis...", parse_mode=None)
 
     final_response = ""
     try:
-        async for chunk in service.generate_response(model=model_to_use, prompt=augmented_prompt, context_history=[]):
+        # Pass context_history to allow the LLM to understand references like "search for him"
+        async for chunk in service.generate_response(model=model_to_use, prompt=augmented_prompt, context_history=context_history):
             final_response += chunk
     except Exception as e:
         logger.error(f"{log_prefix}Error during search's LLM call: {e}", exc_info=True)
@@ -151,15 +165,11 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
     await send_safe_message(context, update, final_response, placeholder_message)
 
     try:
-        history = await storage_manager.get_thread_history(chat_id)
-        history.extend([
-            {'role': 'user', 'content': query},
-            {'role': 'assistant', 'content': final_response}
-        ])
-        await storage_manager.set_thread_history(chat_id, history)
-        logger.info(f"{log_prefix}Search command successful. History updated with original query.")
+        # Save the assistant's response (Append-Only)
+        await storage_manager.save_message(chat_id, 'assistant', final_response)
+        logger.info(f"{log_prefix}Search command successful. Response saved.")
     except Exception as e:
-        logger.error(f"{log_prefix}Failed to save history after search: {e}", exc_info=True)
+        logger.error(f"{log_prefix}Failed to save assistant response: {e}", exc_info=True)
 
 async def retry_search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles the retry search button click."""

@@ -71,7 +71,8 @@ async def test_normal_chat_reroll_dislike(mock_update_context):
     with patch('bot.handlers.misc_commands.storage_manager.get_current_thread_id', new_callable=AsyncMock) as mock_get_thread_id, \
          patch('bot.handlers.misc_commands.storage_manager.get_thread_key', new_callable=AsyncMock) as mock_get_key, \
          patch('bot.response_generator.storage_manager.get_thread_history', new_callable=AsyncMock) as mock_get_history, \
-         patch('bot.response_generator.storage_manager.set_thread_history', new_callable=AsyncMock) as mock_set_history, \
+         patch('bot.response_generator.storage_manager.save_message', new_callable=AsyncMock) as mock_save_msg, \
+         patch('bot.response_generator.storage_manager.remove_last_assistant_message', new_callable=AsyncMock) as mock_remove_last, \
          patch('bot.response_generator.send_safe_message', new_callable=AsyncMock) as mock_send_msg, \
          patch('bot.response_generator.providers.get_provider_details') as mock_get_providers:
 
@@ -90,13 +91,12 @@ async def test_normal_chat_reroll_dislike(mock_update_context):
         await misc_commands.reroll_command(mock_update, mock_context)
         
         # Verify:
-        # 1. set_thread_history called with [User: A, Assistant: C]
-        assert mock_set_history.called
-        saved_history = mock_set_history.call_args[0][1]
-        assert len(saved_history) == 2
-        assert saved_history[0]['content'] == 'Tell me a joke'
-        assert saved_history[1]['content'] == 'To get to the other side!' # New response
-        assert saved_history[1]['content'] != 'Why did the chicken cross the road?' # Old response gone
+        # 1. remove_last_assistant_message called (to delete old answer)
+        assert mock_remove_last.called, "Should verify removal of old assistant message"
+        
+        # 2. save_message called (to append new answer)
+        assert mock_save_msg.called
+        assert mock_save_msg.call_args[0][2] == 'To get to the other side!'
 
 @pytest.mark.asyncio
 async def test_normal_chat_reroll_error(mock_update_context):
@@ -115,7 +115,8 @@ async def test_normal_chat_reroll_error(mock_update_context):
     with patch('bot.handlers.misc_commands.storage_manager.get_current_thread_id', new_callable=AsyncMock) as mock_get_thread_id, \
          patch('bot.handlers.misc_commands.storage_manager.get_thread_key', new_callable=AsyncMock) as mock_get_key, \
          patch('bot.response_generator.storage_manager.get_thread_history', new_callable=AsyncMock) as mock_get_history, \
-         patch('bot.response_generator.storage_manager.set_thread_history', new_callable=AsyncMock) as mock_set_history, \
+         patch('bot.response_generator.storage_manager.save_message', new_callable=AsyncMock) as mock_save_msg, \
+         patch('bot.response_generator.storage_manager.remove_last_assistant_message', new_callable=AsyncMock) as mock_remove_last, \
          patch('bot.response_generator.send_safe_message', new_callable=AsyncMock) as mock_send_msg, \
          patch('bot.response_generator.providers.get_provider_details') as mock_get_providers:
 
@@ -131,10 +132,9 @@ async def test_normal_chat_reroll_error(mock_update_context):
         
         await misc_commands.reroll_command(mock_update, mock_context)
         
-        assert mock_set_history.called
-        saved_history = mock_set_history.call_args[0][1]
-        assert saved_history[-1]['content'] == 'Infinity!'
-        assert '[Error' not in saved_history[-1]['content']
+        assert mock_remove_last.called
+        assert mock_save_msg.called
+        assert mock_save_msg.call_args[0][2] == 'Infinity!'
 
 @pytest.mark.asyncio
 async def test_panel_reroll_success(mock_update_context):

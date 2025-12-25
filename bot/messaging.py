@@ -80,6 +80,7 @@ async def send_safe_message(
                     parse_mode=constants.ParseMode.MARKDOWN_V2,
                     reply_markup=reply_markup if i == len(doc_chunks) - 1 else None
                 )
+        return True
 
     except Exception as e:
         logger.warning(f"{log_prefix}AST pipeline failed: {e}. Falling back to simple text.")
@@ -103,5 +104,8 @@ async def send_safe_message(
                         parse_mode=None,
                         reply_markup=reply_markup if i == len(chunks) - 1 else None
                     )
+            return True
+
         except Exception as final_e:
             logger.error(f"{log_prefix}Final fallback to plain text also failed: {final_e}")
+            return False

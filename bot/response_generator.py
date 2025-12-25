@@ -38,7 +38,15 @@ async def _generate_llm_response(chat_id: int, prompt: str, is_reroll: bool = Fa
     log_prefix = f"(Chat {chat_id}) "
 
     # Load and process conversation history
+    # New Archival Logic: We fetch a limited window (e.g., last 500) to avoid memory overload
+    # But for context construction, we rely on ensure_context_fits to trim it further.
     context_history = await storage_manager.get_thread_history(chat_id)
+
+    # De-duplicate prompt: If the prompt was already saved to DB (Archival mode), remove it from history
+    # because the service.generate_response method typically appends the prompt again.
+    if context_history and context_history[-1].get('role') == 'user' and context_history[-1].get('content') == prompt:
+        context_history.pop()
+
     import json
     processed_history = []
     for message in context_history:
@@ -61,7 +69,9 @@ async def _generate_llm_response(chat_id: int, prompt: str, is_reroll: bool = Fa
             processed_history.append(message)
 
     if is_reroll and processed_history and processed_history[-1].get('role') == 'assistant':
-        logger.info(f"{log_prefix}Reroll detected. Removing last assistant message from history.")
+        # Fallback for transient history that might not have been cleaned up yet? 
+        # In the new logic, we clean DB before calling this, but if we fetched transient state:
+        logger.info(f"{log_prefix}Reroll detected in history processing. Removing last assistant message.")
         processed_history.pop()
 
     # Get provider configuration
@@ -174,6 +184,20 @@ async def _generate_llm_response(chat_id: int, prompt: str, is_reroll: bool = Fa
 async def _generate_and_send_response_task(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int, prompt: str, current_thread_id: str, is_reroll: bool = False, force_truncate: bool = False, placeholder_message = None) -> None:
     log_prefix = f"(Chat {chat_id}) "
 
+    # --- Archival Step 1: Secure the Input ---
+    try:
+        if is_reroll:
+            # For reroll, we remove the faulty previous answer so the prompt is now the last message
+            await storage_manager.remove_last_assistant_message(chat_id)
+        else:
+            # For normal messages, we APPEND the user prompt immediately
+            await storage_manager.save_message(chat_id, 'user', prompt)
+    except Exception as e:
+        logger.error(f"{log_prefix}Failed to save/update initial state: {e}")
+        # Proceeding might be risky if we can't save, but we try to answer anyway?
+        # Ideally we should warn, but let's proceed.
+
+    # --- Generate ---
     response_data = await _generate_llm_response(chat_id, prompt, is_reroll, force_truncate)
 
     if response_data.get('error') == 'context_limit_exceeded':
@@ -198,21 +222,22 @@ async def _generate_and_send_response_task(update: Update, context: ContextTypes
             logger.warning(f"{log_prefix}Failed to delete placeholder message: {e}")
 
     # Centralized, safe sending
-    message_sent_successfully = await send_safe_message(context, update, final_content)
+    try:
+        message_sent_successfully = await send_safe_message(context, update, final_content)
+    except Exception as e:
+        logger.error(f"{log_prefix}Failed to send message: {e}")
+        message_sent_successfully = False
+
 
     # Check if the task was cancelled before saving history
     if asyncio.current_task().cancelled():
         logger.info(f"{log_prefix}Task was cancelled, skipping history update.")
         return
 
-    # Update history
+    # --- Archival Step 2: Secure the Output ---
     if response_data.get('error') is None and message_sent_successfully:
         try:
-            history = response_data.get('processed_history', [])
-            # For a reroll or edit, the user message is already in the history.
-            if not is_reroll:
-                history.append({'role': 'user', 'content': prompt})
-            history.append({'role': 'assistant', 'content': final_content})
-            await storage_manager.set_thread_history(chat_id, history)
+            await storage_manager.save_message(chat_id, 'assistant', final_content)
+            logger.info(f"{log_prefix}Assistant response saved to archive.")
         except Exception as e_hist:
-            logger.error(f"{log_prefix}Failed to update history: {e_hist}")
+            logger.error(f"{log_prefix}Failed to save assistant response: {e_hist}")

@@ -171,16 +171,26 @@ async def set_thread_key(chat_id: int, key: str, value: Any, thread_id: Optional
         await db.execute(f"UPDATE threads SET {key} = ? WHERE thread_pk = ?", (value, thread_pk))
         await db.commit()
 
-async def get_thread_history(chat_id: int, thread_id: Optional[str] = None) -> List[Dict[str, str]]:
+async def get_thread_history(chat_id: int, thread_id: Optional[str] = None, limit: int = 500) -> List[Dict[str, str]]:
     async with aiosqlite.connect(config.DB_PATH) as db:
         thread_pk = await _get_thread_pk(db, chat_id, thread_id)
         if not thread_pk: return []
         async with db.cursor() as cursor:
-            await cursor.execute("SELECT role, content FROM messages WHERE thread_fk = ? ORDER BY timestamp ASC", (thread_pk,))
+            # Fetch last N messages relative to timestamp
+            # We use a subquery to get the latest N, then order them ASC for the LLM
+            await cursor.execute(
+                f"SELECT role, content FROM (SELECT role, content, message_pk FROM messages WHERE thread_fk = ? ORDER BY message_pk DESC LIMIT ?) ORDER BY message_pk ASC", 
+                (thread_pk, limit)
+            )
             rows = await cursor.fetchall()
             return [{"role": row[0], "content": row[1]} for row in rows]
 
-async def set_thread_history(chat_id: int, history: List[Dict[str, str]], thread_id: Optional[str] = None) -> None:
+async def replace_thread_history_dangerous(chat_id: int, history: List[Dict[str, str]], thread_id: Optional[str] = None) -> None:
+    """
+    DEPRECATED: Completely replaces thread history. 
+    Use save_message (append) for normal chat flow.
+    Only use this for hard resets (e.g., /new or tests).
+    """
     async with aiosqlite.connect(config.DB_PATH) as db:
         thread_pk = await _get_thread_pk(db, chat_id, thread_id)
         if not thread_pk: return
@@ -196,8 +206,29 @@ async def set_thread_history(chat_id: int, history: List[Dict[str, str]], thread
             await db.rollback()
             raise e
 
+async def remove_last_assistant_message(chat_id: int, thread_id: Optional[str] = None) -> bool:
+    """Removes the last assistant message (highest message_pk) for the thread."""
+    async with aiosqlite.connect(config.DB_PATH) as db:
+        thread_pk = await _get_thread_pk(db, chat_id, thread_id)
+        if not thread_pk: return False
+        
+        async with db.cursor() as cursor:
+            # Find the PK of the last assistant message
+            await cursor.execute(
+                "SELECT message_pk FROM messages WHERE thread_fk = ? AND role = 'assistant' ORDER BY message_pk DESC LIMIT 1",
+                (thread_pk,)
+            )
+            row = await cursor.fetchone()
+            if row:
+                message_pk = row[0]
+                await db.execute("DELETE FROM messages WHERE message_pk = ?", (message_pk,))
+                await db.commit()
+                logger.info(f"Removed last assistant message (pk {message_pk}) for reroll in chat {chat_id}")
+                return True
+            return False
+
 async def save_message(chat_id: int, role: str, content: str, thread_id: Optional[str] = None) -> None:
-    """Saves a single message to the history of a specific or current thread."""
+    """Saves (Appends) a single message to the history of a specific or current thread."""
     async with aiosqlite.connect(config.DB_PATH) as db:
         thread_pk = await _get_thread_pk(db, chat_id, thread_id)
         if not thread_pk:

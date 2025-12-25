@@ -52,8 +52,6 @@ async def test_search_retry_flow():
     mock_update.callback_query = mock_query
     
     # We need to store the query somewhere because retry_search_callback needs it.
-    # In the implementation, we'll likely store it in user_data or parse from message?
-    # For now, let's assume the implementation uses user_data to store the last query.
     mock_context.user_data = {'last_search_query': 'test query'}
     
     with patch('services.web_search_service.perform_search', new_callable=AsyncMock) as mock_search:
@@ -61,7 +59,6 @@ async def test_search_retry_flow():
         mock_search.return_value = {'status': 'success', 'content': 'Search results'}
         
         # We also need to mock the LLM generation part since search_command calls it
-        # But we can just mock the service.generate_response
         mock_service = MagicMock()
         mock_service.generate_response = MagicMock()
         async def async_gen(*args, **kwargs):
@@ -69,22 +66,30 @@ async def test_search_retry_flow():
         mock_service.generate_response.side_effect = async_gen
         
         with patch('bot.providers.get_provider_details') as mock_get_providers, \
-             patch('config.get_default_provider', return_value='mock_provider'):
+             patch('config.get_default_provider', return_value='mock_provider'), \
+             patch('storage.storage_manager.get_thread_key', new_callable=AsyncMock) as mock_get_key, \
+             patch('storage.storage_manager.save_message', new_callable=AsyncMock) as mock_save, \
+             patch('bot.response_generator._generate_llm_response', new_callable=AsyncMock) as mock_gen_llm:
+            
             mock_get_providers.return_value = {
                 'mock_provider': {'service': mock_service, 'default_model': 'mock_model'}
             }
-            with patch('storage.storage_manager.get_thread_key', new_callable=AsyncMock) as mock_get_key:
-                mock_get_key.return_value = 'mock_provider'
+            mock_get_key.return_value = 'mock_provider'
+            
+            # Mock _generate_llm_response to return success so we don't hit DB/Providers
+            mock_gen_llm.return_value = {
+                'content': "LLM Answer",
+                'error': None,
+                'truncated_history': [],
+                'provider_info': {},
+                'processed_history': []
+            }
+            
+            # Call the retry callback
+            if hasattr(misc_commands, 'retry_search_callback'):
+                await misc_commands.retry_search_callback(mock_update, mock_context)
                 
-                # Call the retry callback (which we haven't implemented yet, but will be in misc_commands)
-                # For this test to pass *after* implementation, we need to import it.
-                # Since it doesn't exist, we can't call it yet. 
-                # This test serves as the "Red" phase of TDD.
-                
-                if hasattr(misc_commands, 'retry_search_callback'):
-                    await misc_commands.retry_search_callback(mock_update, mock_context)
-                    
-                    # Verify search was called again
-                    mock_search.assert_called_with('test query')
-                else:
-                    pytest.fail("retry_search_callback not implemented yet")
+                # Verify search was called again
+                mock_search.assert_called_with('test query')
+            else:
+                pytest.fail("retry_search_callback not implemented yet")

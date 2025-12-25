@@ -13,7 +13,7 @@ from telegram.ext import (
 )
 from typing import List, Dict, Any # Import missing types
 from hashlib import sha256 # Import sha256
-from urllib.parse import quote # Import quote
+from telegram.helpers import escape_markdown # Import escape_markdown
 
 import config
 from services import ollama_service, gemini_service, openrouter_service, openai_compatible_service
@@ -28,6 +28,12 @@ SELECT_PROVIDER, SELECT_MODELS, CONFIRM_MODELS = range(3)
 CALLBACK_PROVIDER_PREFIX = "ask_sel_prov_"
 CALLBACK_MODEL_PREFIX = "ask_sel_mod_"
 CALLBACK_ACTION_PREFIX = "ask_sel_act_"
+# ... (intermediate code preserved by tool ideally, but replace_file_content replaces block)
+# I need to use multi_replace or two replaces to avoid wiping code.
+# I will use replace_file_content for the import, then another for the usage.
+# But wait, I can just do one large replace if I knew the exact content. I don't want to guess.
+# I'll use separate replaces.
+
 
 # --- Helper Functions ---
 
@@ -263,7 +269,7 @@ async def done_selecting_callback(update: Update, context: ContextTypes.DEFAULT_
 
     try:
         await query.edit_message_text(
-            f"Asking selected models: {escape_markdown_v2(', '.join(display_names))}\.\.\.",
+            f"Asking selected models: {escape_markdown(', '.join(display_names), version=2)}\.\.\.",
             parse_mode='MarkdownV2'
         )
     except BadRequest as e:
@@ -276,7 +282,13 @@ async def done_selecting_callback(update: Update, context: ContextTypes.DEFAULT_
     model_map = {}
     results = {} # Initialize results dict here
 
-    context_history = None
+    # Fetch context history (limit to 500 lines)
+    chat_id = update.effective_chat.id
+    try:
+        context_history = await storage_manager.get_thread_history(chat_id, limit=500)
+    except Exception as e:
+        logger.error(f"Failed to fetch history for ask_selected: {e}")
+        context_history = []
 
     for item in selected_list: # Use selected_list which contains provider:actual_id
         provider, actual_id = item.split(":", 1) # Now splitting the correct key
@@ -364,6 +376,16 @@ async def done_selecting_callback(update: Update, context: ContextTypes.DEFAULT_
     await placeholder_message.delete()
 
     await send_safe_message(context, update, final_response_markdown)
+
+    # --- Archival: Save to DB ---
+    try:
+        # Save User Prompt
+        await storage_manager.save_message(chat_id, 'user', prompt)
+        # Save Assistant Response (Summary of all models)
+        await storage_manager.save_message(chat_id, 'assistant', final_response_markdown)
+        logger.info(f"Archived /ask_selected interaction for chat {chat_id}")
+    except Exception as e:
+        logger.error(f"Failed to archive /ask_selected interaction: {e}")
 
 
     # Clean up user_data
