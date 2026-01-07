@@ -84,11 +84,18 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
     user_id = update.effective_user.id
     log_prefix = f"(Chat {chat_id}) "
 
-    if not context.args:
-        await send_safe_message(context, update, "Please provide a query to search. Usage: /search <query>")
+    # Handle reply-to message if no args provided
+    if not context.args and update.message and update.message.reply_to_message:
+        query = update.message.reply_to_message.text
+        if not query:
+             await send_safe_message(context, update, "The replied message has no text to search.")
+             return
+    elif not context.args:
+        await send_safe_message(context, update, "Please provide a query to search. Usage: /search <query> or reply to a message with /search")
         return
+    else:
+        query = " ".join(context.args)
 
-    query = " ".join(context.args)
     logger.info(f"{log_prefix}User {user_id} initiated /search with query: '{query}'")
 
     # Register task for cancellation
@@ -144,11 +151,22 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
         logger.error(f"{log_prefix}Failed to retrieve history: {e}")
         context_history = []
 
-    # Save the user's search query to history immediately (Append-Only)
-    try:
-        await storage_manager.save_message(chat_id, 'user', query)
-    except Exception as e:
-        logger.error(f"{log_prefix}Failed to save user query: {e}")
+    # Smart History Saving: Check for duplicates
+    # If the last message in history is from 'user' and matches the 'query', SKIP saving.
+    # This prevents duplication when the user re-enters the same text as a command.
+    should_save_query = True
+    if context_history:
+        last_msg = context_history[-1]
+        # Basic normalization for comparison (strip whitespace)
+        if last_msg.get('role') == 'user' and last_msg.get('content', '').strip() == query.strip():
+            logger.info(f"{log_prefix}Skipping save of search query: Identical to last user message.")
+            should_save_query = False
+
+    if should_save_query:
+        try:
+            await storage_manager.save_message(chat_id, 'user', query)
+        except Exception as e:
+            logger.error(f"{log_prefix}Failed to save user query: {e}")
 
     await placeholder_message.edit_text(f"Found results. Asking {session_provider.capitalize()} ({model_to_use}) for analysis...", parse_mode=None)
 

@@ -13,9 +13,10 @@ services:
     mem_limit: 2g
     # Optional: If you want the bot container to talk to an Ollama
     # container running on the host machine via Docker's network:
-    # extra_hosts:
-    #   - "host.docker.internal:host-gateway"
-    # Then set OLLAMA_HOST=http://host.docker.internal:11434 in .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - OLLAMA_HOST=http://host.docker.internal:11434
 
     # Optional: Uncomment to run Ollama service within docker-compose
     # depends_on:

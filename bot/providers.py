@@ -41,6 +41,7 @@ def get_provider_details() -> dict:
         'default_model': config.get_default_ollama_model(),
         'allowed_models': [] # Will be fetched dynamically via API if needed
     }
+    _initialized_services['ollama'] = ollama_service
     # Gemini
     if config.GEMINI_API_KEYS: # Only add if keys are configured
         details['gemini'] = {
@@ -48,16 +49,18 @@ def get_provider_details() -> dict:
             'default_model': config.get_default_gemini_model(),
             'allowed_models': config.get_gemini_ask_all_models() # Use ask_all list for selection
         }
+        _initialized_services['gemini'] = gemini_service
     else:
         logger.warning("Gemini provider disabled: No API keys found.")
         
     # OpenRouter
     if config.OPENROUTER_API_KEY and config.OPENROUTER_API_KEY != "YOUR_OPENROUTER_API_KEY":
-         details['openrouter'] = {
+        details['openrouter'] = {
             'service': openrouter_service,
             'default_model': config.get_default_openrouter_model(),
             'allowed_models': config.get_openrouter_allowed_models()
         }
+        _initialized_services['openrouter'] = openrouter_service
     else:
         logger.warning("OpenRouter provider disabled: API key not set.")
 
@@ -117,3 +120,21 @@ def get_service_for_provider(provider_name: str):
 def get_config_for_provider(provider_name: str) -> dict | None:
      """Gets the configuration dictionary for a given provider name."""
      return get_provider_details().get(provider_name)
+ 
+async def shutdown_providers():
+     """Gracefully closes all initialized provider services."""
+     global _initialized_services
+     if not _initialized_services:
+         return
+ 
+     logger.info("Shutting down LLM provider services...")
+     for name, service in _initialized_services.items():
+         if hasattr(service, 'close'):
+             try:
+                 await service.close()
+                 logger.debug(f"Closed service: {name}")
+             except Exception as e:
+                 logger.error(f"Error closing service '{name}': {e}")
+     
+     _initialized_services.clear()
+     logger.info("All LLM providers shutdown.")

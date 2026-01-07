@@ -52,7 +52,7 @@ def format_thinking_content(text: str) -> str:
 
 class TelegramV2Renderer:
     def __init__(self):
-        self.text = ""
+        self.buffer = []  # Use a list for O(1) appends
         self.list_level = 0
         self.link_href = None
         self.ordered_list_stack = [] # To keep track of item numbers for nested ordered lists
@@ -64,7 +64,7 @@ class TelegramV2Renderer:
             handler_name = f"render_{token.type}"
             handler = getattr(self, handler_name, self.render_default)
             handler(token, tokens, i)
-        return self.text.strip()
+        return "".join(self.buffer).strip()
 
     def render_default(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
         if token.children:
@@ -82,7 +82,7 @@ class TelegramV2Renderer:
             # Actually, softbreaks are separate tokens.
             # If the text itself has newlines (unlikely for 'text' token in commonmark unless preserved?), we handle it.
             pass
-        self.text += escaped_text
+        self.buffer.append(escaped_text)
 
     def render_paragraph_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): pass
     def render_paragraph_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
@@ -93,19 +93,19 @@ class TelegramV2Renderer:
             if next_token.type == 'blockquote_close':
                 return
             
-            self.text += '\n\n'
+            self.buffer.append('\n\n')
             if self.in_blockquote:
-                self.text += '\\> '
+                self.buffer.append('\\> ')
 
-    def render_heading_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self.text += '\n*'
-    def render_heading_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self.text += '*\n'
+    def render_heading_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self.buffer.append('\n*')
+    def render_heading_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self.buffer.append('*\n')
 
     def render_bullet_list_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
         self.list_level += 1
         self.is_ordered_list = False # Set flag for unordered list
     def render_bullet_list_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
         self.list_level -= 1
-        if self.list_level == 0: self.text += '\n'
+        if self.list_level == 0: self.buffer.append('\n')
 
     def render_ordered_list_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
         self.list_level += 1
@@ -116,7 +116,7 @@ class TelegramV2Renderer:
         self.list_level -= 1
         if self.ordered_list_stack:
             self.ordered_list_stack.pop()
-        if self.list_level == 0: self.text += '\n'
+        if self.list_level == 0: self.buffer.append('\n')
 
     def render_list_item_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
         # Check if this is a continuation item (hidden)
@@ -125,73 +125,73 @@ class TelegramV2Renderer:
 
         if self.is_ordered_list and self.ordered_list_stack: # Check flag and stack
             current_number = self.ordered_list_stack[-1]
-            self.text += f'{current_number}\\. ' # Number and escaped dot for ordered lists (preserves numbering across splits)
+            self.buffer.append(f'{current_number}\\. ') # Number and escaped dot for ordered lists (preserves numbering across splits)
             self.ordered_list_stack[-1] += 1 # Increment for next item in this ordered list
         else:
-            self.text += '\\- ' # Escaped hyphen for unordered list (safer than native bullet which can cause 'reserved character' errors)
-    def render_list_item_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self.text += '\n'
+            self.buffer.append('\\- ') # Escaped hyphen for unordered list (safer than native bullet which can cause 'reserved character' errors)
+    def render_list_item_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self.buffer.append('\n')
 
     def render_softbreak(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
-        self.text += '\n'
+        self.buffer.append('\n')
         if self.in_blockquote:
-            self.text += '\\> '
+            self.buffer.append('\\> ')
 
     def render_hardbreak(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
-        self.text += '\n'
+        self.buffer.append('\n')
         if self.in_blockquote:
-            self.text += '\\> '
+            self.buffer.append('\\> ')
 
     def render_inline(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self.render_default(token, tokens, index)
 
-    def render_strong_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self.text += '*'
-    def render_strong_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self.text += '*'
+    def render_strong_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self.buffer.append('*')
+    def render_strong_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self.buffer.append('*')
 
-    def render_em_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self.text += '_'
-    def render_em_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self.text += '_'
+    def render_em_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self.buffer.append('_')
+    def render_em_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self.buffer.append('_')
 
     def render_code_inline(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
-        self.text += f'`{telegram.helpers.escape_markdown(token.content, version=2)}`'
+        self.buffer.append(f'`{telegram.helpers.escape_markdown(token.content, version=2)}`')
 
     def render_fence(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
         lang = token.info.split()[0] if token.info else ''
         content = token.content.rstrip()
-        self.text += f'```{lang}\n{content}\n```\n'
+        self.buffer.append(f'```{lang}\n{content}\n```\n')
         
     def render_code_block(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
         # Indented code block -> Fenced code block
         content = token.content.rstrip()
-        self.text += f'```\n{content}\n```\n'
+        self.buffer.append(f'```{content}\n```\n')
 
     def render_blockquote_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
-        self.text += '\\> '
+        self.buffer.append('\\> ')
         self.in_blockquote = True
     def render_blockquote_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
-        self.text += '\n'
+        self.buffer.append('\n')
         self.in_blockquote = False
     
     def render_hr(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
-        self.text += '\n\\-\\-\\-\n'
+        self.buffer.append('\n\\-\\-\\-\n')
 
     def render_image(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
         # Render image as a link: [Alt Text](URL)
         alt = token.content or "Image"
         src = token.attrs.get('src', '')
-        self.text += f'[{telegram.helpers.escape_markdown(alt, version=2)}]({telegram.helpers.escape_markdown(src, version=2)})'
+        self.buffer.append(f'[{telegram.helpers.escape_markdown(alt, version=2)}]({telegram.helpers.escape_markdown(src, version=2)})')
 
     def render_link_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
-        self.text += '['
+        self.buffer.append('[')
         self.link_href = token.attrs.get('href', '')
     def render_link_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
         href = self.link_href or ''
-        self.text += f']({telegram.helpers.escape_markdown(href, version=2)})'
+        self.buffer.append(f']({telegram.helpers.escape_markdown(href, version=2)})')
         self.link_href = None
 
     # --- Table Handlers ---
     def render_table_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
         # Telegram doesn't support tables. We'll try to render it as a list of lines.
-        self.text += '\n'
+        self.buffer.append('\n')
     def render_table_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
-        self.text += '\n'
+        self.buffer.append('\n')
 
     def render_thead_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): pass
     def render_thead_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): pass
@@ -201,16 +201,16 @@ class TelegramV2Renderer:
 
     def render_tr_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): pass
     def render_tr_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
-        self.text += '\n'
+        self.buffer.append('\n')
 
     def render_th_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
-        self.text += '*' # Bold headers
+        self.buffer.append('*') # Bold headers
     def render_th_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
-        self.text += '* \\| '
+        self.buffer.append('* \\| ')
 
     def render_td_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): pass
     def render_td_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
-        self.text += ' \\| '
+        self.buffer.append(' \\| ')
 
 def format_for_telegram_v2(markdown_text: str) -> str:
     # 1. Format thinking blocks (DeepSeek R1 style)

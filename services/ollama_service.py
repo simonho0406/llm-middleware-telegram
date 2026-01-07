@@ -6,9 +6,52 @@ from typing import List, Dict, Optional, AsyncGenerator
 
 logger = logging.getLogger(__name__)
 
+_client_instance: Optional[ollama.AsyncClient] = None
+
 def get_ollama_client() -> ollama.AsyncClient:
-    """Creates and returns a new Ollama async client."""
-    return ollama.AsyncClient(host=config.OLLAMA_HOST)
+    """Returns a shared Ollama async client instance."""
+    global _client_instance
+    if _client_instance is None:
+        _client_instance = ollama.AsyncClient(host=config.OLLAMA_HOST)
+    return _client_instance
+
+async def close():
+    """Closes the shared Ollama client."""
+    global _client_instance
+    if _client_instance:
+        # Ollama's AsyncClient doesn't have a close() method exposed directly usually?
+        # Actually it uses httpx.AsyncClient under the hood. 
+        # Checking library source or docs is key. 
+        # Standard httpx client pattern: await client.aclose() or similar?
+        # Creating a new client: `self._client = httpx.AsyncClient(...)`
+        # It seems `ollama` python lib v0.x might not expose close easily on the wrapper.
+        # But wait, looking at my search result: "Access Asynchronous Methods via client.aio". That was Gemini.
+        # For Ollama: `AsyncClient` inherits from `BaseClient`.
+        # Taking a safer bet: If it has .close(), call it. If it has .aclose(), call it.
+        # Most httpx wrappers support .close() (sync) or .aclose() (async).
+        # Let's try to close the internal _client if accessible, or just plain close().
+        
+        # Best effort cleanup
+        pass 
+        # WAIT: The implementation plan said "Add close() method". 
+        # I should try to close it if possible. 
+        # If the library doesn't expose it, I can at least set it to None.
+        pass
+        
+    # Actually, let's implement a proper async close if the library supports it.
+    # If not, we just clear the reference.
+    if _client_instance:
+         # Check for httpx client
+         if hasattr(_client_instance, '_client') and hasattr(_client_instance._client, 'aclose'):
+             await _client_instance._client.aclose()
+         elif hasattr(_client_instance, 'close'):
+             if asyncio.iscoroutinefunction(_client_instance.close):
+                 await _client_instance.close()
+             else:
+                 _client_instance.close()
+         
+         _client_instance = None
+         logger.info("Ollama client closed.")
 
 async def check_ollama_health(client: ollama.AsyncClient) -> bool:
     """
@@ -72,6 +115,11 @@ async def _generate_single_model_non_streaming(model: str, prompt: str, context_
     if context_history:
         for msg in context_history:
             role = msg.get('role', 'user').lower()
+            
+            # Map internal roles
+            if role == 'assistant:panel':
+                role = 'assistant'
+            
             if role not in ['user', 'assistant']: 
                 role = 'user'
             messages.append({'role': role, 'content': msg.get('content', '')})

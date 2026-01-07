@@ -8,9 +8,13 @@ import config
 logger = logging.getLogger(__name__)
 
 # Define the type hint for the async post_init function
+# Define the type hint for the async post_init function
 PostInitFunc = Callable[[Application], Awaitable[None]]
 
-def create_application(post_init_hook: PostInitFunc | None = None) -> Application:
+# Define the type hint for the async post_shutdown function
+PostShutdownFunc = Callable[[Application], Awaitable[None]]
+
+def create_application(post_init_hook: PostInitFunc | None = None, post_shutdown_hook: PostShutdownFunc | None = None) -> Application:
     """Creates and configures the Telegram Bot Application."""
     if not config.TELEGRAM_BOT_TOKEN or config.TELEGRAM_BOT_TOKEN == "YOUR_TELEGRAM_BOT_TOKEN":
         logger.error("Telegram Bot Token is not configured. Exiting.")
@@ -38,6 +42,10 @@ def create_application(post_init_hook: PostInitFunc | None = None) -> Applicatio
     # Add the post_init hook if provided
     if post_init_hook:
         builder.post_init(post_init_hook)
+        
+    # Add the post_shutdown hook if provided
+    if post_shutdown_hook:
+        builder.post_shutdown(post_shutdown_hook)
 
     # Build the Application
     application = builder.build()

@@ -32,6 +32,11 @@ async def generate_response(
         for msg in context_history:
              # Ensure roles are 'user' or 'assistant'
              role = msg.get('role', 'user').lower()
+             
+             # Map internal roles
+             if role == 'assistant:panel':
+                 role = 'assistant'
+                 
              if role not in ['user', 'assistant']:
                  role = 'user' # Default to user if role is invalid
              messages.append({"role": role, "content": msg.get('content', '')})
@@ -249,6 +254,11 @@ async def _generate_single_model_non_streaming(model_id: str, prompt: str, conte
     if context_history:
         for msg in context_history:
              role = msg.get('role', 'user').lower()
+             
+             # Map internal roles
+             if role == 'assistant:panel':
+                 role = 'assistant'
+                 
              if role not in ['user', 'assistant']: role = 'user'
              messages.append({"role": role, "content": msg.get('content', '')})
     # FIX: Only append the prompt if it's not an empty string

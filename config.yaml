@@ -91,10 +91,8 @@ expert_panel:
 
   # Orchestrator (Project Manager) - Keep original working configuration
   orchestrator:
-    # provider: "nvidia"
-    # model: "nvidia/llama-3.3-nemotron-super-49b-v1.5"
-    provider: "openrouter"
-    model: "amazon/nova-2-lite-v1:free"
+    provider: "nvidia"
+    model: "nvidia/nemotron-3-nano-30b-a3b"
     fallback_provider: "nvidia"
     fallback_model: "openai/gpt-oss-120b"
     request_timeout_seconds: 600

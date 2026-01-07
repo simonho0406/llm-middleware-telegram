@@ -30,6 +30,7 @@ class OpenAICompatibleService:
                 api_key=self.api_key,
                 http_client=httpx.AsyncClient(timeout=config.get_request_timeout_seconds()),
                 default_headers={"OpenAI-Version": self.api_version} if self.api_version else None,
+                max_retries=0, # Disable library-level retries; rely on app-level logic
             )
             logger.info(f"OpenAICompatibleService initialized for provider '{self.provider_name}' with base URL '{self.base_url}'")
         except Exception as e:
@@ -39,6 +40,12 @@ class OpenAICompatibleService:
         self.max_retries = provider_config.get('max_retries', 3)
         self.initial_delay = provider_config.get('initial_delay', 1)
         self.enable_streaming = provider_config.get('enable_streaming', True)  # Allow disabling streaming per provider
+
+    async def close(self):
+        """Explicitly close the underlying HTTP client."""
+        if self.client:
+            await self.client.close()
+            logger.info(f"Closed OpenAICompatibleService client for '{self.provider_name}'")
 
     async def list_models(self) -> list[str]:
         if not hasattr(self.client.models, 'list'):
@@ -82,7 +89,18 @@ class OpenAICompatibleService:
 
         messages = []
         if context_history:
-            messages.extend(context_history)
+            # Sanitize roles for strict APIs (e.g. NVIDIA)
+            # Map 'assistant:panel' -> 'assistant', leave others as is
+            for msg in context_history:
+                role = msg.get("role", "")
+                content = msg.get("content", "")
+                
+                # strict validation fix: map internal roles to API-allowed roles
+                if role == "assistant:panel":
+                    role = "assistant"
+                    
+                messages.append({"role": role, "content": content})
+                
         if prompt:
             messages.append({"role": "user", "content": prompt})
 

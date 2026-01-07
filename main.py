@@ -8,7 +8,7 @@ from bot.menu_setup import setup_bot_commands_and_menu
 from bot.application import create_application
 import config # To access config variables if needed directly
 # Import provider initialization function
-from bot.providers import get_provider_details
+from bot.providers import get_provider_details, shutdown_providers
 from storage import storage_manager
 
 # Configure logging
@@ -123,6 +123,11 @@ def main() -> None:
         except Exception as e:
             logger.error(f"Failed to get bot info: {e}")
 
+    async def cleanup_services(application: Application):
+        """Lifecycle hook to clean up resources on shutdown."""
+        logger.info("Running shutdown lifecycle hook...")
+        await shutdown_providers()
+
     async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error("Exception while handling an update:", exc_info=context.error)
         if isinstance(update, Update) and update.effective_message:
@@ -148,7 +153,7 @@ def main() -> None:
     while True:
         try:
             logger.info("Creating application...")
-            app = create_application(post_init_hook=post_init_with_commands)
+            app = create_application(post_init_hook=post_init_with_commands, post_shutdown_hook=cleanup_services)
 
             # Register Handlers
             # High-priority group for conversation handlers (group=0)

@@ -55,18 +55,28 @@ MODEL_CONTEXT_LIMITS = {
     "_default": ModelContextLimits(4096, 1024, 1024, False)
 }
 
-def count_tokens(text: str) -> int:
-    """Enhanced token counting with better accuracy."""
+
+try:
+    import tiktoken
     try:
-        import tiktoken
-        encoder = tiktoken.get_encoding("cl100k_base")
-        return len(encoder.encode(text))
-    except ImportError:
-        # Fallback estimation: ~4 characters per token
-        return len(text) // 4
+        # Global encoder instance to avoid overhead on every call (cached)
+        _TIKTOKEN_ENCODER = tiktoken.get_encoding("cl100k_base")
     except Exception:
-        # Emergency fallback
-        return len(text) // 4
+        _TIKTOKEN_ENCODER = None
+except ImportError:
+    _TIKTOKEN_ENCODER = None
+
+def count_tokens(text: str) -> int:
+    """Enhanced token counting with better accuracy and caching."""
+    if _TIKTOKEN_ENCODER:
+        try:
+            return len(_TIKTOKEN_ENCODER.encode(text))
+        except Exception:
+             # Fallback if encoding fails for some reason
+             pass
+    
+    # Fallback estimation: ~4 characters per token
+    return len(text) // 4
 
 import config
 
@@ -81,7 +91,7 @@ def get_model_context_limits(model: str, provider: str) -> ModelContextLimits:
     else:
         # Unknown model: Assume it supports exactly what the user configured
         # This allows the user_max_tokens to be the sole limiting factor
-        logger.info(f"No hardcoded limits for {model}, defaulting to user configuration.")
+        logger.debug(f"No hardcoded limits for {model}, defaulting to user configuration.")
         
         # Use values directly from config.yaml
         # This ensures no hardcoded magic numbers dictate the fallback behavior
@@ -117,105 +127,69 @@ def get_model_context_limits(model: str, provider: str) -> ModelContextLimits:
         supports_long_context=base_limits.supports_long_context
     )
 
-# Removed complex user strategy selection - now using simple automatic truncation
-
-async def calculate_context_usage(
-    prompt: str,
-    history: List[Dict[str, str]],
-    model: str,
-    provider: str
-) -> Tuple[int, int, bool]:
-    """
-    Calculate current context usage and determine if truncation is needed.
-
-    Returns:
-        (current_tokens, max_allowed_tokens, needs_truncation)
-    """
-    limits = get_model_context_limits(model, provider)
-
-    prompt_tokens = count_tokens(prompt)
-    history_tokens = sum(count_tokens(msg.get("content", "")) for msg in history)
-    total_tokens = prompt_tokens + history_tokens
-
-    needs_truncation = total_tokens > limits.effective_input_limit
-
-    logger.debug(f"Context usage: {total_tokens}/{limits.effective_input_limit} tokens (prompt: {prompt_tokens}, history: {history_tokens})")
-
-    return total_tokens, limits.effective_input_limit, needs_truncation
-
-async def truncate_to_fit_context(
-    history: List[Dict[str, str]],
-    prompt: str,
-    model: str,
-    provider: str
-) -> Tuple[List[Dict[str, str]], int]:
-    """
-    Truncate conversation history to fit within model's context window.
-    Keeps the most recent messages that fit, preserving as much context as possible.
-
-    Returns:
-        (truncated_history, tokens_removed)
-    """
-    limits = get_model_context_limits(model, provider)
-    prompt_tokens = count_tokens(prompt)
-    available_tokens = limits.effective_input_limit - prompt_tokens
-
-    if available_tokens <= 0:
-        logger.warning(f"Prompt alone ({prompt_tokens} tokens) exceeds context limit for {model}")
-        return [], 0
-
-    original_tokens = sum(count_tokens(msg.get("content", "")) for msg in history)
-
-    if original_tokens <= available_tokens:
-        # Everything fits, no truncation needed
-        return history, 0
-
-    # Truncate from the beginning, keeping most recent messages
-    truncated_history = []
-    current_tokens = 0
-
-    for msg in reversed(history):
-        msg_tokens = count_tokens(msg.get("content", ""))
-        if current_tokens + msg_tokens <= available_tokens:
-            truncated_history.insert(0, msg)
-            current_tokens += msg_tokens
-        else:
-            # This message would exceed the limit, stop here
-            break
-
-    tokens_removed = original_tokens - current_tokens
-
-    logger.info(f"Context truncated for {model}: {len(history)} -> {len(truncated_history)} messages, "
-                f"removed {tokens_removed} tokens (kept {current_tokens}/{available_tokens} available)")
-
-    return truncated_history, tokens_removed
-
 async def ensure_context_fits(
     prompt: str,
     history: List[Dict[str, str]],
     model: str,
-    provider: str
+    provider: str,
+    safety_margin: float = 1.0
 ) -> Tuple[List[Dict[str, str]], Optional[str]]:
     """
     Ensure the context fits within the model's limits by truncating if necessary.
-
+    Optimized to calculate usage and truncate in a single pass.
+    
+    Args:
+        safety_margin (float): Multiplier for the available context limit (default 1.0). 
+                              Use < 1.0 to leave extra room (e.g. 0.8 for 20% buffer).
+    
     Returns:
         (final_history, info_message)
     """
-    current_tokens, max_tokens, needs_truncation = await calculate_context_usage(
-        prompt, history, model, provider
-    )
+    limits = get_model_context_limits(model, provider)
+    prompt_tokens = count_tokens(prompt)
+    
+    # Calculate effective limit with safety margin
+    # We apply the margin to the total input limit to effectively reserve more space
+    effective_limit_tokens = int(limits.effective_input_limit * safety_margin)
+    available_tokens = effective_limit_tokens - prompt_tokens
+    
+    # If prompt alone is too big, just return empty history (and let generation likely fail or truncate prompt elsewhere)
+    if available_tokens <= 0:
+        logger.warning(f"Prompt alone ({prompt_tokens} tokens) exceeds context limit for {model} (Limit: {limits.effective_input_limit})")
+        return [], f"Prompt too long for {model} context window."
 
-    if not needs_truncation:
-        return history, None
-
-    # Automatically truncate to fit
-    truncated_history, tokens_removed = await truncate_to_fit_context(
-        history, prompt, model, provider
-    )
-
-    if tokens_removed > 0:
-        info_message = f"Context automatically adjusted for {model}: removed {tokens_removed} tokens from conversation history"
+    # Process history in reverse (newest to oldest) to fill available space
+    truncated_history = []
+    current_tokens = 0
+    messages_kept = 0
+    
+    # Iterate backwards
+    for msg in reversed(history):
+        content = msg.get("content", "")
+        # Optimize: Avoid counting if content is empty
+        msg_tokens = count_tokens(content) if content else 0
+        
+        if current_tokens + msg_tokens <= available_tokens:
+            # We insert at 0 to reconstruct correct order
+            truncated_history.insert(0, msg)
+            current_tokens += msg_tokens
+            messages_kept += 1
+        else:
+            # Context full. Stop.
+            break
+            
+    # Check if we removed anything
+    original_count = len(history)
+    if messages_kept < original_count:
+        tokens_removed = sum(count_tokens(m.get("content", "")) for m in history) - current_tokens # Estimate removed tokens
+        # Optimization: calculating exact tokens_removed requires counting the excluded ones. 
+        # For logging, we can just say "truncated".
+        # But if we want exact number, we'd have to count the rest. 
+        # For performance, let's just log message count difference.
+        
+        logger.info(f"Context truncated for {model}: {original_count} -> {messages_kept} messages. Used {current_tokens}/{available_tokens} tokens.")
+        info_message = f"Context automatically adjusted for {model}: kept {messages_kept}/{original_count} messages"
         return truncated_history, info_message
-    else:
-        return history, None
+    
+    logger.debug(f"Context fits: {current_tokens}/{available_tokens} tokens.")
+    return history, None

@@ -102,11 +102,16 @@ async def _generate_llm_response(chat_id: int, prompt: str, is_reroll: bool = Fa
     # Automatically ensure context fits within model limits
     from utils.context_manager import ensure_context_fits
 
+    # If force_truncate is active (e.g. from retry), apply a safety margin to reduce context size
+    # This helps when the model is returning empty responses near the limit
+    safety_margin = 0.75 if force_truncate else 1.0
+
     final_history, context_info = await ensure_context_fits(
         prompt=prompt,
         history=processed_history,
         model=model_to_use,
-        provider=session_provider
+        provider=session_provider,
+        safety_margin=safety_margin
     )
 
     if context_info:
@@ -168,7 +173,12 @@ async def _generate_llm_response(chat_id: int, prompt: str, is_reroll: bool = Fa
             search_query = None  # Clear search query since we're not using it
 
     final_content = raw_full_llm_response.strip()
+    final_content = raw_full_llm_response.strip()
     if not final_content:
+        if not force_truncate and not llm_error_reported_by_model:
+             logger.warning(f"{log_prefix}Empty response received from model. Retrying with forced context truncation...")
+             return await _generate_llm_response(chat_id, prompt, is_reroll, force_truncate=True, operation_id=operation_id)
+        
         final_content = "[Error: The AI returned an empty response. This might be due to a content filter or an issue with the selected model. Please try rerolling or using a different model.]"
         llm_error_reported_by_model = True
 

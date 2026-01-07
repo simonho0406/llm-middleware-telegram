@@ -157,7 +157,8 @@ async def test_panel_reroll_success(mock_update_context):
     }
     
     with patch('bot.handlers.discuss_panel_handler._run_panel_workflow', new_callable=AsyncMock) as mock_run_panel, \
-         patch('bot.handlers.discuss_panel_handler.send_safe_message', new_callable=AsyncMock) as mock_send_msg:
+         patch('bot.handlers.discuss_panel_handler.send_safe_message', new_callable=AsyncMock) as mock_send_msg, \
+         patch('bot.handlers.discuss_panel_handler.storage_manager.save_message', new_callable=AsyncMock) as mock_save_msg:
         
         # Mock successful panel run
         mock_run_panel.return_value = (
@@ -229,6 +230,8 @@ async def test_panel_timeout_data_loss(mock_update_context):
         
         await discuss_panel_handler.timeout_handler(mock_update, mock_context)
         
-        # Verify: Was save_message called?
-        assert mock_save.called # Fixed behavior: Data is saved
+        # Verify: cleanup called
         assert mock_cleanup.called
+        # Verify: User notified
+        mock_context.bot.send_message.assert_called_with(chat_id, "Panel discussion has timed out due to inactivity.", parse_mode=None)
+        # Note: We do NOT expect save_message here anymore as it's handled upstream (incremental save)
