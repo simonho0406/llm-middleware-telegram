@@ -1,3 +1,7 @@
+import warnings
+# Suppress Google Generative AI deprecation warning (Migration tracked in Ticket MIGRATE_GEMINI_V1)
+warnings.filterwarnings("ignore", category=FutureWarning, module="google.generativeai")
+
 import google.generativeai as genai
 from google.api_core import exceptions as google_exceptions
 import logging
