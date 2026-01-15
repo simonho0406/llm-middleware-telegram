@@ -189,34 +189,3 @@ async def check_status() -> (bool, str):
     is_healthy = await check_ollama_health(client)
     message = f"Service is {'reachable' if is_healthy else 'unreachable'} at {config.OLLAMA_HOST}"
     return is_healthy, message
-
-# Example usage (for testing purposes)
-async def _test():
-    print("Testing Ollama Service...")
-    if not await check_status():
-        print("Ollama connection failed. Exiting test.")
-        return
-
-    models = await list_models()
-    print(f"Available models: {models}")
-    if not models:
-        print("No models found. Cannot test generation.")
-        return
-
-    test_model = config.get_default_ollama_model()
-    if test_model not in models:
-        print(f"Default model '{test_model}' not found in available models: {models}. Using first available model.")
-        test_model = models[0]
-
-    print(f"\nTesting generation with model: {test_model}")
-    prompt = "Why is the sky blue?"
-    print(f"Prompt: {prompt}")
-    full_response = ""
-    async for chunk in generate_response(model=test_model, prompt=prompt):
-        print(chunk, end="", flush=True)
-        full_response += chunk
-    print("\n--- End of Generation ---")
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(_test())

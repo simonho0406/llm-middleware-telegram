@@ -289,7 +289,7 @@ async def _generate_single_model_non_streaming(model_id: str, prompt: str, conte
         logger.error(f"HTTP Error during concurrent OpenRouter generation (Model: {model_id}): {http_err}")
         try:
             err_details = http_err.response.json().get('error', {}).get('message', str(http_err))
-        except: # Handle cases where error response is not JSON
+        except ValueError: # Handle cases where error response is not JSON
             err_details = str(http_err)
         return f"[HTTP Error {http_err.response.status_code}: {err_details}]"
     except httpx.ReadTimeout:

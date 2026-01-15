@@ -67,8 +67,9 @@ async def test_search_retry_flow():
         
         with patch('bot.providers.get_provider_details') as mock_get_providers, \
              patch('config.get_default_provider', return_value='mock_provider'), \
-             patch('storage.storage_manager.get_thread_key', new_callable=AsyncMock) as mock_get_key, \
-             patch('storage.storage_manager.save_message', new_callable=AsyncMock) as mock_save, \
+             patch('bot.handlers.misc_commands.storage_manager.get_thread_key', new_callable=AsyncMock) as mock_get_key, \
+             patch('bot.handlers.misc_commands.storage_manager.save_message', new_callable=AsyncMock) as mock_save, \
+             patch('bot.handlers.misc_commands.storage_manager.get_thread_history', new_callable=AsyncMock) as mock_history, \
              patch('bot.response_generator._generate_llm_response', new_callable=AsyncMock) as mock_gen_llm:
             
             mock_get_providers.return_value = {

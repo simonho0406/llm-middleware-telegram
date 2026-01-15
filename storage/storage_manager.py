@@ -24,3 +24,10 @@ set_user_setting = backend.set_user_setting
 get_current_thread_id = backend.get_current_thread_id
 get_thread_key = backend.get_thread_key
 set_thread_key = backend.set_thread_key
+remove_last_assistant_message = backend.remove_last_assistant_message
+create_thread = backend.create_thread
+delete_thread = backend.delete_thread
+list_threads = backend.list_threads
+rename_thread = backend.rename_thread
+# Alias for backward compatibility (used in misc_commands.py /new)
+set_thread_history = backend.replace_thread_history_dangerous

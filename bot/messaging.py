@@ -82,6 +82,16 @@ async def send_safe_message(
                 )
         return True
 
+    except BadRequest as e:
+        if "message is not modified" in str(e).lower():
+            # This is benign; we tried to update with the same content.
+            # Treat it as a success to avoid scary logs and retries.
+            logger.debug(f"{log_prefix}Swallowed MessageNotModified error.")
+            return True
+        else:
+            logger.warning(f"{log_prefix}AST pipeline failed: {e}. Falling back to simple text.")
+            # Fall through to fallback logic
+
     except Exception as e:
         logger.warning(f"{log_prefix}AST pipeline failed: {e}. Falling back to simple text.")
         # The existing fallback logic remains the same.

@@ -144,39 +144,39 @@ async def check_status() -> (bool, str):
 
 # Example usage (for testing purposes)
 async def _test():
-    print("Testing Gemini Service...")
+    logger.info("Testing Gemini Service...")
     # This test function is now simplified as check_connection is removed.
     # A simple call to list_models can serve as a connection check.
-    print("Attempting to list models to check connection...")
+    logger.info("Attempting to list models to check connection...")
     models = await list_models()
     if not models:
-        print("Gemini connection failed or no models found.")
+        logger.warning("Gemini connection failed or no models found.")
         return
-    print(f"Found {len(models)} models. Connection successful.")
+    logger.info(f"Found {len(models)} models. Connection successful.")
 
     test_model_single = config.get_default_gemini_model()
-    print(f"\nTesting single response streaming with model: {test_model_single}")
+    logger.info(f"\nTesting single response streaming with model: {test_model_single}")
+    logger.info(f"Prompt: {prompt_single}")
     prompt_single = "Why is the sky blue?"
-    print(f"Prompt: {prompt_single}")
     full_response_single = ""
     async for chunk in generate_response(model=test_model_single, prompt=prompt_single):
         print(chunk, end="", flush=True)
         full_response_single += chunk
-    print("\n--- End of Single Generation ---")
+    logger.info("\n--- End of Single Generation ---")
 
     if config.get_gemini_ask_all_models():
-        print(f"\nTesting concurrent generation with models: {config.get_gemini_ask_all_models()}")
+        logger.info(f"\nTesting concurrent generation with models: {config.get_gemini_ask_all_models()}")
         prompt_concurrent = "Write a short poem about a cat."
-        print(f"Prompt: {prompt_concurrent}")
+        logger.info(f"Prompt: {prompt_concurrent}")
         concurrent_results = await generate_concurrent_responses(prompt=prompt_concurrent)
-        print("\n--- Concurrent Results ---")
+        logger.info("\n--- Concurrent Results ---")
         for model, response in concurrent_results.items():
-            print(f"--- Model: {model} ---")
-            print(response)
-            print("-" * (len(model) + 14))
-        print("--- End of Concurrent Results ---")
+            logger.info(f"--- Model: {model} ---")
+            logger.info(response)
+            logger.info("-" * (len(model) + 14))
+        logger.info("--- End of Concurrent Results ---")
     else:
-        print("\nSkipping concurrent generation test: No models configured in 'gemini_ask_all_models'.")
+        logger.info("\nSkipping concurrent generation test: No models configured in 'gemini_ask_all_models'.")
 
 if __name__ == "__main__":
     import asyncio

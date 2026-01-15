@@ -846,8 +846,8 @@ async def _run_panel_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE
         refiner_fallback_used = refiner_llm_result['fallback_used']
         
         # Challenge C: Check if Refiner failed and gracefully fall back to proposer_response
-        if refiner_response.startswith("[Error:"):
-            logger.warning(f"Refiner failed: {refiner_response}. Using proposer response as final answer.")
+        if refiner_response.startswith("[Error:") or not refiner_response.strip():
+            logger.warning(f"Refiner failed or returned empty: {refiner_response}. Using proposer response as final answer.")
             final_answer = f"⚠️ **Warning:** The final refinement step was skipped due to an error. The following is the unpolished response.\n\n---\n\n{proposer_response}"
             refiner_status = 'Failure'
         else:
@@ -1029,6 +1029,11 @@ async def _cleanup_discussion_state(context: ContextTypes.DEFAULT_TYPE, chat_id:
         placeholder_msg: Optional message object to update with cancellation status
     """
     panel_task = context.user_data.get('panel_task')
+
+    # Try to find the placeholder in user_data if not explicitly provided
+    if not placeholder_msg:
+        placeholder_msg = context.user_data.get('panel_placeholder')
+
     if panel_task and not panel_task.done():
         panel_task.cancel()
         logger.info(f"Cancelled in-flight panel task for chat {chat_id}.")
@@ -1037,8 +1042,10 @@ async def _cleanup_discussion_state(context: ContextTypes.DEFAULT_TYPE, chat_id:
         if placeholder_msg:
             try:
                 await placeholder_msg.edit_text("Discussion cancelled.", parse_mode=None)
-            except Exception as e:
+            except telegram.error.TelegramError as e:
                 logger.warning(f"Could not update placeholder message during cleanup: {e}")
+            except Exception as e:
+                logger.error(f"Unexpected error updating placeholder during cleanup: {e}")
         
         try:
             # Await the task to allow it to process the cancellation
@@ -1055,6 +1062,7 @@ async def _cleanup_discussion_state(context: ContextTypes.DEFAULT_TYPE, chat_id:
 
     context.user_data.pop('panel_task', None)
     context.user_data.pop('panel_state', None)
+    context.user_data.pop('panel_placeholder', None)  # Clear the placeholder reference
     
     # Reset the command menu back to the default
     await setup_bot_commands_and_menu(context.application, chat_id)
@@ -1252,6 +1260,12 @@ async def reroll_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
         if history_for_reroll and history_for_reroll[-1]['role'] == 'assistant':
             history_for_reroll.pop()
+            # Also remove from database to prevent duplication, matching standard reroll behavior
+            try:
+                await storage_manager.remove_last_assistant_message(chat_id)
+                logger.info(f"[{chat_id}] Removed last assistant message from DB for panel reroll.")
+            except Exception as e:
+                logger.error(f"Failed to remove last assistant message during panel reroll: {e}")
 
         try:
             panel_task = asyncio.create_task(

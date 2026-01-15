@@ -312,7 +312,8 @@ async def run_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             try:
                 await storage_manager.save_message(chat_id, 'user', discussion_data['user_prompt'])
                 await storage_manager.save_message(chat_id, 'assistant', final_transcript)
-            except:
+            except Exception as e:
+                logger.error(f"Failed to save emergency backup message: {e}")
                 pass
 
     except Exception as e:

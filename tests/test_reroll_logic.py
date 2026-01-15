@@ -68,18 +68,26 @@ async def test_normal_chat_reroll_dislike(mock_update_context):
         {'role': 'assistant', 'content': 'Why did the chicken cross the road?'}
     ]
     
-    with patch('bot.handlers.misc_commands.storage_manager.get_current_thread_id', new_callable=AsyncMock) as mock_get_thread_id, \
-         patch('bot.handlers.misc_commands.storage_manager.get_thread_key', new_callable=AsyncMock) as mock_get_key, \
-         patch('bot.response_generator.storage_manager.get_thread_history', new_callable=AsyncMock) as mock_get_history, \
-         patch('bot.response_generator.storage_manager.save_message', new_callable=AsyncMock) as mock_save_msg, \
-         patch('bot.response_generator.storage_manager.remove_last_assistant_message', new_callable=AsyncMock) as mock_remove_last, \
+    # Shared Mocks
+    mock_get_thread_id = AsyncMock(return_value="thread_1")
+    mock_get_key = AsyncMock(side_effect=lambda cid, key, default=None: "Tell me a joke" if key == 'last_user_prompt' else "mock_provider")
+    mock_get_history = AsyncMock(return_value=list(initial_history))
+    mock_save_msg = AsyncMock()
+    mock_remove_last = AsyncMock()
+    
+    with patch('storage.storage_manager.get_current_thread_id', mock_get_thread_id), \
+         patch('storage.storage_manager.get_thread_key', mock_get_key), \
+         patch('storage.storage_manager.get_thread_history', mock_get_history), \
+         patch('storage.storage_manager.save_message', mock_save_msg), \
+         patch('storage.storage_manager.remove_last_assistant_message', mock_remove_last), \
+         patch('bot.handlers.misc_commands.storage_manager.get_current_thread_id', mock_get_thread_id), \
+         patch('bot.handlers.misc_commands.storage_manager.get_thread_key', mock_get_key), \
+         patch('bot.response_generator.storage_manager.get_thread_history', mock_get_history), \
+         patch('bot.response_generator.storage_manager.save_message', mock_save_msg), \
+         patch('bot.response_generator.storage_manager.remove_last_assistant_message', mock_remove_last), \
          patch('bot.response_generator.send_safe_message', new_callable=AsyncMock) as mock_send_msg, \
          patch('bot.response_generator.providers.get_provider_details') as mock_get_providers:
 
-        mock_get_thread_id.return_value = "thread_1"
-        mock_get_key.side_effect = lambda cid, key, default=None: "Tell me a joke" if key == 'last_user_prompt' else "mock_provider"
-        mock_get_history.return_value = list(initial_history) # Return a copy
-        
         # Mock Provider Service
         mock_service = MagicMock()
         mock_service.generate_response.return_value = async_iter(["To get to the other side!"])
@@ -112,18 +120,26 @@ async def test_normal_chat_reroll_error(mock_update_context):
         {'role': 'assistant', 'content': '[Error: Division by zero]'}
     ]
     
-    with patch('bot.handlers.misc_commands.storage_manager.get_current_thread_id', new_callable=AsyncMock) as mock_get_thread_id, \
-         patch('bot.handlers.misc_commands.storage_manager.get_thread_key', new_callable=AsyncMock) as mock_get_key, \
-         patch('bot.response_generator.storage_manager.get_thread_history', new_callable=AsyncMock) as mock_get_history, \
-         patch('bot.response_generator.storage_manager.save_message', new_callable=AsyncMock) as mock_save_msg, \
-         patch('bot.response_generator.storage_manager.remove_last_assistant_message', new_callable=AsyncMock) as mock_remove_last, \
+    # Shared Mocks
+    mock_get_thread_id = AsyncMock(return_value="thread_1")
+    mock_get_key = AsyncMock(side_effect=lambda cid, key, default=None: "Calc 1/0" if key == 'last_user_prompt' else "mock_provider")
+    mock_get_history = AsyncMock(return_value=list(initial_history))
+    mock_save_msg = AsyncMock()
+    mock_remove_last = AsyncMock()
+    
+    with patch('storage.storage_manager.get_current_thread_id', mock_get_thread_id), \
+         patch('storage.storage_manager.get_thread_key', mock_get_key), \
+         patch('storage.storage_manager.get_thread_history', mock_get_history), \
+         patch('storage.storage_manager.save_message', mock_save_msg), \
+         patch('storage.storage_manager.remove_last_assistant_message', mock_remove_last), \
+         patch('bot.handlers.misc_commands.storage_manager.get_current_thread_id', mock_get_thread_id), \
+         patch('bot.handlers.misc_commands.storage_manager.get_thread_key', mock_get_key), \
+         patch('bot.response_generator.storage_manager.get_thread_history', mock_get_history), \
+         patch('bot.response_generator.storage_manager.save_message', mock_save_msg), \
+         patch('bot.response_generator.storage_manager.remove_last_assistant_message', mock_remove_last), \
          patch('bot.response_generator.send_safe_message', new_callable=AsyncMock) as mock_send_msg, \
          patch('bot.response_generator.providers.get_provider_details') as mock_get_providers:
 
-        mock_get_thread_id.return_value = "thread_1"
-        mock_get_key.side_effect = lambda cid, key, default=None: "Calc 1/0" if key == 'last_user_prompt' else "mock_provider"
-        mock_get_history.return_value = list(initial_history)
-        
         mock_service = MagicMock()
         mock_service.generate_response.return_value = async_iter(["Infinity!"])
         mock_get_providers.return_value = {
@@ -235,3 +251,74 @@ async def test_panel_timeout_data_loss(mock_update_context):
         # Verify: User notified
         mock_context.bot.send_message.assert_called_with(chat_id, "Panel discussion has timed out due to inactivity.", parse_mode=None)
         # Note: We do NOT expect save_message here anymore as it's handled upstream (incremental save)
+
+@pytest.mark.asyncio
+async def test_panel_reroll_db_cleanup(mock_update_context):
+    """
+    Story: User rerolls a panel outcome.
+    Expectation: The OLD outcome must be removed from the database before the new one is generated.
+    """
+    mock_update, mock_context = mock_update_context
+    chat_id = mock_update.effective_chat.id
+    
+    # Setup Panel State
+    import asyncio
+    mock_context.user_data['panel_state'] = {
+        "full_transcript": [
+            {"role": "user", "content": "Explain Quantum"},
+            {"role": "assistant", "content": "Old Answer"}
+        ],
+        "original_prompt": "Explain Quantum",
+        "lock": asyncio.Lock()
+    }
+    
+    with patch('bot.handlers.discuss_panel_handler._run_panel_workflow', new_callable=AsyncMock) as mock_run_panel, \
+         patch('bot.handlers.discuss_panel_handler.storage_manager.remove_last_assistant_message', new_callable=AsyncMock) as mock_remove_last, \
+         patch('bot.handlers.discuss_panel_handler.storage_manager.save_message', new_callable=AsyncMock) as mock_save_msg, \
+         patch('bot.handlers.discuss_panel_handler.send_safe_message', new_callable=AsyncMock):
+        
+        mock_run_panel.return_value = ({}, "New Answer", "Proposer Content")
+        
+        await discuss_panel_handler.reroll_discussion(mock_update, mock_context)
+        
+        # Verify db cleanup
+        assert mock_remove_last.called, "Must remove old assistant message from DB before rerolling"
+        mock_remove_last.assert_called_with(chat_id)
+
+@pytest.mark.asyncio
+async def test_panel_cancel_cleanup(mock_update_context):
+    """
+    Story: User cancels panel, or panel times out.
+    Expectation: The placeholder message (spinner) should be edited to 'Cancelled' to avoid stuck UI.
+    """
+    mock_update, mock_context = mock_update_context
+    chat_id = 12345
+    
+    # Setup context with a placeholder in user_data
+    mock_placeholder = AsyncMock()
+    mock_context.user_data['panel_placeholder'] = mock_placeholder
+    
+    mock_panel_task = MagicMock() # Use MagicMock for synchronous methods like done()
+    mock_panel_task.done.return_value = False
+    mock_panel_task.cancel = MagicMock()
+    # To be awaitable (for `await panel_task`), it needs __await__ or be compatible
+    # But since we use MagicMock, we might need to make it awaitable if the code awaits it.
+    # The code does `await panel_task`.
+    # Let's use AsyncMock but configure done() as a property or sync method?
+    # Easier: Just make done() return False on a MagicMock that has __await__.
+    
+    # Better approach:
+    mock_panel_task = AsyncMock()
+    mock_panel_task.done = MagicMock(return_value=False) 
+    
+    mock_context.user_data['panel_task'] = mock_panel_task
+    
+    # Execute cleanup WITHOUT passing placeholder explicitly (simulating /cancel command)
+    await discuss_panel_handler._cleanup_discussion_state(mock_context, chat_id)
+    
+    # Verify placeholder was edited
+    assert mock_placeholder.edit_text.called
+    assert "Discussion cancelled" in mock_placeholder.edit_text.call_args[0][0]
+    
+    # Verify cleanup
+    assert 'panel_placeholder' not in mock_context.user_data

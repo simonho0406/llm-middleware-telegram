@@ -53,16 +53,25 @@ async def test_full_user_flow_simulation():
     
     # Mock Storage Manager
     # Patching the local reference in response_generator is the most reliable way
-    with patch('storage.storage_manager.get_thread_history', new_callable=AsyncMock) as mock_get_history, \
-         patch('bot.response_generator.storage_manager.save_message', new_callable=AsyncMock) as mock_rg_save_message, \
-         patch('storage.storage_manager.save_message', new_callable=AsyncMock) as mock_sm_save_message, \
-         patch('storage.storage_manager.get_current_thread_id', new_callable=AsyncMock) as mock_get_thread_id, \
+    # Shared Mocks
+    mock_get_history = AsyncMock(return_value=[])
+    mock_sm_save_message = AsyncMock() # Canonical save
+    mock_rg_save_message = AsyncMock() # Response gen save
+    mock_chat_save_message = AsyncMock() # Chat handler save
+    mock_get_thread_id = AsyncMock(return_value="thread_1")
+    
+    # We patch all possible paths with the SAME objects where appropriate
+    with patch('storage.storage_manager.get_thread_history', mock_get_history), \
+         patch('storage.storage_manager.save_message', mock_sm_save_message), \
+         patch('storage.storage_manager.get_current_thread_id', mock_get_thread_id), \
+         patch('bot.handlers.chat.storage_manager.get_current_thread_id', mock_get_thread_id), \
+         patch('bot.handlers.chat.storage_manager.save_message', mock_chat_save_message), \
+         patch('bot.handlers.chat.storage_manager.get_thread_history', mock_get_history), \
+         patch('bot.response_generator.storage_manager.save_message', mock_rg_save_message), \
          patch('bot.response_generator._generate_llm_response', new_callable=AsyncMock) as mock_gen_response, \
          patch('bot.response_generator.send_safe_message', new_callable=AsyncMock) as mock_send_msg:
         
         # 1. Simulate Normal Message
-        mock_get_thread_id.return_value = "thread_1"
-        mock_get_history.return_value = []
         mock_gen_response.return_value = {
             'content': "Quantum computing is cool.",
             'error': None,

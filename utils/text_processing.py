@@ -427,7 +427,7 @@ def split_document_ast_aware(tokens: List, max_len: int = 4096) -> List[List]:
                 if token.attrs and 'start' in token.attrs:
                     try:
                         start = int(token.attrs['start'])
-                    except:
+                    except (ValueError, TypeError):
                         pass
                 ordered_list_counters.append(start)
             elif token.type == 'list_item_open':

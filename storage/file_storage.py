@@ -319,55 +319,10 @@ async def get_all_chat_ids() -> List[int]:
         return list(_sessions.keys())
 # Load sessions when the module is imported
 
-# Example usage (for testing purposes) - Needs update for new structure
-async def _test():
-    print("Testing File Storage (Threaded)...")
-    chat_id_1 = 123
-    chat_id_2 = 456
-
-    # Initial state
-    print(f"Initial session for {chat_id_1}: {await get_session(chat_id_1)}")
-    print(f"Initial current thread for {chat_id_1}: {await get_current_thread_id(chat_id_1)}")
-    print(f"Initial default thread data for {chat_id_1}: {await get_thread_data(chat_id_1)}")
-
-    # Set data in default thread
-    await set_thread_key(chat_id_1, "provider", "ollama")
-    await set_thread_key(chat_id_1, "ollama_model", "llama3:latest")
-    print(f"Default thread data for {chat_id_1} after set: {await get_thread_data(chat_id_1)}")
-
-    # Create and switch to a new thread
-    new_thread_name = "work_project"
-    await create_thread(chat_id_1, new_thread_name)
-    await set_current_thread_id(chat_id_1, new_thread_name)
-    print(f"Threads for {chat_id_1}: {await list_threads(chat_id_1)}")
-    print(f"Current thread for {chat_id_1}: {await get_current_thread_id(chat_id_1)}")
-
-    # Set data in the new thread
-    await set_thread_key(chat_id_1, "provider", "gemini")
-    await set_thread_key(chat_id_1, "history", [{"role": "user", "content": "hello"}])
-    print(f"'{new_thread_name}' thread data for {chat_id_1}: {await get_thread_data(chat_id_1)}")
-    print(f"Provider for current thread ({new_thread_name}): {await get_thread_key(chat_id_1, 'provider')}")
-
-    # Switch back to default
-    await set_current_thread_id(chat_id_1, _DEFAULT_THREAD_ID)
-    print(f"Current thread for {chat_id_1} after switch back: {await get_current_thread_id(chat_id_1)}")
-    print(f"Provider for current thread (default): {await get_thread_key(chat_id_1, 'provider')}")
-
-    # Delete the new thread
-    await delete_thread(chat_id_1, new_thread_name)
-    print(f"Threads for {chat_id_1} after delete: {await list_threads(chat_id_1)}")
-
-    # Simulate reload
-    print("\nSimulating reload...")
-    global _sessions
-    _sessions = {}
-    _load_sessions_from_file()
-    print(f"Reloaded session for {chat_id_1}: {await get_session(chat_id_1)}")
-    print(f"Reloaded default thread data for {chat_id_1}: {await get_thread_data(chat_id_1)}")
-
-
 if __name__ == "__main__":
     import asyncio
+    import os
+    from core import config
     # Ensure data dir exists for test
     DATA_DIR = os.path.dirname(config.get_session_file_path())
     if DATA_DIR and not os.path.exists(DATA_DIR):
