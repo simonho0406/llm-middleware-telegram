@@ -28,7 +28,8 @@ async def send_safe_message(
     update: Update, 
     text: str, 
     reply_markup=None,
-    is_edit: bool = False
+    is_edit: bool = False,
+    force_new: bool = False
 ):
     """
     A centralized and safe message sending function.
@@ -44,7 +45,8 @@ async def send_safe_message(
     log_prefix = f"(Chat {chat_id}) "
     
     # Determine if it's an edit based on the explicit parameter or the presence of a callback query.
-    is_edit = is_edit or (update.callback_query is not None)
+    # If force_new is True, explicitly disable edit mode.
+    is_edit = (is_edit or (update.callback_query is not None)) and not force_new
     
     reply_to_msg_id = update.effective_message.message_id if update.effective_message else None
 

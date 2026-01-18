@@ -140,6 +140,19 @@ async def generate_concurrent_responses(prompt: str, context_history: Optional[L
 
     return {model: res for model, res in zip(config.get_gemini_ask_all_models(), results)}
 
+async def _generate_single_model_non_streaming(model_id: str, prompt: str, context_history: Optional[List[Dict]] = None) -> str:
+    """Internal helper to generate a response from a single model non-streamingly (for /ask_selected)."""
+    full_response = ""
+    try:
+        async for chunk in generate_response(model=model_id, prompt=prompt, context_history=context_history):
+            if chunk.startswith("[Error:"): # Should handle error chunks better if possible
+                 pass # Or append? Let's just append everything.
+            full_response += chunk
+        return full_response.strip()
+    except Exception as e:
+        logger.error(f"Error in _generate_single_model_non_streaming for {model_id}: {e}")
+        return f"[Error: {e}]"
+
 async def check_status() -> (bool, str):
     """Checks if the Gemini service is configured."""
     is_configured = bool(config.GEMINI_API_KEYS)

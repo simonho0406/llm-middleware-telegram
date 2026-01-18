@@ -248,3 +248,15 @@ class OpenAICompatibleService:
         except ImportError:
             logger.warning("tiktoken not installed, falling back to word-based estimation")
             return sum(len(c["content"].split()) for c in content)
+
+    async def _generate_single_model_non_streaming(self, model: str, prompt: str, context_history: list = None) -> str:
+        """Helper to generate a complete string response using the existing generator logic."""
+        full_response = ""
+        try:
+            async for chunk in self.generate_response(model, prompt, context_history):
+                full_response += chunk
+        except Exception as e:
+            logger.error(f"Error in non-streaming generation for {self.provider_name}/{model}: {e}")
+            return f"[Error: {str(e)}]"
+        
+        return full_response.strip() if full_response else "[Error: Empty response]"

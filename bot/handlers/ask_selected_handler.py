@@ -14,48 +14,53 @@ from telegram.ext import (
 from typing import List, Dict, Any # Import missing types
 from hashlib import sha256 # Import sha256
 from telegram.helpers import escape_markdown # Import escape_markdown
+import re # Import regex for parsing grades
 
 import config
 from services import ollama_service, gemini_service, openrouter_service, openai_compatible_service
 from storage import storage_manager
 from bot.messaging import send_safe_message
+from bot import providers # Ensure this import exists
 
 logger = logging.getLogger(__name__)
 
 # Conversation states
-SELECT_PROVIDER, SELECT_MODELS, CONFIRM_MODELS = range(3)
+SELECT_PROVIDER, SELECT_MODELS, CONFIRM_MODELS, WAIT_FOR_PROMPT = range(4)
 # Callback data prefixes
 CALLBACK_PROVIDER_PREFIX = "ask_sel_prov_"
 CALLBACK_MODEL_PREFIX = "ask_sel_mod_"
 CALLBACK_ACTION_PREFIX = "ask_sel_act_"
-# ... (intermediate code preserved by tool ideally, but replace_file_content replaces block)
-# I need to use multi_replace or two replaces to avoid wiping code.
-# I will use replace_file_content for the import, then another for the usage.
-# But wait, I can just do one large replace if I knew the exact content. I don't want to guess.
-# I'll use separate replaces.
 
 
 # --- Helper Functions ---
 
 async def get_models_for_provider(provider: str) -> List[Dict[str, Any]]:
-    """Fetches models based on provider."""
+    """Fetches models based on provider using standard service lookup."""
     models = []
-    if provider == "ollama":
-        ollama_models = await ollama_service.list_models()
-        models = [{"id": m, "name": m} for m in ollama_models]
-    elif provider == "gemini":
-        # Fetch models dynamically from Gemini service
-        models = await gemini_service.list_models()
-    elif provider == "openrouter":
-        models = await openrouter_service.list_models() # Fetch free models
-    else:
-        # Handle custom OpenAI-compatible providers
+    
+    # 1. Try to get models from the service instance (Dynamic)
+    service = providers.get_service_for_provider(provider)
+    try:
+        if service and hasattr(service, 'list_models'):
+            # Some services return list of strings, others list of dicts
+            raw_models = await service.list_models()
+            if raw_models:
+                # Normalize to List[Dict]
+                if isinstance(raw_models[0], str):
+                    models = [{"id": m, "name": m} for m in raw_models]
+                elif isinstance(raw_models[0], dict):
+                    models = [{"id": m.get('id'), "name": m.get('name', m.get('id'))} for m in raw_models]
+    except Exception as e:
+        logger.warning(f"Failed to list models dynamically for {provider}: {e}")
+
+    # 2. Fallback to Config (Legacy/Static) if dynamic failed or returned empty
+    if not models:
         provider_config = providers.get_config_for_provider(provider)
         if provider_config and provider_config.get('allowed_models'):
             models = [{"id": model_id, "name": model_id} for model_id in provider_config['allowed_models']]
+            
     return models
 
-from bot import providers # Ensure this import exists
 
 def build_provider_keyboard() -> InlineKeyboardMarkup:
     """Builds a dynamic provider selection keyboard."""
@@ -65,17 +70,29 @@ def build_provider_keyboard() -> InlineKeyboardMarkup:
     keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data=f"{CALLBACK_ACTION_PREFIX}cancel")])
     return InlineKeyboardMarkup(keyboard)
 
-async def build_model_keyboard(provider: str, selected_models: set, context: ContextTypes.DEFAULT_TYPE) -> InlineKeyboardMarkup:
-    """Builds the model selection keyboard for a given provider."""
+async def build_model_keyboard(provider: str, selected_models: set, context: ContextTypes.DEFAULT_TYPE, page: int = 1) -> InlineKeyboardMarkup:
+    """Builds the model selection keyboard for a given provider with pagination."""
     models = await get_models_for_provider(provider)
     models.sort(key=lambda x: x.get('name', x.get('id')).lower())
+
+    ITEMS_PER_PAGE = 8
+    total_models = len(models)
+    
+    # Calculate slice
+    start_idx = (page - 1) * ITEMS_PER_PAGE
+    end_idx = min(start_idx + ITEMS_PER_PAGE, total_models)
+    
+    # Store current page in context for toggling
+    context.user_data['ask_selected_page'] = page
+    
+    current_page_models = models[start_idx:end_idx]
 
     keyboard = []
     row = []
     # Ensure model_metadata exists
     context.user_data.setdefault('model_metadata', {})
 
-    for model in models:
+    for model in current_page_models:
         model_id = model.get('id')
         model_name = model.get('name', model_id)
         display_name = model_name if len(model_name) < 25 else model_name[:22] + "..."
@@ -106,6 +123,15 @@ async def build_model_keyboard(provider: str, selected_models: set, context: Con
     if row:
         keyboard.append(row)
 
+    # Navigation Buttons
+    nav_buttons = []
+    if page > 1:
+        nav_buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"{CALLBACK_ACTION_PREFIX}page:{page-1}"))
+    if end_idx < total_models:
+        nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"{CALLBACK_ACTION_PREFIX}page:{page+1}"))
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+
     # Add action buttons
     keyboard.append([
         InlineKeyboardButton("⬅️ Back to Providers", callback_data=f"{CALLBACK_ACTION_PREFIX}back_providers"),
@@ -121,12 +147,24 @@ async def ask_selected_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     chat_id = update.effective_chat.id
     logger.info(f"Starting /ask_selected conversation for chat_id: {chat_id}")
 
-    if not context.args:
-        await update.message.reply_text("Please provide a prompt\. Usage: /ask_selected <your prompt>\.")
-        return ConversationHandler.END
+    prompt = None
+    if context.args:
+        prompt = " ".join(context.args)
+    elif update.message.text and update.message.text.startswith('/ask_selected'):
+         # Manual argument parsing for regex fallback
+         text = update.message.text
+         # Split by first space to separate command from args
+         parts = text.split(" ", 1)
+         if len(parts) > 1:
+             prompt = parts[1].strip()
+    
+    # Check reply fallback if prompt is still None
+    if not prompt and update.message.reply_to_message and update.message.reply_to_message.text:
+        prompt = update.message.reply_to_message.text
 
-    context.user_data['ask_selected_prompt'] = " ".join(context.args)
-    context.user_data['ask_selected_models'] = set() # Store as "provider:actual_model_id"
+    context.user_data['ask_selected_prompt'] = prompt
+    context.user_data['ask_selected_models'] = [] # Store as list to preserve order [provider:actual_model_id]
+    context.user_data['ask_selected_models_set'] = set() # Store as set for fast lookup
     context.user_data['model_metadata'] = {} # Initialize metadata mapping
 
     reply_markup = build_provider_keyboard()
@@ -140,8 +178,9 @@ async def select_provider_callback(update: Update, context: ContextTypes.DEFAULT
     provider = query.data[len(CALLBACK_PROVIDER_PREFIX):]
     context.user_data['current_provider_selection'] = provider
 
-    selected_models = context.user_data.get('ask_selected_models', set())
-    reply_markup = await build_model_keyboard(provider, selected_models, context) # Pass context
+    selected_models_set = context.user_data.get('ask_selected_models_set', set())
+    # Initialize page 1
+    reply_markup = await build_model_keyboard(provider, selected_models_set, context, page=1) # Pass context and page
 
     message_text = f"Select models from {provider} (Tap to toggle)"
     parse_mode = None
@@ -178,17 +217,24 @@ async def select_model_callback(update: Update, context: ContextTypes.DEFAULT_TY
     actual_model_id = model_meta['actual_id']
     selection_key = f"{provider}:{actual_model_id}" # Use actual ID for selection state
 
-    selected_models_set: set = context.user_data.get('ask_selected_models', set())
+    selected_models_list: list = context.user_data.get('ask_selected_models', [])
+    selected_models_set: set = context.user_data.get('ask_selected_models_set', set())
 
     if selection_key in selected_models_set:
         selected_models_set.remove(selection_key)
+        if selection_key in selected_models_list:
+             selected_models_list.remove(selection_key)
     else:
         selected_models_set.add(selection_key)
-    context.user_data['ask_selected_models'] = selected_models_set
+        selected_models_list.append(selection_key)
+        
+    context.user_data['ask_selected_models'] = selected_models_list
+    context.user_data['ask_selected_models_set'] = selected_models_set
 
     # Rebuild keyboard with updated selection state and context
     current_provider = context.user_data.get('current_provider_selection', provider)
-    reply_markup = await build_model_keyboard(current_provider, selected_models_set, context) # Pass context
+    current_page = context.user_data.get('ask_selected_page', 1)
+    reply_markup = await build_model_keyboard(current_provider, selected_models_set, context, page=current_page) # Pass context and current_page
     try:
         await query.edit_message_reply_markup(reply_markup=reply_markup)
     except BadRequest as e:
@@ -211,13 +257,13 @@ async def page_models_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     
     page = int(query.data.split(':')[-1])
     provider = context.user_data.get('current_provider_selection')
-    selected_models = context.user_data.get('ask_selected_models', set())
+    selected_models_set = context.user_data.get('ask_selected_models_set', set())
     
     if not provider:
         await query.edit_message_text("Error: Provider context lost. Please start over.")
         return ConversationHandler.END
     
-    reply_markup = await build_model_keyboard(provider, selected_models, context, page=page)
+    reply_markup = await build_model_keyboard(provider, selected_models_set, context, page=page)
     await query.edit_message_reply_markup(reply_markup=reply_markup)
     
     return SELECT_MODELS
@@ -236,25 +282,75 @@ async def done_selecting_callback(update: Update, context: ContextTypes.DEFAULT_
     await query.answer()
     chat_id = update.effective_chat.id
 
-    selected_models_set = context.user_data.get('ask_selected_models', set())
+    selected_models_list = context.user_data.get('ask_selected_models', [])
+    selected_models_set = context.user_data.get('ask_selected_models_set', set())
     prompt = context.user_data.get('ask_selected_prompt', '')
     model_metadata = context.user_data.get('model_metadata', {}) # Get metadata
 
     if not selected_models_set:
         await query.edit_message_text("No models selected. Cancelling.")
         return ConversationHandler.END
+    
     if not prompt:
-         await query.edit_message_text("Error: Prompt not found. Cancelling.")
-         return ConversationHandler.END
+         await query.edit_message_text("Please enter your prompt now:")
+         return WAIT_FOR_PROMPT
 
-    # Use display names for the confirmation message
+    return await _execute_council_flow(update, context, prompt, selected_models_list, model_metadata)
+
+async def wait_for_prompt_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handles the user input prompt after model selection."""
+    prompt = update.message.text
+    context.user_data['ask_selected_prompt'] = prompt
+    
+    selected_models_list = context.user_data.get('ask_selected_models', [])
+    model_metadata = context.user_data.get('model_metadata', {})
+    
+    return await _execute_council_flow(update, context, prompt, selected_models_list, model_metadata)
+
+async def _execute_council_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, prompt: str, selected_list: list, model_metadata: dict) -> int:
+    """Executes the Council flow (Chairman Synthesis)."""
+    
+    status_message = None
+    chat_id = update.effective_chat.id
+    
+    if update.callback_query:
+        # Case 1: Callback Query (Done button)
+        query = update.callback_query
+        try:
+            # Delete the selection keyboard/message explicitly
+            await query.message.delete()
+        except BadRequest:
+            pass 
+            
+        # Send a FRESH status message
+        status_message = await context.bot.send_message(
+            chat_id=chat_id,
+            text="Council is deliberating... 🏛️",
+            parse_mode=None
+        )
+    else:
+        # Case 2: User sent a text prompt (Wait for prompt)
+        status_message = await update.message.reply_text("Council is deliberating... 🏛️")
+
+    # Use display names for logs/status
     display_names = []
-    selected_list = sorted(list(selected_models_set)) # Keep sorted list of provider:actual_id
+    
+    # Identify Chairman (First selected model)
+    chairman_key = selected_list[0]
+    chairman_provider, chairman_id = chairman_key.split(":", 1)
+    
+    # Get Chairman Display Name
+    chairman_meta = None
+    for meta in model_metadata.values():
+         if meta['actual_id'] == chairman_id and meta['provider'] == chairman_provider:
+              chairman_meta = meta
+              break
+    chairman_display_name = chairman_meta['display'] if chairman_meta else chairman_id
+    
     for item in selected_list:
          provider, actual_id = item.split(":", 1)
-         # Find the display name from metadata (might need reverse lookup if keys are hashes)
+         # Find display name
          display_name = actual_id # Fallback
-         # Find the hash key corresponding to this actual_id and provider
          found_meta = None
          for meta in model_metadata.values():
               if meta['actual_id'] == actual_id and meta['provider'] == provider:
@@ -267,20 +363,20 @@ async def done_selecting_callback(update: Update, context: ContextTypes.DEFAULT_
 
     logger.info(f"Executing /ask_selected for chat {chat_id} with models: {selected_list} and prompt: '{prompt}'")
 
-    try:
-        await query.edit_message_text(
-            f"Asking selected models: {escape_markdown(', '.join(display_names), version=2)}\.\.\.",
-            parse_mode='MarkdownV2'
-        )
-    except BadRequest as e:
-         logger.error(f"Failed to edit confirmation message: {e}")
-         # Continue execution even if edit fails
-    placeholder_message = query.message
+    if status_message:
+        try:
+            # Edit the FRESH status message
+            await status_message.edit_text(
+                f"Asking selected models w/ Chairman *{escape_markdown(chairman_display_name, version=2)}*: {escape_markdown(', '.join(display_names), version=2)}\.\.\.",
+                parse_mode='MarkdownV2'
+            )
+        except BadRequest as e:
+             logger.error(f"Failed to edit status message: {e}")
 
     # --- Execute Concurrent Queries ---
     tasks = []
     model_map = {}
-    results = {} # Initialize results dict here
+    results = {} 
 
     # Fetch context history (limit to 500 lines)
     chat_id = update.effective_chat.id
@@ -290,46 +386,25 @@ async def done_selecting_callback(update: Update, context: ContextTypes.DEFAULT_
         logger.error(f"Failed to fetch history for ask_selected: {e}")
         context_history = []
 
-    for item in selected_list: # Use selected_list which contains provider:actual_id
-        provider, actual_id = item.split(":", 1) # Now splitting the correct key
+    for item in selected_list:
+        provider, actual_id = item.split(":", 1)
         service = None
 
         # Find display name for logging/error messages
-        display_name = actual_id # Fallback
+        display_name = actual_id 
         for meta in model_metadata.values():
              if meta['actual_id'] == actual_id and meta['provider'] == provider:
                   display_name = meta['display']
                   break
 
-        task_model_key = f"{provider}:{display_name}" # Key for results dict
-
-        actual_id_for_api = actual_id # Default
+        task_model_key = f"{provider}:{display_name}"
+        actual_id_for_api = actual_id 
 
         if provider == "ollama":
-            service = ollama_service
-            try:
-                available_models = await ollama_service.list_models()
-                if actual_id not in available_models:
-                    logger.error(f"Model {display_name} ({actual_id}) not found locally in Ollama.")
-                    results[task_model_key] = f"[Model Not Found: {display_name}]"
-                    continue # Skip this model
-            except Exception as e:
-                 logger.error(f"Failed to list Ollama models: {e}")
-                 results[task_model_key] = f"[Error checking Ollama models: {e}]"
-                 continue
-        elif provider == "gemini":
-            service = gemini_service
-            # Gemini API uses the base model name (e.g., 'gemini-1.5-pro-latest')
-            actual_id_for_api = actual_id
-        elif provider == "openrouter":
-            service = openrouter_service
-            # OpenRouter uses provider/model_name format (e.g., 'google/gemini-pro')
-            # We stored the correct ID in 'actual_id' when fetching models
-            actual_id_for_api = actual_id
-        else:
-            # Handle custom OpenAI-compatible providers
-            service = openai_compatible_service
-            actual_id_for_api = actual_id
+            # Pass strict=False or similar if needed, or just rely on service
+            pass
+            
+        service = providers.get_service_for_provider(provider)
 
         if service:
             service_func = getattr(service, "_generate_single_model_non_streaming", None)
@@ -337,7 +412,7 @@ async def done_selecting_callback(update: Update, context: ContextTypes.DEFAULT_
                 logger.debug(f"Creating task for {task_model_key} using API ID: {actual_id_for_api}")
                 task = asyncio.create_task(service_func(actual_id_for_api, prompt, context_history))
                 tasks.append(task)
-                model_map[task] = task_model_key # Map task back to display key
+                model_map[task] = task_model_key 
             else:
                 logger.error(f"Service {provider} missing _generate_single_model_non_streaming method.")
                 results[task_model_key] = f"[{provider} service error]"
@@ -349,7 +424,7 @@ async def done_selecting_callback(update: Update, context: ContextTypes.DEFAULT_
     # Gather results
     results_raw = await asyncio.gather(*tasks, return_exceptions=True)
 
-    # Process results (using the display key from model_map)
+    # Process results
     for i, task in enumerate(tasks):
         model_key_display = model_map.get(task, f"unknown_{i}")
         result_data = results_raw[i]
@@ -363,19 +438,71 @@ async def done_selecting_callback(update: Update, context: ContextTypes.DEFAULT_
             results[model_key_display] = str(result_data)
 
     # --- Format and Send Final Response Using AST Pipeline ---
-    # Generate clean markdown content
     response_parts = [f"**Responses for prompt:** {prompt}"]
     sorted_results = sorted(results.items())
 
     for model_key_display, response_text in sorted_results:
         response_parts.append(f"\n\n---\n**Model: `{model_key_display}`**\n---\n{response_text}")
 
-    final_response_markdown = "\n".join(response_parts)
+    # --- Chairman Synthesis ---
+    synthesis_prompt = (
+        f"You are the Chairman of an expert LLM Council. The user asked: '{prompt}'\n\n"
+        "Here are the responses from the council members:\n"
+    )
+    
+    for model_key_display, response_text in sorted_results:
+        synthesis_prompt += f"\n--- Member: {model_key_display} ---\n{response_text}\n"
+        
+    synthesis_prompt += (
+        "\n\nBased on the above, provide a comprehensive Synthesis Answer.\n"
+        "1. Start with an 'Executive Summary' that integrates the best insights.\n"
+        "2. **Grade** each model's response on a scale of 0-10 (where 10 is perfect) based on accuracy, helpfulness, and adherence to the prompt. Format as 'Grade for [Model Name]: [Score]/10'.\n" 
+        "3. Note any significant consensus or conflicts between members.\n"
+        "4. Provide the final, most accurate answer."
+    )
+    
+    synthesis_service = providers.get_service_for_provider(chairman_provider)
 
-    # Delete the placeholder "Asking..." message
-    await placeholder_message.delete()
+    chairman_response = "*(Chairman synthesis failed)*"
+    if synthesis_service:
+        service_func = getattr(synthesis_service, "_generate_single_model_non_streaming", None)
+        if service_func:
+            logger.info(f"Generating Chairman Synthesis with {chairman_key}")
+            try:
+                chairman_response = await service_func(chairman_id, synthesis_prompt, []) 
+            except Exception as e:
+                logger.error(f"Chairman Synthesis failed: {e}")
+                chairman_response = f"[Error: Chairman Synthesis Failed - {e}]"
+       
+            # Extract and log grades
+            grade_matches = re.findall(r"Grade for (.+?): (\d+(?:\.\d+)?)/10", chairman_response, re.IGNORECASE)
+            if grade_matches:
+                for model_name, score in grade_matches:
+                    logger.info(f"🏆 Model Grade - {model_name.strip()}: {score}")
+            else:
+                logger.warning("No grades found in Chairman Synthesis.")
+    
+    
+    # Format Final Output
+    final_response_markdown = f"🏛️ **Chairman Synthesis** (`{chairman_display_name}`)\n\n{chairman_response}\n\n"
+    final_response_markdown += "═" * 20 + "\n\n"
+    
+    for model_key_display, response_text in sorted_results:
+        final_response_markdown += f"**Member: `{model_key_display}`**\n---\n{response_text}\n\n"
 
-    await send_safe_message(context, update, final_response_markdown)
+
+    # Delete the placeholder/status message
+    if status_message:
+        try:
+            await status_message.delete()
+        except BadRequest:
+            pass
+            
+    # --- Format and Send Final Response ---
+    # We use force_new=True because we deleted the status message and want a fresh response,
+    # avoiding "Message to edit not found" errors if a callback was involved.
+    # send_safe_message handles the AST rendering pipeline internally.
+    await send_safe_message(context, update, final_response_markdown, force_new=True)
 
     # --- Archival: Save to DB ---
     try:
@@ -391,6 +518,7 @@ async def done_selecting_callback(update: Update, context: ContextTypes.DEFAULT_
     # Clean up user_data
     context.user_data.pop('ask_selected_prompt', None)
     context.user_data.pop('ask_selected_models', None)
+    context.user_data.pop('ask_selected_models_set', None)
     context.user_data.pop('current_provider_selection', None)
     context.user_data.pop('model_metadata', None)
 
@@ -404,6 +532,7 @@ async def cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     # Clean up user_data
     context.user_data.pop('ask_selected_prompt', None)
     context.user_data.pop('ask_selected_models', None)
+    context.user_data.pop('ask_selected_models_set', None)
     context.user_data.pop('current_provider_selection', None)
     context.user_data.pop('model_metadata', None)
     return ConversationHandler.END
@@ -422,13 +551,17 @@ async def conversation_timeout(update: Update, context: ContextTypes.DEFAULT_TYP
     # Clean up user_data
     context.user_data.pop('ask_selected_prompt', None)
     context.user_data.pop('ask_selected_models', None)
+    context.user_data.pop('ask_selected_models_set', None)
     context.user_data.pop('current_provider_selection', None)
     context.user_data.pop('model_metadata', None)
 
 
 # --- Handler Export ---
 ask_selected_conv_handler = ConversationHandler(
-    entry_points=[CommandHandler("ask_selected", ask_selected_start)],
+    entry_points=[
+        CommandHandler("ask_selected", ask_selected_start),
+        MessageHandler(filters.Regex(r'^/ask_selected'), ask_selected_start)
+    ],
     states={
         SELECT_PROVIDER: [
             CallbackQueryHandler(select_provider_callback, pattern=f"^{CALLBACK_PROVIDER_PREFIX}"),
@@ -440,6 +573,9 @@ ask_selected_conv_handler = ConversationHandler(
         CallbackQueryHandler(back_to_providers_callback, pattern=f"^{CALLBACK_ACTION_PREFIX}back_providers$"),
         CallbackQueryHandler(done_selecting_callback, pattern=f"^{CALLBACK_ACTION_PREFIX}done$"),
         CallbackQueryHandler(cancel_callback, pattern=f"^{CALLBACK_ACTION_PREFIX}cancel$"),
+    ],
+    WAIT_FOR_PROMPT: [
+        MessageHandler(filters.TEXT & ~filters.COMMAND, wait_for_prompt_callback)
     ],
     },
     fallbacks=[CommandHandler("cancel", cancel_callback)],

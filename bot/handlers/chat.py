@@ -89,6 +89,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     logger.info(f"{log_prefix}Buffering message from User {user_id}: '{message_text[:50]}...'")
 
+    # Explicitly ignore any message starting with '/' to prevent eating commands
+    # that failed strict CommandHandler filtering (e.g. strict entity checks).
+    if message_text.strip().startswith('/'):
+        logger.info(f"{log_prefix}Ignoring message starting with '/' (detected as potential command).")
+        return
+
     if config.get_allowed_chat_ids() and chat_id not in config.get_allowed_chat_ids():
         logger.warning(f"{log_prefix}Unauthorized chat ID. User: {user_id}.")
         return
