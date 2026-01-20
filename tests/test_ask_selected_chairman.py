@@ -53,21 +53,24 @@ async def test_chairman_identification_and_flow(mock_update_context):
     }
 
     # Patch dependencies
+    # We must patch providers.get_service_for_provider to return our mock service
+    mock_service = AsyncMock()
+    
+    # Mock Service Generation logic
+    async def mock_generate(model_id, prompt, history):
+        if "Synthesis" in prompt:
+            return f"Synthesis by {model_id}"
+        return f"Response from {model_id}"
+    
+    mock_service._generate_single_model_non_streaming = AsyncMock(side_effect=mock_generate)
+
     with patch('bot.handlers.ask_selected_handler.storage_manager.get_thread_history', new_callable=AsyncMock) as mock_get_history, \
          patch('bot.handlers.ask_selected_handler.storage_manager.save_message', new_callable=AsyncMock), \
          patch('bot.handlers.ask_selected_handler.send_safe_message', new_callable=AsyncMock) as mock_send_safe, \
-         patch('bot.handlers.ask_selected_handler.openai_compatible_service') as mock_service_module:
+         patch('bot.handlers.ask_selected_handler.providers.get_service_for_provider') as mock_get_provider:
         
         mock_get_history.return_value = []
-        
-        # Mock Service Generation
-        # We need to handle individual calls and the chairman synthesis call
-        async def mock_generate(model_id, prompt, history):
-            if "Synthesis" in prompt:
-                return f"Synthesis by {model_id}"
-            return f"Response from {model_id}"
-            
-        mock_service_module._generate_single_model_non_streaming = AsyncMock(side_effect=mock_generate)
+        mock_get_provider.return_value = mock_service
         
         # ACT
         await ask_selected_handler.done_selecting_callback(mock_update, mock_context)
@@ -76,8 +79,7 @@ async def test_chairman_identification_and_flow(mock_update_context):
         
         # 1. Verify Chairman Synthesis was requested
         # The service should be called with the Chairman's ID ('modelA') and a prompt containing "Synthesis"
-        # We check the calls to _generate_single_model_non_streaming
-        calls = mock_service_module._generate_single_model_non_streaming.call_args_list
+        calls = mock_service._generate_single_model_non_streaming.call_args_list
         
         # We expect 3 calls: Member A, Member B, and Chairman Synthesis
         assert len(calls) == 3
@@ -134,11 +136,18 @@ async def test_wait_for_prompt_callback_execution(mock_update_context):
     
     # Patch internals to avoid full execution logic if we just want to verify flow, 
     # but here let's patch the dependencies to verify it runs through.
+    # Patch internals
+    # We need to ensure storage methods are awaitable
     with patch('bot.handlers.ask_selected_handler.storage_manager') as mock_storage, \
-         patch('bot.handlers.ask_selected_handler.openai_compatible_service') as mock_service, \
+         patch('bot.handlers.ask_selected_handler.providers.get_service_for_provider') as mock_get_provider, \
          patch('bot.handlers.ask_selected_handler.send_safe_message', new_callable=AsyncMock):
+
+        mock_storage.get_thread_history = AsyncMock(return_value=[])
+        mock_storage.save_message = AsyncMock()
              
+        mock_service = AsyncMock()
         mock_service._generate_single_model_non_streaming = AsyncMock(return_value="Response")
+        mock_get_provider.return_value = mock_service
         
         # ACT
         result = await ask_selected_handler.wait_for_prompt_callback(mock_update, mock_context)

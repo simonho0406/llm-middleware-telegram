@@ -59,6 +59,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 ├ /configure_panel - Customize your Expert Panel agents
 └ /end_discussion - Conclude an ongoing panel discussion
 
+*Context & Privacy*:
+├ /context - Manage & prune conversation history blocks
+└ /flash <query> - One-shot query (Burn-after-reading, not saved)
+
 *Provider & Model Management*:
 ├ /provider - Show/switch AI provider
 ├ /model - Show current model

@@ -19,12 +19,12 @@ from bot.settings import USER_SETTINGS
 
 logger = logging.getLogger(__name__)
 
-async def _generate_and_send_response(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int, prompt: str, current_thread_id: str, is_reroll: bool = False, force_truncate: bool = False, placeholder_message = None) -> None:
+async def _generate_and_send_response(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int, prompt: str, current_thread_id: str, is_reroll: bool = False, force_truncate: bool = False, placeholder_message = None, skip_save: bool = False, task_key: str = 'llm_task') -> None:
     """Wraps the response generation in a cancellable task."""
     task = asyncio.create_task(
-        _generate_and_send_response_task(update, context, chat_id, user_id, prompt, current_thread_id, is_reroll, force_truncate, placeholder_message)
+        _generate_and_send_response_task(update, context, chat_id, user_id, prompt, current_thread_id, is_reroll, force_truncate, placeholder_message, skip_save)
     )
-    context.chat_data['llm_task'] = task
+    context.chat_data[task_key] = task
     try:
         await task
     except asyncio.CancelledError:
@@ -191,21 +191,24 @@ async def _generate_llm_response(chat_id: int, prompt: str, is_reroll: bool = Fa
         'processed_history': processed_history
     }
 
-async def _generate_and_send_response_task(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int, prompt: str, current_thread_id: str, is_reroll: bool = False, force_truncate: bool = False, placeholder_message = None) -> None:
+async def _generate_and_send_response_task(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int, prompt: str, current_thread_id: str, is_reroll: bool = False, force_truncate: bool = False, placeholder_message = None, skip_save: bool = False) -> None:
     log_prefix = f"(Chat {chat_id}) "
 
     # --- Archival Step 1: Secure the Input ---
-    try:
-        if is_reroll:
-            # For reroll, we remove the faulty previous answer so the prompt is now the last message
-            await storage_manager.remove_last_assistant_message(chat_id)
-        else:
-            # For normal messages, we APPEND the user prompt immediately
-            await storage_manager.save_message(chat_id, 'user', prompt)
-    except Exception as e:
-        logger.error(f"{log_prefix}Failed to save/update initial state: {e}")
-        # Proceeding might be risky if we can't save, but we try to answer anyway?
-        # Ideally we should warn, but let's proceed.
+    if not skip_save:
+        try:
+            if is_reroll:
+                # For reroll, we remove the faulty previous answer so the prompt is now the last message
+                await storage_manager.remove_last_assistant_message(chat_id)
+            else:
+                # For normal messages, we APPEND the user prompt immediately
+                await storage_manager.save_message(chat_id, 'user', prompt)
+        except Exception as e:
+            logger.error(f"{log_prefix}Failed to save/update initial state: {e}")
+            # Proceeding might be risky if we can't save, but we try to answer anyway?
+            # Ideally we should warn, but let's proceed.
+    else:
+        logger.info(f"{log_prefix}Skipping input archival (skip_save=True)")
 
     # --- Generate ---
     response_data = await _generate_llm_response(chat_id, prompt, is_reroll, force_truncate)
@@ -245,9 +248,11 @@ async def _generate_and_send_response_task(update: Update, context: ContextTypes
         return
 
     # --- Archival Step 2: Secure the Output ---
-    if response_data.get('error') is None and message_sent_successfully:
+    if not skip_save and response_data.get('error') is None and message_sent_successfully:
         try:
             await storage_manager.save_message(chat_id, 'assistant', final_content)
             logger.info(f"{log_prefix}Assistant response saved to archive.")
         except Exception as e_hist:
             logger.error(f"{log_prefix}Failed to save assistant response: {e_hist}")
+    elif skip_save:
+        logger.info(f"{log_prefix}Skipping output archival (skip_save=True)")

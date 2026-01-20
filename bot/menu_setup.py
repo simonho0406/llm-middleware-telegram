@@ -28,8 +28,11 @@ async def setup_bot_commands_and_menu(application: Application, chat_id: int | N
         BotCommand("set_model", "Set a new model for the provider"),
         # Thread Management
         BotCommand("threads", "List and manage conversation threads"),
+        BotCommand("threads", "List and manage conversation threads"),
         BotCommand("rename_thread", "Rename the current thread"),
+        BotCommand("context", "Manage & prune conversation history"),
         # Misc
+        BotCommand("flash", "Burn-after-reading (one-shot query)"),
         BotCommand("start", "Initialize the bot"),
     ]
     

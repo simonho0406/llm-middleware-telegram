@@ -7,7 +7,7 @@
 storage_backend: "database" # Options: "database", "file"
 
 # --- Primary Provider Settings ---
-default_provider: "openrouter"
+default_provider: "nvidia"
 default_ollama_model: "qwq"
 
 # --- Gemini Configuration (Free Tier: 5 RPM / 25 RPD) ---
@@ -65,9 +65,10 @@ custom_openai_providers:
   - name: "nvidia"
     base_url: "https://integrate.api.nvidia.com/v1"
     api_key: "CUSTOM_PROVIDER_API_KEY_NVIDIA" # Matches the variable in .env.example
-    default_model: "nvidia/llama-3.3-nemotron-70b-instruct"
+    default_model: "nvidia/nemotron-3-nano-30b-a3b"
     enable_streaming: false  # Disable streaming for stability
     allowed_models:
+      - "nvidia/nemotron-3-nano-30b-a3b"
       - "nvidia/llama-3.3-nemotron-super-49b-v1.5"
       - "meta/llama3-70b-instruct"
       - "meta/llama3-8b-instruct"

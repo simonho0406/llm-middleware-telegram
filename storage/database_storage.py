@@ -185,6 +185,34 @@ async def get_thread_history(chat_id: int, thread_id: Optional[str] = None, limi
             rows = await cursor.fetchall()
             return [{"role": row[0], "content": row[1]} for row in rows]
 
+async def get_thread_history_with_pk(chat_id: int, thread_id: Optional[str] = None, limit: int = 500) -> List[Dict[str, Any]]:
+    """Fetches history including message_pk for granular management."""
+    async with aiosqlite.connect(config.DB_PATH) as db:
+        thread_pk = await _get_thread_pk(db, chat_id, thread_id)
+        if not thread_pk: return []
+        async with db.cursor() as cursor:
+            # Similar to get_thread_history but includes message_pk and timestamp
+            await cursor.execute(
+                f"SELECT message_pk, role, content, timestamp FROM (SELECT message_pk, role, content, timestamp FROM messages WHERE thread_fk = ? ORDER BY message_pk DESC LIMIT ?) ORDER BY message_pk ASC", 
+                (thread_pk, limit)
+            )
+            rows = await cursor.fetchall()
+            return [{"id": row[0], "role": row[1], "content": row[2], "timestamp": row[3]} for row in rows]
+
+async def delete_messages(chat_id: int, message_ids: List[int]) -> bool:
+    """Deletes specific messages by their PKs."""
+    if not message_ids:
+        return False
+    async with aiosqlite.connect(config.DB_PATH) as db:
+        # Verify ownership (optional but good practice)? For now just delete by PK.
+        # Actually, PK is global unique usually, but let's ensure they belong to the chat?
+        # That's expensive. Simpler to just delete by PKs.
+        placeholders = ','.join('?' for _ in message_ids)
+        cursor = await db.execute(f"DELETE FROM messages WHERE message_pk IN ({placeholders})", tuple(message_ids))
+        await db.commit()
+        logger.info(f"Deleted {cursor.rowcount} messages for chat {chat_id}")
+        return cursor.rowcount > 0
+
 async def replace_thread_history_dangerous(chat_id: int, history: List[Dict[str, str]], thread_id: Optional[str] = None) -> None:
     """
     DEPRECATED: Completely replaces thread history. 

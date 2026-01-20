@@ -26,7 +26,10 @@ class StorageManager:
             self.save_message = database_storage.save_message
             self.get_all_chat_ids = database_storage.get_all_chat_ids
             self.get_user_setting = database_storage.get_user_setting
+            self.get_user_setting = database_storage.get_user_setting
             self.set_user_setting = database_storage.set_user_setting
+            self.get_thread_history_with_pk = getattr(database_storage, 'get_thread_history_with_pk', None)
+            self.delete_messages = getattr(database_storage, 'delete_messages', None)
         elif backend == "file":
             self.init = file_storage.init_file_storage
             self.get_current_thread_id = file_storage.get_current_thread_id
@@ -43,6 +46,8 @@ class StorageManager:
             self.get_all_chat_ids = lambda: []  # File storage doesn't support this
             self.get_user_setting = file_storage.get_user_setting
             self.set_user_setting = file_storage.set_user_setting
+            self.get_thread_history_with_pk = None # Not implemented for file storage
+            self.delete_messages = None # Not implemented for file storage
         else:
             raise ValueError(f"Invalid STORAGE_BACKEND: {backend}")
 

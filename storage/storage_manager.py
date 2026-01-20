@@ -30,4 +30,9 @@ delete_thread = backend.delete_thread
 list_threads = backend.list_threads
 rename_thread = backend.rename_thread
 # Alias for backward compatibility (used in misc_commands.py /new)
+# Alias for backward compatibility (used in misc_commands.py /new)
 set_thread_history = backend.replace_thread_history_dangerous
+
+# New Context Management API
+get_thread_history_with_pk = getattr(backend, 'get_thread_history_with_pk', None)
+delete_messages = getattr(backend, 'delete_messages', None)

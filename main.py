@@ -61,6 +61,8 @@ def main() -> None:
     from bot.handlers.discuss_panel_handler import discuss_panel_conv_handler
     from bot.handlers.config_handler import config_conv_handler
     from bot.handlers.configure_panel_handler import configure_panel_conv_handler
+    from bot.handlers.flash_handler import flash_handler
+    from bot.handlers.context_sidebar_handler import context_sidebar_handler, context_callback_handler
 
     async def post_init_with_commands(application: Application):
         logger.info("Initializing provider details...")
@@ -156,12 +158,17 @@ def main() -> None:
             app = create_application(post_init_hook=post_init_with_commands, post_shutdown_hook=cleanup_services)
 
             # Register Handlers
-            # High-priority group for conversation handlers (group=0)
-            # specific handlers first
+            # High-priority: Flash (Global Escape Hatch)
+            app.add_handler(flash_handler, group=0)
+            
+            # Conversation Handlers
             app.add_handler(config_conv_handler, group=0)
             app.add_handler(discuss_conv_handler, group=0)
             app.add_handler(discuss_panel_conv_handler, group=0)
             app.add_handler(configure_panel_conv_handler, group=0)
+            # app.add_handler(flash_handler, group=0) -> Moved up
+            app.add_handler(context_sidebar_handler, group=0)
+            app.add_handler(context_callback_handler, group=0)
             app.add_handler(edited_message_handler, group=0)
             
             for handler in misc_handlers:

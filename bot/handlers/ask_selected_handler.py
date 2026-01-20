@@ -362,6 +362,12 @@ async def _execute_council_flow(update: Update, context: ContextTypes.DEFAULT_TY
 
 
     logger.info(f"Executing /ask_selected for chat {chat_id} with models: {selected_list} and prompt: '{prompt}'")
+    
+    # Incremental Archival: Save USER prompt IMMEDIATELY
+    try:
+        await storage_manager.save_message(chat_id, 'user', prompt)
+    except Exception as e:
+        logger.error(f"Failed to save user prompt: {e}")
 
     if status_message:
         try:
@@ -506,8 +512,6 @@ async def _execute_council_flow(update: Update, context: ContextTypes.DEFAULT_TY
 
     # --- Archival: Save to DB ---
     try:
-        # Save User Prompt
-        await storage_manager.save_message(chat_id, 'user', prompt)
         # Save Assistant Response (Summary of all models)
         await storage_manager.save_message(chat_id, 'assistant', final_response_markdown)
         logger.info(f"Archived /ask_selected interaction for chat {chat_id}")

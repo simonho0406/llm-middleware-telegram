@@ -881,6 +881,9 @@ async def _run_panel_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def _run_panel_task_background(update: Update, context: ContextTypes.DEFAULT_TYPE, user_prompt: str, assembling_msg, chat_id: int):
     """Background task wrapper for the panel workflow."""
     try:
+        # Incremental Archival: Save USER prompt IMMEDIATELY to prevent orphans on crash
+        await storage_manager.save_message(chat_id, 'user', user_prompt)
+
         panel_results, final_answer, proposer_response = await _run_panel_workflow(
             update, context, user_prompt, [], assembling_msg, chat_id
         )
@@ -905,7 +908,7 @@ async def _run_panel_task_background(update: Update, context: ContextTypes.DEFAU
 
         # Use the centralized send_safe_message function
         if await send_safe_message(context, update, pure_markdown_content):
-            # Incremental Archival: Save the panel's result immediately
+            # Incremental Archival: Save the panel's result
             await storage_manager.save_message(chat_id, 'assistant:panel', final_answer)
         
     except asyncio.CancelledError:
@@ -983,6 +986,9 @@ async def handle_follow_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                     chat_id
                 )
             )
+            # Incremental Archival: Save USER prompt IMMEDIATELY
+            await storage_manager.save_message(chat_id, 'user', follow_up_prompt)
+
             context.user_data['panel_task'] = panel_task
             new_panel_results, new_final_answer, new_proposer_response = await panel_task
         except asyncio.CancelledError:
@@ -1013,6 +1019,7 @@ async def handle_follow_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         
         # AST-Based Architecture: Parse, Split, and Send
         pure_summary = _format_panel_summary(new_panel_results)
+        pure_markdown_content = f"{pure_summary}\n\n---\n\n{new_final_answer}"
         pure_markdown_content = f"{pure_summary}\n\n---\n\n{new_final_answer}"
         if await send_safe_message(context, update, pure_markdown_content):
             # Incremental Archival: Save the panel's result immediately
