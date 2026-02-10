@@ -384,6 +384,9 @@ async def _execute_council_flow(update: Update, context: ContextTypes.DEFAULT_TY
     model_map = {}
     results = {} 
 
+    # Register task for cancellation
+    context.chat_data['llm_task'] = asyncio.current_task()
+
     # Fetch context history (limit to 500 lines)
     chat_id = update.effective_chat.id
     try:
@@ -525,6 +528,7 @@ async def _execute_council_flow(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data.pop('ask_selected_models_set', None)
     context.user_data.pop('current_provider_selection', None)
     context.user_data.pop('model_metadata', None)
+    context.chat_data.pop('llm_task', None)  # Clean up task reference
 
     return ConversationHandler.END
 
@@ -532,6 +536,13 @@ async def cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     """Cancels the conversation."""
     query = update.callback_query
     await query.answer()
+    
+    # Cancel any running LLM task associated with this flow
+    llm_task = context.chat_data.get('llm_task')
+    if llm_task and not llm_task.done():
+        llm_task.cancel()
+        logger.info(f"Cancelled in-flight /ask_selected task.")
+        
     await query.edit_message_text("Selection cancelled\.")
     # Clean up user_data
     context.user_data.pop('ask_selected_prompt', None)
@@ -539,6 +550,7 @@ async def cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     context.user_data.pop('ask_selected_models_set', None)
     context.user_data.pop('current_provider_selection', None)
     context.user_data.pop('model_metadata', None)
+    context.chat_data.pop('llm_task', None)
     return ConversationHandler.END
 
 async def conversation_timeout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

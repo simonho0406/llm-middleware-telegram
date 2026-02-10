@@ -9,56 +9,32 @@ logger = logging.getLogger(__name__)
 _client_instance: Optional[ollama.AsyncClient] = None
 
 def get_ollama_client() -> ollama.AsyncClient:
-    """Returns a shared Ollama async client instance."""
+    """Returns a shared Ollama async client instance with configured timeout."""
     global _client_instance
     if _client_instance is None:
-        _client_instance = ollama.AsyncClient(host=config.OLLAMA_HOST)
+        # Set persistent timeout for the client.
+        # This applies to the read timeout (time between chunks), facilitating "slow but steady" generation.
+        # We use the config value (default 1200s for Ollama).
+        timeout_sec = config.get_ollama_request_timeout_seconds()
+        _client_instance = ollama.AsyncClient(host=config.OLLAMA_HOST, timeout=timeout_sec)
     return _client_instance
 
 async def close():
     """Closes the shared Ollama client."""
     global _client_instance
     if _client_instance:
-        # Ollama's AsyncClient doesn't have a close() method exposed directly usually?
-        # Actually it uses httpx.AsyncClient under the hood. 
-        # Checking library source or docs is key. 
-        # Standard httpx client pattern: await client.aclose() or similar?
-        # Creating a new client: `self._client = httpx.AsyncClient(...)`
-        # It seems `ollama` python lib v0.x might not expose close easily on the wrapper.
-        # But wait, looking at my search result: "Access Asynchronous Methods via client.aio". That was Gemini.
-        # For Ollama: `AsyncClient` inherits from `BaseClient`.
-        # Taking a safer bet: If it has .close(), call it. If it has .aclose(), call it.
-        # Most httpx wrappers support .close() (sync) or .aclose() (async).
-        # Let's try to close the internal _client if accessible, or just plain close().
-        
-        # Best effort cleanup
-        pass 
-        # WAIT: The implementation plan said "Add close() method". 
-        # I should try to close it if possible. 
-        # If the library doesn't expose it, I can at least set it to None.
-        pass
-        
-    # Actually, let's implement a proper async close if the library supports it.
-    # If not, we just clear the reference.
-    if _client_instance:
-         # Check for httpx client
-         if hasattr(_client_instance, '_client') and hasattr(_client_instance._client, 'aclose'):
-             await _client_instance._client.aclose()
-         elif hasattr(_client_instance, 'close'):
-             if asyncio.iscoroutinefunction(_client_instance.close):
-                 await _client_instance.close()
-             else:
-                 _client_instance.close()
-         
-         _client_instance = None
-         logger.info("Ollama client closed.")
+       # Best effort cleanup for cached client
+       pass
+    _client_instance = None
+    logger.info("Ollama client closed.")
 
 async def check_ollama_health(client: ollama.AsyncClient) -> bool:
     """
     Performs a quick and reliable health check of the Ollama server.
     """
     try:
-        async with httpx.AsyncClient() as http_client:
+        # Use a short timeout for health checks
+        async with httpx.AsyncClient(timeout=5.0) as http_client:
             response = await http_client.get(config.OLLAMA_HOST)
             return response.status_code == 200 and "Ollama is running" in response.text
     except httpx.RequestError as e:
@@ -92,11 +68,11 @@ async def list_models() -> List[str]:
         model_names = []
         models_list = response_dict.get('models', [])
         for model_details in models_list:
-             name = model_details.get('name') or model_details.get('model')
-             if name:
-                 model_names.append(name)
-             else:
-                 logger.warning(f"Could not extract model name from Ollama list response item: {model_details}")
+            name = model_details.get('name') or model_details.get('model')
+            if name:
+                model_names.append(name)
+            else:
+                logger.warning(f"Could not extract model name from Ollama list response item: {model_details}")
         logger.info(f"Available Ollama models: {model_names}")
         return model_names
     except Exception as e:
@@ -162,10 +138,10 @@ async def generate_response(model: str, prompt: str, context_history: Optional[L
 
     logger.info(f"Sending request to Ollama model '{model}'")
     try:
+        # Note: request_timeout in 'options' is often ignored by Ollama unless implemented by the model runner.
+        # We rely on the client.timeout set in get_ollama_client() for network resiliency.
         options = {}
-        if request_timeout is not None:
-            options['request_timeout'] = request_timeout
-
+        
         async for part in await client.chat(model=model, messages=messages, stream=True, options=options):
             if hasattr(part, 'message') and hasattr(part.message, 'content'):
                 chunk = part.message.content

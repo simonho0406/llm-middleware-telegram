@@ -116,6 +116,10 @@ def get_allowed_chat_ids():
 def get_request_timeout_seconds():
     return _yaml_config.get("REQUEST_TIMEOUT_SECONDS", 180)
 
+def get_ollama_request_timeout_seconds():
+    # Default to 20m (1200s) for local models if not specified
+    return _yaml_config.get("OLLAMA_REQUEST_TIMEOUT_SECONDS", 1200)
+
 def get_default_max_context_tokens():
     return _yaml_config.get("default_max_context_tokens", 3800)
 

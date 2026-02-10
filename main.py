@@ -154,6 +154,18 @@ def main() -> None:
     logger.info("Starting bot polling loop...")
     while True:
         try:
+            # CRITICAL FIX: Create a new event loop for each iteration.
+            # python-telegram-bot's run_polling closes the loop on exit.
+            # Without this, restarts fail with "RuntimeError: Event loop is closed".
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_closed():
+                    raise RuntimeError("Loop is closed")
+            except RuntimeError:
+                logger.info("Event loop is closed or missing. Creating a new one...")
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+
             logger.info("Creating application...")
             app = create_application(post_init_hook=post_init_with_commands, post_shutdown_hook=cleanup_services)
 

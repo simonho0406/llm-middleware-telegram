@@ -33,6 +33,8 @@ openrouter_allowed_models:
 # --- System Configuration ---
 session_file_path: "data/sessions.json"
 REQUEST_TIMEOUT_SECONDS: 180
+# Specific timeout for local Ollama to handle slow CPU inference
+OLLAMA_REQUEST_TIMEOUT_SECONDS: 1200
 default_max_context_tokens: 128000
 context_token_output_buffer: 20000
 
