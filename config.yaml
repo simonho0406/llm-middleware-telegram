@@ -95,9 +95,9 @@ expert_panel:
   # Orchestrator (Project Manager) - Keep original working configuration
   orchestrator:
     provider: "nvidia"
-    model: "nvidia/nemotron-3-nano-30b-a3b"
+    model: "openai/gpt-oss-120b"
     fallback_provider: "nvidia"
-    fallback_model: "openai/gpt-oss-120b"
+    fallback_model: "nvidia/nemotron-3-nano-30b-a3b"
     request_timeout_seconds: 600
 
   # Expert Panel Roles - Restore original working models

@@ -122,18 +122,14 @@ class OpenAICompatibleService:
                 timeout_value = request_timeout if request_timeout is not None else config.get_request_timeout_seconds()
                 api_kwargs["timeout"] = timeout_value
 
-                # Targeted Reasoning Payload: Only enabled for specific providers
-                # This prevents timeouts/errors on strict OpenAI-compatible endpoints (like Nvidia NIM)
-                # that do not recognize 'include_reasoning' or 'extra_body'.
-                reasoning_payload = {}
+                # Targeted Reasoning Payload: Maximize test-time scaling globally.
+                reasoning_payload = {
+                    "reasoning_effort": "high"
+                }
                 
-                # Check for OpenRouter
+                # OpenRouter specifically supports including reasoning traces in the completion delta
                 if "openrouter.ai" in self.base_url.lower():
                     reasoning_payload["include_reasoning"] = True
-                
-                # Check for OpenAI (Official) - reasoning_effort only works on o1/o3
-                elif "api.openai.com" in self.base_url.lower() and model.startswith("o"):
-                    reasoning_payload["reasoning_effort"] = "high"
                 
                 # Attempt 1: Try with reasoning params (only if payload is not empty)
                 try:
