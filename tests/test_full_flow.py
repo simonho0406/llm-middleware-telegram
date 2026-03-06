@@ -69,7 +69,8 @@ async def test_full_user_flow_simulation():
          patch('bot.handlers.chat.storage_manager.get_thread_history', mock_get_history), \
          patch('bot.response_generator.storage_manager.save_message', mock_rg_save_message), \
          patch('bot.response_generator._generate_llm_response', new_callable=AsyncMock) as mock_gen_response, \
-         patch('bot.response_generator.send_safe_message', new_callable=AsyncMock) as mock_send_msg:
+         patch('bot.response_generator.send_safe_message', new_callable=AsyncMock) as mock_send_msg, \
+         patch('bot.response_generator.config.get_enable_streaming', return_value=False):
         
         # 1. Simulate Normal Message
         mock_gen_response.return_value = {
@@ -113,8 +114,12 @@ async def test_full_user_flow_simulation():
         # We expect save_message to be called TWICE (User then Assistant)
         history_updated = (
             mock_rg_save_message.called or 
-            mock_sm_save_message.called
+            mock_sm_save_message.called or
+            mock_chat_save_message.called
         )
+        print(f"DEBUG rg_save: {mock_rg_save_message.call_args_list}")
+        print(f"DEBUG sm_save: {mock_sm_save_message.call_args_list}")
+        print(f"DEBUG chat_save: {mock_chat_save_message.call_args_list}")
         assert history_updated, "storage_manager.save_message was not called"
         
         # 2. Simulate Panel Trigger

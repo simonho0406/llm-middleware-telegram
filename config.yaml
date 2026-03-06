@@ -68,7 +68,7 @@ custom_openai_providers:
     base_url: "https://integrate.api.nvidia.com/v1"
     api_key: "CUSTOM_PROVIDER_API_KEY_NVIDIA" # Matches the variable in .env.example
     default_model: "nvidia/nemotron-3-nano-30b-a3b"
-    enable_streaming: false  # Disable streaming for stability
+    enable_streaming: true  # Re-enabled via native Telegram Draft API
     allowed_models:
       - "nvidia/nemotron-3-nano-30b-a3b"
       - "nvidia/llama-3.3-nemotron-super-49b-v1.5"

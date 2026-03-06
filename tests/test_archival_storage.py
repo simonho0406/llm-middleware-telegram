@@ -3,6 +3,10 @@ import pytest_asyncio
 import asyncio
 import time
 import os
+import sys
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import aiosqlite
 from storage import database_storage, storage_manager
 from bot import response_generator

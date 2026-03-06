@@ -47,11 +47,11 @@ async def test_ask_selected_context_and_archival(mock_update_context):
     mock_update, mock_context = mock_update_context
     
     # Setup User Data
-    mock_context.user_data['ask_selected_models'] = ['mock_provider:model1']
-    mock_context.user_data['ask_selected_models_set'] = {'mock_provider:model1'}
+    mock_context.user_data['ask_selected_models'] = ['nvidia:model1']
+    mock_context.user_data['ask_selected_models_set'] = {'nvidia:model1'}
     mock_context.user_data['ask_selected_prompt'] = 'Test Prompt'
     mock_context.user_data['model_metadata'] = {
-        'mock_provider:model1': {'provider': 'mock_provider', 'actual_id': 'model1', 'display': 'Model 1'}
+        'nvidia:model1': {'provider': 'nvidia', 'actual_id': 'model1', 'display': 'Model 1'}
     }
     
     # Needs to match hash logic? No, the handler splits "provider:actual_id" from selected_list
@@ -64,14 +64,16 @@ async def test_ask_selected_context_and_archival(mock_update_context):
     
     with patch('bot.handlers.ask_selected_handler.storage_manager.get_thread_history', new_callable=AsyncMock) as mock_get_history, \
          patch('bot.handlers.ask_selected_handler.storage_manager.save_message', new_callable=AsyncMock) as mock_save_message, \
-         patch('bot.handlers.ask_selected_handler.openai_compatible_service') as mock_service_module, \
+         patch('bot.handlers.ask_selected_handler.providers.get_service_for_provider') as mock_get_service, \
          patch('bot.handlers.ask_selected_handler.send_safe_message', new_callable=AsyncMock):
              
         mock_get_history.return_value = mock_history
         
         # Mock Service
+        mock_service_instance = MagicMock()
         mock_service_func = AsyncMock(return_value="LLM Result")
-        mock_service_module._generate_single_model_non_streaming = mock_service_func
+        mock_service_instance._generate_single_model_non_streaming = mock_service_func
+        mock_get_service.return_value = mock_service_instance
         
         # Execute
         await ask_selected_handler.done_selecting_callback(mock_update, mock_context)

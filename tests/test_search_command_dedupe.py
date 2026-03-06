@@ -1,4 +1,9 @@
 import pytest
+import os
+import sys
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from unittest.mock import AsyncMock, MagicMock, patch
 from bot.handlers import misc_commands
 
@@ -52,6 +57,7 @@ async def test_search_deduplication():
                     mock_providers.get_provider_details.return_value = {
                         'ollama': {'service': mock_service, 'default_model': 'model'},
                         'openrouter': {'service': mock_service, 'default_model': 'model'},
+                        'nvidia': {'service': mock_service, 'default_model': 'model'},
                         'default': {'service': mock_service, 'default_model': 'model'}
                     }
                     mock_providers.get_config_for_provider.return_value = {'default_model': 'model'}
@@ -119,6 +125,7 @@ async def test_search_reply_handling():
                     mock_providers.get_provider_details.return_value = {
                         'ollama': {'service': mock_service, 'default_model': 'model'},
                         'openrouter': {'service': mock_service, 'default_model': 'model'},
+                        'nvidia': {'service': mock_service, 'default_model': 'model'},
                         'default': {'service': mock_service, 'default_model': 'model'}
                     }
                     mock_providers.get_config_for_provider.return_value = {'default_model': 'model'}

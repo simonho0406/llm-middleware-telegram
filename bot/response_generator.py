@@ -30,7 +30,7 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
     except asyncio.CancelledError:
         logger.info(f"(Chat {chat_id}) LLM task was cancelled.")
 
-async def _generate_llm_response(chat_id: int, prompt: str, is_reroll: bool = False, force_truncate: bool = False, operation_id: str = "chat_response") -> dict:
+async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: int, prompt: str, is_reroll: bool = False, force_truncate: bool = False, operation_id: str = "chat_response") -> dict:
     """
     Core LLM response generation logic, decoupled from message formatting and sending.
     Returns a response dict with 'content', 'error', 'truncated_history', and 'provider_info'.
@@ -140,12 +140,28 @@ async def _generate_llm_response(chat_id: int, prompt: str, is_reroll: bool = Fa
         else:
              augmented_prompt = prompt
 
+        import random
+        from bot.messaging import send_draft_message
+        
+        enable_streaming = config.get_enable_streaming()
+        if provider_config.get('enable_streaming') is False:
+             enable_streaming = False
+             
+        draft_id = random.randint(100000, 999999)
+        last_draft_time = time.time()
+        draft_throttle_seconds = 0.5
+
         async for chunk in service.generate_response(model=model_to_use, prompt=augmented_prompt, context_history=truncated_history):
             if chunk.startswith("[Error:") or chunk.startswith("Error:"):
                 raw_full_llm_response = chunk
                 llm_error_reported_by_model = True
                 break
             raw_full_llm_response += chunk
+            
+            # Fire off a non-blocking draft update if throttling window has passed
+            if enable_streaming and (time.time() - last_draft_time) > draft_throttle_seconds:
+                asyncio.create_task(send_draft_message(context, chat_id, draft_id, raw_full_llm_response + " █"))
+                last_draft_time = time.time()
 
         if not llm_error_reported_by_model:
             logger.info(f"{log_prefix}LLM generation complete. Length: {len(raw_full_llm_response)}")
@@ -177,7 +193,7 @@ async def _generate_llm_response(chat_id: int, prompt: str, is_reroll: bool = Fa
     if not final_content:
         if not force_truncate and not llm_error_reported_by_model:
              logger.warning(f"{log_prefix}Empty response received from model. Retrying with forced context truncation...")
-             return await _generate_llm_response(chat_id, prompt, is_reroll, force_truncate=True, operation_id=operation_id)
+             return await _generate_llm_response(context, chat_id, prompt, is_reroll, force_truncate=True, operation_id=operation_id)
         
         final_content = "[Error: The AI returned an empty response. This might be due to a content filter or an issue with the selected model. Please try rerolling or using a different model.]"
         llm_error_reported_by_model = True
@@ -211,7 +227,7 @@ async def _generate_and_send_response_task(update: Update, context: ContextTypes
         logger.info(f"{log_prefix}Skipping input archival (skip_save=True)")
 
     # --- Generate ---
-    response_data = await _generate_llm_response(chat_id, prompt, is_reroll, force_truncate)
+    response_data = await _generate_llm_response(context, chat_id, prompt, is_reroll, force_truncate)
 
     if response_data.get('error') == 'context_limit_exceeded':
         # This logic remains in the handler as it's specific to the chat workflow

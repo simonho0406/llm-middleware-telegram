@@ -28,7 +28,8 @@ async def test_search_instruction_logic():
              with patch('utils.context_manager.ensure_context_fits', new_callable=AsyncMock) as mock_fits:
                  mock_fits.return_value = ([], "info")
                  
-                 await response_generator._generate_llm_response(chat_id, prompt)
+                 mock_context = MagicMock()
+                 await response_generator._generate_llm_response(mock_context, chat_id, prompt)
                  
                  # VERIFY: prompt passed to service should NOT contain search instruction
                  call_args = mock_service.generate_response.call_args
@@ -57,7 +58,8 @@ async def test_search_instruction_logic():
              with patch('utils.context_manager.ensure_context_fits', new_callable=AsyncMock) as mock_fits:
                  mock_fits.return_value = ([], "info")
                  
-                 await response_generator._generate_llm_response(chat_id, prompt)
+                 mock_context = MagicMock()
+                 await response_generator._generate_llm_response(mock_context, chat_id, prompt)
                  
                  # VERIFY: prompt passed to service MUST contain search instruction
                  call_args = mock_service.generate_response.call_args
@@ -90,7 +92,8 @@ async def test_panel_labeling():
              with patch('utils.context_manager.ensure_context_fits', new_callable=AsyncMock) as mock_fits:
                  mock_fits.return_value = ([], "info")
                  
-                 await response_generator._generate_llm_response(chat_id, "hi")
+                 mock_context = MagicMock()
+                 await response_generator._generate_llm_response(mock_context, chat_id, "hi")
                  
                  # Inspect what was passed to ensure_context_fits (which receives processed_history)
                  call_args = mock_fits.call_args

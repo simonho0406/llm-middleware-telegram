@@ -86,13 +86,16 @@ async def test_normal_chat_reroll_dislike(mock_update_context):
          patch('bot.response_generator.storage_manager.save_message', mock_save_msg), \
          patch('bot.response_generator.storage_manager.remove_last_assistant_message', mock_remove_last), \
          patch('bot.response_generator.send_safe_message', new_callable=AsyncMock) as mock_send_msg, \
-         patch('bot.response_generator.providers.get_provider_details') as mock_get_providers:
+         patch('bot.response_generator.providers.get_provider_details') as mock_get_providers, \
+         patch('bot.response_generator.config.get_enable_streaming', return_value=False):
 
         # Mock Provider Service
         mock_service = MagicMock()
         mock_service.generate_response.return_value = async_iter(["To get to the other side!"])
         mock_get_providers.return_value = {
-            "mock_provider": {"service": mock_service, "default_model": "mock_model"}
+            "mock_provider": {"service": mock_service, "default_model": "mock_model"},
+            "nvidia": {"service": mock_service, "default_model": "mock_model"},
+            "ollama": {"service": mock_service, "default_model": "mock_model"}
         }
         
         # Execute /reroll
@@ -138,12 +141,15 @@ async def test_normal_chat_reroll_error(mock_update_context):
          patch('bot.response_generator.storage_manager.save_message', mock_save_msg), \
          patch('bot.response_generator.storage_manager.remove_last_assistant_message', mock_remove_last), \
          patch('bot.response_generator.send_safe_message', new_callable=AsyncMock) as mock_send_msg, \
-         patch('bot.response_generator.providers.get_provider_details') as mock_get_providers:
+         patch('bot.response_generator.providers.get_provider_details') as mock_get_providers, \
+         patch('bot.response_generator.config.get_enable_streaming', return_value=False):
 
         mock_service = MagicMock()
         mock_service.generate_response.return_value = async_iter(["Infinity!"])
         mock_get_providers.return_value = {
-            "mock_provider": {"service": mock_service, "default_model": "mock_model"}
+             "mock_provider": {"service": mock_service, "default_model": "mock_model"},
+             "nvidia": {"service": mock_service, "default_model": "mock_model"},
+             "ollama": {"service": mock_service, "default_model": "mock_model"}
         }
         
         await misc_commands.reroll_command(mock_update, mock_context)

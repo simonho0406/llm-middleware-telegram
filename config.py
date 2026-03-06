@@ -131,3 +131,6 @@ def get_custom_providers_config():
 
 def get_expert_panel_config():
     return _yaml_config.get("expert_panel", {})
+
+def get_enable_streaming():
+    return _yaml_config.get("enable_streaming", True)

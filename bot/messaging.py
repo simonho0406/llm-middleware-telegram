@@ -23,6 +23,39 @@ def escape_meta_tags(text: str) -> str:
     text = re.sub(r"<reflect>.*?</reflect>", "", text, flags=re.DOTALL | re.IGNORECASE)
     return text.strip()
 
+import httpx
+
+async def send_draft_message(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    draft_id: int,
+    text: str
+):
+    """
+    Sends a message draft using the raw Telegram API temporarily (until PTB updates).
+    """
+    if not text:
+        return
+        
+    log_prefix = f"(Chat {chat_id}) "
+    
+    # Send draft via direct HTTP request
+    url = f"https://api.telegram.org/bot{context.bot.token}/sendMessageDraft"
+    payload = {
+        "chat_id": chat_id,
+        "draft_id": draft_id,
+        "text": escape_meta_tags(text)
+    }
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            # Short timeout to prevent draft updates from blocking
+            resp = await client.post(url, json=payload, timeout=2.0)
+            if resp.status_code != 200:
+                logger.debug(f"{log_prefix}Draft update failed: {resp.status_code} - {resp.text}")
+    except Exception as e:
+         logger.debug(f"{log_prefix}Exception during draft update: {e}")
+
 async def send_safe_message(
     context: ContextTypes.DEFAULT_TYPE, 
     update: Update, 
