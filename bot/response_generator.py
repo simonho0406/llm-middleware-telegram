@@ -13,11 +13,14 @@ from services import ollama_service, gemini_service, openrouter_service
 from services.openai_compatible_service import OpenAICompatibleService
 
 from storage import storage_manager
-from bot.messaging import send_safe_message
+from bot.messaging import send_safe_message, finalize_draft
 from utils.context_manager import ensure_context_fits
 from bot.settings import USER_SETTINGS
 
 logger = logging.getLogger(__name__)
+
+# Per-chat draft singleton: only one draft rolls per chat at a time
+_active_drafts: dict[int, int] = {}  # chat_id -> draft_id
 
 async def _generate_and_send_response(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int, prompt: str, current_thread_id: str, is_reroll: bool = False, force_truncate: bool = False, placeholder_message = None, skip_save: bool = False, task_key: str = 'llm_task') -> None:
     """Wraps the response generation in a cancellable task."""
@@ -150,6 +153,14 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
         draft_id = random.randint(100000, 999999)
         last_draft_time = time.time()
         draft_throttle_seconds = 0.5
+        
+        # Per-chat singleton: evict any existing draft for this chat before starting a new one
+        if enable_streaming:
+            old_draft_id = _active_drafts.get(chat_id)
+            if old_draft_id is not None:
+                logger.debug(f"{log_prefix}Evicting previous draft {old_draft_id} for new draft {draft_id}")
+                asyncio.create_task(finalize_draft(context, chat_id, old_draft_id))
+            _active_drafts[chat_id] = draft_id
 
         async for chunk in service.generate_response(model=model_to_use, prompt=augmented_prompt, context_history=truncated_history):
             if chunk.startswith("[Error:") or chunk.startswith("Error:"):
@@ -162,6 +173,12 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
             if enable_streaming and (time.time() - last_draft_time) > draft_throttle_seconds:
                 asyncio.create_task(send_draft_message(context, chat_id, draft_id, raw_full_llm_response + " █"))
                 last_draft_time = time.time()
+
+        # Finalize the draft when streaming ends
+        if enable_streaming:
+            asyncio.create_task(finalize_draft(context, chat_id, draft_id))
+            if _active_drafts.get(chat_id) == draft_id:
+                del _active_drafts[chat_id]
 
         if not llm_error_reported_by_model:
             logger.info(f"{log_prefix}LLM generation complete. Length: {len(raw_full_llm_response)}")

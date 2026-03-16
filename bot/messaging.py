@@ -41,10 +41,13 @@ async def send_draft_message(
     
     # Send draft via direct HTTP request
     url = f"https://api.telegram.org/bot{context.bot.token}/sendMessageDraft"
+    # Sanitize: strip stray HTML tags LLMs emit, then strip meta/reflect tags
+    sanitized_text = escape_meta_tags(replace_html_tags(text))
+    
     payload = {
         "chat_id": chat_id,
         "draft_id": draft_id,
-        "text": escape_meta_tags(text)
+        "text": sanitized_text
     }
     
     try:
@@ -55,6 +58,28 @@ async def send_draft_message(
                 logger.debug(f"{log_prefix}Draft update failed: {resp.status_code} - {resp.text}")
     except Exception as e:
          logger.debug(f"{log_prefix}Exception during draft update: {e}")
+
+
+async def finalize_draft(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    draft_id: int
+):
+    """
+    Dismiss a rolling draft block by sending an empty/final update.
+    This tells Telegram to stop showing the typing animation for this draft.
+    """
+    url = f"https://api.telegram.org/bot{context.bot.token}/sendMessageDraft"
+    payload = {
+        "chat_id": chat_id,
+        "draft_id": draft_id,
+        "text": ""
+    }
+    try:
+        async with httpx.AsyncClient() as client:
+            await client.post(url, json=payload, timeout=2.0)
+    except Exception as e:
+        logger.debug(f"(Chat {chat_id}) Exception finalizing draft {draft_id}: {e}")
 
 async def send_safe_message(
     context: ContextTypes.DEFAULT_TYPE, 
