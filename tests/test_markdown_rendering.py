@@ -41,12 +41,12 @@ class TestTelegramRendering(unittest.TestCase):
 | Cell 3 | Cell 4 |
 """
         rendered = format_for_telegram_v2(markdown)
-        # Check for bold headers
-        self.assertIn("*Header 1*", rendered)
-        # Check for separators
-        self.assertIn("|", rendered)
-        # Check for newlines (not crammed)
-        self.assertTrue(rendered.count('\n') >= 2)
+        # Check that it's rendered as a code block
+        self.assertIn("```", rendered)
+        # Check for column padding and alignment
+        self.assertIn("| Header 1 | Header 2 |", rendered)
+        self.assertIn("| Cell 1   | Cell 2   |", rendered)
+        self.assertIn("| Cell 3   | Cell 4   |", rendered)
 
     def test_blockquote(self):
         markdown = "> Quote line 1\n> Quote line 2"

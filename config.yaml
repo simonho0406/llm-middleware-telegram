@@ -97,7 +97,7 @@ expert_panel:
     provider: "nvidia"
     model: "openai/gpt-oss-120b"
     fallback_provider: "nvidia"
-    fallback_model: "nvidia/nemotron-3-nano-30b-a3b"
+    fallback_model: "nvidia/nemotron-3-super-120b-a12b"
     request_timeout_seconds: 600
 
   # Expert Panel Roles - Restore original working models

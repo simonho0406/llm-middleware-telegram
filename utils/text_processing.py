@@ -58,6 +58,13 @@ class TelegramV2Renderer:
         self.ordered_list_stack = [] # To keep track of item numbers for nested ordered lists
         self.is_ordered_list = False # Flag to indicate if current list is ordered
         self.in_blockquote = False # Flag for blockquote context
+        
+        # Table state
+        self.in_table = False
+        self.table_rows = []
+        self.current_row = []
+        self.in_table_cell = False
+        self.current_cell_content = []
 
     def render(self, tokens: List[Dict[str, Any]]) -> str:
         for i, token in enumerate(tokens):
@@ -74,6 +81,10 @@ class TelegramV2Renderer:
                 handler(child, token.children, -1)
 
     def render_text(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
+        if self.in_table_cell:
+            self.current_cell_content.append(token.content.strip())
+            return
+            
         sanitized_content = sanitize_text_characters(token.content)
         escaped_text = telegram.helpers.escape_markdown(sanitized_content, version=2)
         if self.in_blockquote:
@@ -188,10 +199,50 @@ class TelegramV2Renderer:
 
     # --- Table Handlers ---
     def render_table_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
-        # Telegram doesn't support tables. We'll try to render it as a list of lines.
-        self.buffer.append('\n')
+        self.in_table = True
+        self.table_rows = []
+        
     def render_table_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
-        self.buffer.append('\n')
+        self.in_table = False
+        if not self.table_rows:
+            return
+            
+        # 1. Determine max width of each column
+        # Ensure all rows have same length safely
+        max_cols = max(len(row) for row in self.table_rows) if self.table_rows else 0
+        col_widths = [0] * max_cols
+        
+        for row in self.table_rows:
+            for i, cell in enumerate(row):
+                # Clean up any MarkdownV2 escapes applied by render_text since we're putting this in a code block
+                clean_cell = cell.replace('\\', '')
+                row[i] = clean_cell
+                # Calculate display width (simplified: using string length)
+                col_widths[i] = max(col_widths[i], len(clean_cell))
+                
+        # 2. Format the table using monospace code block for alignment
+        formatted_lines = []
+        for r_idx, row in enumerate(self.table_rows):
+            formatted_row = []
+            for c_idx in range(max_cols):
+                # Get cell or empty string if row is short
+                cell = row[c_idx] if c_idx < len(row) else ""
+                # Pad to col_width
+                formatted_row.append(cell.ljust(col_widths[c_idx]))
+            
+            # Join cells with pipe
+            formatted_lines.append("| " + " | ".join(formatted_row) + " |")
+            
+            # Add separator after header row (assuming first row is header)
+            if r_idx == 0:
+                sep_row = []
+                for w in col_widths:
+                    sep_row.append("-" * w)
+                formatted_lines.append("|-" + "-|-".join(sep_row) + "-|")
+
+        # 3. Add to main buffer as a Telegram code block
+        table_text = "\n".join(formatted_lines)
+        self.buffer.append(f'\n```\n{table_text}\n```\n')
 
     def render_thead_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): pass
     def render_thead_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): pass
@@ -199,18 +250,28 @@ class TelegramV2Renderer:
     def render_tbody_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): pass
     def render_tbody_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): pass
 
-    def render_tr_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): pass
+    def render_tr_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
+        self.current_row = []
+        
     def render_tr_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
-        self.buffer.append('\n')
+        self.table_rows.append(self.current_row)
+        self.current_row = []
 
     def render_th_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
-        self.buffer.append('*') # Bold headers
+        self.in_table_cell = True
+        self.current_cell_content = []
+        
     def render_th_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
-        self.buffer.append('* \\| ')
+        self.current_row.append("".join(self.current_cell_content))
+        self.in_table_cell = False
 
-    def render_td_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): pass
+    def render_td_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
+        self.in_table_cell = True
+        self.current_cell_content = []
+        
     def render_td_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
-        self.buffer.append(' \\| ')
+        self.current_row.append("".join(self.current_cell_content))
+        self.in_table_cell = False
 
 def format_for_telegram_v2(markdown_text: str) -> str:
     # 1. Format thinking blocks (DeepSeek R1 style)
