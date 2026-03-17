@@ -882,7 +882,8 @@ async def _run_panel_task_background(update: Update, context: ContextTypes.DEFAU
     """Background task wrapper for the panel workflow."""
     try:
         # Incremental Archival: Save USER prompt IMMEDIATELY to prevent orphans on crash
-        await storage_manager.save_message(chat_id, 'user', user_prompt)
+        pk = await storage_manager.save_message(chat_id, 'user', user_prompt)
+        context.user_data['pending_panel_message_pk'] = pk
 
         panel_results, final_answer, proposer_response = await _run_panel_workflow(
             update, context, user_prompt, [], assembling_msg, chat_id
@@ -910,6 +911,8 @@ async def _run_panel_task_background(update: Update, context: ContextTypes.DEFAU
         if await send_safe_message(context, update, pure_markdown_content):
             # Incremental Archival: Save the panel's result
             await storage_manager.save_message(chat_id, 'assistant:panel', final_answer)
+            # Clear pending PK since the interaction block is now complete and stable
+            context.user_data.pop('pending_panel_message_pk', None)
         
     except asyncio.CancelledError:
         logger.warning(f"Panel workflow in background task for chat {chat_id} was cancelled.")
@@ -987,7 +990,8 @@ async def handle_follow_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 )
             )
             # Incremental Archival: Save USER prompt IMMEDIATELY
-            await storage_manager.save_message(chat_id, 'user', follow_up_prompt)
+            pk = await storage_manager.save_message(chat_id, 'user', follow_up_prompt)
+            context.user_data['pending_panel_message_pk'] = pk
 
             context.user_data['panel_task'] = panel_task
             new_panel_results, new_final_answer, new_proposer_response = await panel_task
@@ -1024,6 +1028,8 @@ async def handle_follow_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if await send_safe_message(context, update, pure_markdown_content):
             # Incremental Archival: Save the panel's result immediately
             await storage_manager.save_message(chat_id, 'assistant:panel', new_final_answer)
+            # Clear pending PK since the interaction block is now complete and stable
+            context.user_data.pop('pending_panel_message_pk', None)
 
     return AWAITING_FOLLOW_UP
 
@@ -1070,6 +1076,12 @@ async def _cleanup_discussion_state(context: ContextTypes.DEFAULT_TYPE, chat_id:
     context.user_data.pop('panel_task', None)
     context.user_data.pop('panel_state', None)
     context.user_data.pop('panel_placeholder', None)  # Clear the placeholder reference
+    
+    # Surgical cleanup of orphaned user prompt preventing data loss history wipes
+    pending_pk = context.user_data.pop('pending_panel_message_pk', None)
+    if pending_pk is not None:
+        await storage_manager.delete_messages(chat_id, [pending_pk])
+        logger.info(f"Cleaned up orphaned panel prompt PK {pending_pk} due to cancellation in chat {chat_id}.")
     
     # Reset the command menu back to the default
     await setup_bot_commands_and_menu(context.application, chat_id)

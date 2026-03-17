@@ -549,6 +549,13 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if llm_task and not llm_task.done():
         llm_task.cancel()
         logger.info(f"(Chat {chat_id}) Normal chat LLM task cancelled by user.")
+        
+        # Surgical cleanup of orphaned user prompt preventing data loss history wipes
+        pending_pk = context.chat_data.pop('pending_user_message_pk', None)
+        if pending_pk is not None:
+            await storage_manager.delete_messages(chat_id, [pending_pk])
+            logger.info(f"(Chat {chat_id}) Cleaned up orphaned user prompt PK {pending_pk} due to cancellation.")
+
         await send_safe_message(context, update, "The current AI response generation has been cancelled.")
         context.chat_data.pop('llm_task', None)
     else:

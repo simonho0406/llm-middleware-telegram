@@ -365,7 +365,8 @@ async def _execute_council_flow(update: Update, context: ContextTypes.DEFAULT_TY
     
     # Incremental Archival: Save USER prompt IMMEDIATELY
     try:
-        await storage_manager.save_message(chat_id, 'user', prompt)
+        pk = await storage_manager.save_message(chat_id, 'user', prompt)
+        context.user_data['pending_council_message_pk'] = pk
     except Exception as e:
         logger.error(f"Failed to save user prompt: {e}")
 
@@ -529,6 +530,9 @@ async def _execute_council_flow(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data.pop('current_provider_selection', None)
     context.user_data.pop('model_metadata', None)
     context.chat_data.pop('llm_task', None)  # Clean up task reference
+    
+    # Clear pending PK since the interaction block is now complete and stable
+    context.user_data.pop('pending_council_message_pk', None)
 
     return ConversationHandler.END
 
@@ -551,6 +555,14 @@ async def cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     context.user_data.pop('current_provider_selection', None)
     context.user_data.pop('model_metadata', None)
     context.chat_data.pop('llm_task', None)
+    
+    # Surgical cleanup of orphaned user prompt preventing data loss history wipes
+    pending_pk = context.user_data.pop('pending_council_message_pk', None)
+    if pending_pk is not None:
+        chat_id = update.effective_chat.id
+        await storage_manager.delete_messages(chat_id, [pending_pk])
+        logger.info(f"Cleaned up orphaned council prompt PK {pending_pk} due to cancellation.")
+        
     return ConversationHandler.END
 
 async def conversation_timeout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

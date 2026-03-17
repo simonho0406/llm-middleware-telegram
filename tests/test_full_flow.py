@@ -59,15 +59,18 @@ async def test_full_user_flow_simulation():
     mock_rg_save_message = AsyncMock() # Response gen save
     mock_chat_save_message = AsyncMock() # Chat handler save
     mock_get_thread_id = AsyncMock(return_value="thread_1")
+    mock_set_thread_key = AsyncMock()
     
     # We patch all possible paths with the SAME objects where appropriate
     with patch('storage.storage_manager.get_thread_history', mock_get_history), \
          patch('storage.storage_manager.save_message', mock_sm_save_message), \
          patch('storage.storage_manager.get_current_thread_id', mock_get_thread_id), \
          patch('bot.handlers.chat.storage_manager.get_current_thread_id', mock_get_thread_id), \
+         patch('bot.handlers.chat.storage_manager.set_thread_key', mock_set_thread_key), \
          patch('bot.handlers.chat.storage_manager.save_message', mock_chat_save_message), \
          patch('bot.handlers.chat.storage_manager.get_thread_history', mock_get_history), \
          patch('bot.response_generator.storage_manager.save_message', mock_rg_save_message), \
+         patch('bot.response_generator.storage_manager.get_user_setting', AsyncMock(return_value=False)), \
          patch('bot.response_generator._generate_llm_response', new_callable=AsyncMock) as mock_gen_response, \
          patch('bot.response_generator.send_safe_message', new_callable=AsyncMock) as mock_send_msg, \
          patch('bot.response_generator.config.get_enable_streaming', return_value=False):

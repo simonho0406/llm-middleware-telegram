@@ -80,14 +80,17 @@ async def test_normal_chat_reroll_dislike(mock_update_context):
          patch('storage.storage_manager.get_thread_history', mock_get_history), \
          patch('storage.storage_manager.save_message', mock_save_msg), \
          patch('storage.storage_manager.remove_last_assistant_message', mock_remove_last), \
+         patch('storage.storage_manager.remove_last_assistant_message', mock_remove_last), \
          patch('bot.handlers.misc_commands.storage_manager.get_current_thread_id', mock_get_thread_id), \
          patch('bot.handlers.misc_commands.storage_manager.get_thread_key', mock_get_key), \
+         patch('bot.handlers.misc_commands.storage_manager.delete_messages', AsyncMock()), \
          patch('bot.response_generator.storage_manager.get_thread_history', mock_get_history), \
          patch('bot.response_generator.storage_manager.save_message', mock_save_msg), \
          patch('bot.response_generator.storage_manager.remove_last_assistant_message', mock_remove_last), \
          patch('bot.response_generator.send_safe_message', new_callable=AsyncMock) as mock_send_msg, \
          patch('bot.response_generator.providers.get_provider_details') as mock_get_providers, \
-         patch('bot.response_generator.config.get_enable_streaming', return_value=False):
+         patch('bot.response_generator.config.get_enable_streaming', return_value=False), \
+         patch('bot.response_generator.storage_manager.get_user_setting', AsyncMock(return_value=False)):
 
         # Mock Provider Service
         mock_service = MagicMock()
@@ -135,14 +138,17 @@ async def test_normal_chat_reroll_error(mock_update_context):
          patch('storage.storage_manager.get_thread_history', mock_get_history), \
          patch('storage.storage_manager.save_message', mock_save_msg), \
          patch('storage.storage_manager.remove_last_assistant_message', mock_remove_last), \
+         patch('storage.storage_manager.remove_last_assistant_message', mock_remove_last), \
          patch('bot.handlers.misc_commands.storage_manager.get_current_thread_id', mock_get_thread_id), \
          patch('bot.handlers.misc_commands.storage_manager.get_thread_key', mock_get_key), \
+         patch('bot.handlers.misc_commands.storage_manager.delete_messages', AsyncMock()), \
          patch('bot.response_generator.storage_manager.get_thread_history', mock_get_history), \
          patch('bot.response_generator.storage_manager.save_message', mock_save_msg), \
          patch('bot.response_generator.storage_manager.remove_last_assistant_message', mock_remove_last), \
          patch('bot.response_generator.send_safe_message', new_callable=AsyncMock) as mock_send_msg, \
          patch('bot.response_generator.providers.get_provider_details') as mock_get_providers, \
-         patch('bot.response_generator.config.get_enable_streaming', return_value=False):
+         patch('bot.response_generator.config.get_enable_streaming', return_value=False), \
+         patch('bot.response_generator.storage_manager.get_user_setting', AsyncMock(return_value=False)):
 
         mock_service = MagicMock()
         mock_service.generate_response.return_value = async_iter(["Infinity!"])

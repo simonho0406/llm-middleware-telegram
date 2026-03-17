@@ -255,21 +255,25 @@ async def remove_last_assistant_message(chat_id: int, thread_id: Optional[str] =
                 return True
             return False
 
-async def save_message(chat_id: int, role: str, content: str, thread_id: Optional[str] = None) -> None:
-    """Saves (Appends) a single message to the history of a specific or current thread."""
+async def save_message(chat_id: int, role: str, content: str, thread_id: Optional[str] = None) -> Optional[int]:
+    """Saves (Appends) a single message to the history and returns its message_pk."""
     async with aiosqlite.connect(config.DB_PATH) as db:
         thread_pk = await _get_thread_pk(db, chat_id, thread_id)
         if not thread_pk:
             logger.error(f"Attempted to save message to non-existent thread for chat_id {chat_id}")
-            return
+            return None
 
         timestamp = int(time.time())
-        await db.execute(
-            "INSERT INTO messages (thread_fk, role, content, timestamp) VALUES (?, ?, ?, ?)",
-            (thread_pk, role, content, timestamp)
-        )
+        async with db.cursor() as cursor:
+            await cursor.execute(
+                "INSERT INTO messages (thread_fk, role, content, timestamp) VALUES (?, ?, ?, ?)",
+                (thread_pk, role, content, timestamp)
+            )
+            message_pk = cursor.lastrowid
+        
         await db.commit()
-        logger.info(f"Saved single message with role '{role}' to thread_pk {thread_pk} for chat {chat_id}")
+        logger.info(f"Saved single message with role '{role}' to thread_pk {thread_pk} for chat {chat_id} (PK: {message_pk})")
+        return message_pk
 
 async def create_thread(chat_id: int, thread_id: str) -> bool:
     async with aiosqlite.connect(config.DB_PATH) as db:

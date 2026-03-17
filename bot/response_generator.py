@@ -233,9 +233,12 @@ async def _generate_and_send_response_task(update: Update, context: ContextTypes
             if is_reroll:
                 # For reroll, we remove the faulty previous answer so the prompt is now the last message
                 await storage_manager.remove_last_assistant_message(chat_id)
+                # We don't save a new prompt, so there's no PK to track for cancellation cleanup
+                context.chat_data['pending_user_message_pk'] = None
             else:
                 # For normal messages, we APPEND the user prompt immediately
-                await storage_manager.save_message(chat_id, 'user', prompt)
+                pk = await storage_manager.save_message(chat_id, 'user', prompt)
+                context.chat_data['pending_user_message_pk'] = pk
         except Exception as e:
             logger.error(f"{log_prefix}Failed to save/update initial state: {e}")
             # Proceeding might be risky if we can't save, but we try to answer anyway?
@@ -285,7 +288,12 @@ async def _generate_and_send_response_task(update: Update, context: ContextTypes
         try:
             await storage_manager.save_message(chat_id, 'assistant', final_content)
             logger.info(f"{log_prefix}Assistant response saved to archive.")
+            # Clear pending PK since the interaction block is now complete and stable
+            context.chat_data.pop('pending_user_message_pk', None)
         except Exception as e_hist:
             logger.error(f"{log_prefix}Failed to save assistant response: {e_hist}")
     elif skip_save:
         logger.info(f"{log_prefix}Skipping output archival (skip_save=True)")
+    
+    # Final safety cleanup for any leaked keys (e.g. if error prevented saving)
+    context.chat_data.pop('pending_user_message_pk', None)
