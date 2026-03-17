@@ -66,6 +66,12 @@ class TelegramV2Renderer:
         self.in_table_cell = False
         self.current_cell_content = []
 
+    def _append_inline(self, text: str):
+        if self.in_table_cell:
+            self.current_cell_content.append(text)
+        else:
+            self.buffer.append(text)
+
     def render(self, tokens: List[Dict[str, Any]]) -> str:
         for i, token in enumerate(tokens):
             handler_name = f"render_{token.type}"
@@ -82,7 +88,7 @@ class TelegramV2Renderer:
 
     def render_text(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
         if self.in_table_cell:
-            self.current_cell_content.append(token.content.strip())
+            self._append_inline(token.content)
             return
             
         sanitized_content = sanitize_text_characters(token.content)
@@ -93,7 +99,7 @@ class TelegramV2Renderer:
             # Actually, softbreaks are separate tokens.
             # If the text itself has newlines (unlikely for 'text' token in commonmark unless preserved?), we handle it.
             pass
-        self.buffer.append(escaped_text)
+        self._append_inline(escaped_text)
 
     def render_paragraph_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): pass
     def render_paragraph_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
@@ -154,14 +160,18 @@ class TelegramV2Renderer:
 
     def render_inline(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self.render_default(token, tokens, index)
 
-    def render_strong_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self.buffer.append('*')
-    def render_strong_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self.buffer.append('*')
+    def render_strong_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self._append_inline('*')
+    def render_strong_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self._append_inline('*')
 
-    def render_em_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self.buffer.append('_')
-    def render_em_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self.buffer.append('_')
+    def render_em_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self._append_inline('_')
+    def render_em_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self._append_inline('_')
 
     def render_code_inline(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
-        self.buffer.append(f'`{telegram.helpers.escape_markdown(token.content, version=2)}`')
+        content = token.content
+        if self.in_table_cell:
+            self._append_inline(f'`{content}`')
+        else:
+            self._append_inline(f'`{telegram.helpers.escape_markdown(content, version=2)}`')
 
     def render_fence(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
         lang = token.info.split()[0] if token.info else ''
@@ -187,14 +197,20 @@ class TelegramV2Renderer:
         # Render image as a link: [Alt Text](URL)
         alt = token.content or "Image"
         src = token.attrs.get('src', '')
-        self.buffer.append(f'[{telegram.helpers.escape_markdown(alt, version=2)}]({telegram.helpers.escape_markdown(src, version=2)})')
+        if self.in_table_cell:
+            self._append_inline(f'[{alt}]({src})')
+        else:
+            self._append_inline(f'[{telegram.helpers.escape_markdown(alt, version=2)}]({telegram.helpers.escape_markdown(src, version=2)})')
 
     def render_link_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
-        self.buffer.append('[')
+        self._append_inline('[')
         self.link_href = token.attrs.get('href', '')
     def render_link_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
         href = self.link_href or ''
-        self.buffer.append(f']({telegram.helpers.escape_markdown(href, version=2)})')
+        if self.in_table_cell:
+            self._append_inline(f']({href})')
+        else:
+            self._append_inline(f']({telegram.helpers.escape_markdown(href, version=2)})')
         self.link_href = None
 
     # --- Table Handlers ---

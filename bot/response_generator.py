@@ -24,6 +24,13 @@ _active_drafts: dict[int, int] = {}  # chat_id -> draft_id
 
 async def _generate_and_send_response(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int, prompt: str, current_thread_id: str, is_reroll: bool = False, force_truncate: bool = False, placeholder_message = None, skip_save: bool = False, task_key: str = 'llm_task') -> None:
     """Wraps the response generation in a cancellable task."""
+    
+    # SYSTEMIC FIX: Defensively cancel any existing task on this key to prevent zombie leak
+    old_task = context.chat_data.get(task_key)
+    if old_task and not old_task.done():
+        logger.warning(f"(Chat {chat_id}) Systemic Concurrency Catch: Cancelling zombie '{task_key}' before spinning up new task.")
+        old_task.cancel()
+
     task = asyncio.create_task(
         _generate_and_send_response_task(update, context, chat_id, user_id, prompt, current_thread_id, is_reroll, force_truncate, placeholder_message, skip_save)
     )
@@ -31,7 +38,7 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
     try:
         await task
     except asyncio.CancelledError:
-        logger.info(f"(Chat {chat_id}) LLM task was cancelled.")
+        logger.info(f"(Chat {chat_id}) LLM task '{task_key}' was cancelled cleanly.")
 
 async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: int, prompt: str, is_reroll: bool = False, force_truncate: bool = False, operation_id: str = "chat_response") -> dict:
     """
@@ -171,14 +178,14 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
             
             # Fire off a non-blocking draft update if throttling window has passed
             if enable_streaming and (time.time() - last_draft_time) > draft_throttle_seconds:
-                asyncio.create_task(send_draft_message(context, chat_id, draft_id, raw_full_llm_response + " █"))
+                if _active_drafts.get(chat_id) == draft_id:
+                    asyncio.create_task(send_draft_message(context, chat_id, draft_id, raw_full_llm_response + " █"))
                 last_draft_time = time.time()
 
         # Finalize the draft when streaming ends
-        if enable_streaming:
+        if enable_streaming and _active_drafts.get(chat_id) == draft_id:
             asyncio.create_task(finalize_draft(context, chat_id, draft_id))
-            if _active_drafts.get(chat_id) == draft_id:
-                del _active_drafts[chat_id]
+            del _active_drafts[chat_id]
 
         if not llm_error_reported_by_model:
             logger.info(f"{log_prefix}LLM generation complete. Length: {len(raw_full_llm_response)}")
