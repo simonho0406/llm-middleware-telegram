@@ -17,17 +17,42 @@ def fix_collapsed_tables(text: str) -> str:
         return text
     
     # 1. Standardize spaces between columns collapsing back into newlines
-    text = re.sub(r'\|\s+\|', '|\n|', text)
+    fixed = re.sub(r'\|\s+\|', '|\n|', text)
     
-    # 2. Split paragraphs that collide with the end of a table
-    text = re.sub(r'\|\s+(?=-{2,})', '|\n\n', text) 
-    text = re.sub(r'\|\s+(?=#{1,6}\s)', '|\n\n', text)
+    # 2. Re-anchor table headers that are fused into the preceding paragraph
+    # We locate the structural delimiter row (e.g., |---|---|), count its columns, 
+    # and geometrically backtrack to decouple the header row from any paragraph text.
+    delimiter_pattern = re.compile(r'\n\|(?:[\s\-:]+\|)+')
     
-    # 3. Split paragraphs that collide with the start of a new table header
-    # Looks for a word character ending with a space, immediately followed by | and a capital letter or format string
-    text = re.sub(r'([a-zA-Z0-9\)])\s+(?=\|\s*[\*\_\-]?[A-Za-z])', r'\1\n\n', text)
+    offset = 0
+    while True:
+        match = delimiter_pattern.search(fixed, offset)
+        if not match:
+            break
+            
+        delim = match.group(0)
+        pipes = delim.count('|')
+        
+        header_start = -1
+        pipe_count = 0
+        for i in range(match.start() - 1, -1, -1):
+            if fixed[i] == '|':
+                pipe_count += 1
+                if pipe_count == pipes:
+                    header_start = i
+                    break
+        
+        if header_start > 0 and fixed[header_start - 1] not in ('\n', '>'):
+            fixed = fixed[:header_start] + '\n\n' + fixed[header_start:]
+            offset = match.end() + 2
+            continue
+            
+        offset = match.end()
+        
+    # 3. Split paragraphs that dynamically collide with the end of a table.
+    fixed = re.sub(r'(\|\s*)(?=-{3,}|\#{1,6}\s)', r'|\n\n', fixed)
     
-    return text
+    return fixed
 
 def sanitize_text_characters(text: str) -> str:
     """
