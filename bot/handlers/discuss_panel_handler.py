@@ -709,10 +709,23 @@ async def _run_panel_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE
                             # Augment Proposer's prompt with the combined research dossier
                             proposer_task = next((task for task in tasks_list if task.get("role") == "Proposer"), None)
                             if proposer_task:
+                                from utils.context_manager import get_model_context_limits, truncate_text_to_tokens
+                                role_configs = panel_config.get('roles', {})
+                                proposer_config = role_configs.get('Proposer', {})
+                                proposer_provider_name = proposer_config.get('provider', config.get_default_provider())
+                                proposer_model_name = proposer_config.get('model', 'unknown')
+                                
+                                limits = get_model_context_limits(proposer_model_name, proposer_provider_name)
+                                max_dossier_tokens = int(limits.effective_input_limit * 0.5)
+                                truncated_dossier = truncate_text_to_tokens(research_dossier, max_dossier_tokens)
+                                
+                                if len(truncated_dossier) < len(research_dossier):
+                                    logger.warning(f"Expert Panel research dossier truncated from {len(research_dossier)} chars to fit {max_dossier_tokens} token budget.")
+
                                 original_prompt = proposer_task.get("prompt", "")
                                 augmented_prompt = (
                                     f"Based on the following comprehensive research dossier, please address the user's original query.\n\n"
-                                    f"--- RESEARCH DOSSIER ---\n{research_dossier}\n\n"
+                                    f"--- RESEARCH DOSSIER ---\n{truncated_dossier}\n\n"
                                     f"--- ORIGINAL TASK ---\n{original_prompt}"
                                 )
                                 proposer_task["prompt"] = augmented_prompt

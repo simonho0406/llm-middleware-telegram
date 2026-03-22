@@ -135,18 +135,27 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
         return
     search_results = search_response['content']
 
-    augmented_prompt = (
-        f"Based on the following web search results, please provide a comprehensive answer to the user's query.\n\n"
-        f"--- USER QUERY ---\n{query}\n\n"
-        f"--- WEB SEARCH RESULTS ---\n{search_results}"
-    )
-
     session_provider = await storage_manager.get_thread_key(chat_id, 'provider', config.get_default_provider())
     provider_details = providers.get_provider_details()
     provider_config = provider_details.get(session_provider, provider_details[config.get_default_provider()])
     
     service = provider_config['service']
     model_to_use = await storage_manager.get_thread_key(chat_id, 'model', provider_config['default_model'])
+
+    from utils.context_manager import get_model_context_limits, truncate_text_to_tokens
+    limits = get_model_context_limits(model_to_use, session_provider)
+    # Give search results 50% of context window limit
+    max_search_tokens = int(limits.effective_input_limit * 0.5)
+    truncated_search_results = truncate_text_to_tokens(search_results, max_search_tokens)
+    
+    if len(truncated_search_results) < len(search_results):
+        logger.warning(f"{log_prefix}Normal chat search results truncated from {len(search_results)} chars to fit {max_search_tokens} token budget.")
+
+    augmented_prompt = (
+        f"Based on the following web search results, please provide a comprehensive answer to the user's query.\n\n"
+        f"--- USER QUERY ---\n{query}\n\n"
+        f"--- WEB SEARCH RESULTS ---\n{truncated_search_results}"
+    )
 
     # Fetch history for context (limit to recent messages to avoid overload, though context checks handle this)
     try:

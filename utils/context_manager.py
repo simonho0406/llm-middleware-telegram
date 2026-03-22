@@ -78,6 +78,28 @@ def count_tokens(text: str) -> int:
     # Fallback estimation: ~4 characters per token
     return len(text) // 4
 
+def truncate_text_to_tokens(text: str, max_tokens: int) -> str:
+    """
+    Truncates a given string to exactly hit the model's token budget constraint.
+    Reverts to heuristic truncation if tiktoken fails.
+    """
+    if _TIKTOKEN_ENCODER:
+        try:
+            tokens = _TIKTOKEN_ENCODER.encode(text)
+            if len(tokens) > max_tokens:
+                truncated_tokens = tokens[:max_tokens]
+                return _TIKTOKEN_ENCODER.decode(truncated_tokens)
+            return text
+        except Exception as e:
+            logger.warning(f"Tiktoken encode failed during hard truncation: {e}")
+            pass
+            
+    # Fallback to heuristic (4 chars per token)
+    max_chars = max_tokens * 4
+    if len(text) > max_chars:
+        return text[:max_chars]
+    return text
+
 import config
 
 def get_model_context_limits(model: str, provider: str) -> ModelContextLimits:

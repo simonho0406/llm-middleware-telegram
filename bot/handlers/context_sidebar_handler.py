@@ -13,6 +13,7 @@ CTX_PREFIX = "ctx_"
 CTX_NAV = f"{CTX_PREFIX}nav_"    # ctx_nav_<page>
 CTX_DEL = f"{CTX_PREFIX}del_"    # ctx_del_<page>_<hash_or_id?>
 CTX_CONFIRM = f"{CTX_PREFIX}cfm_" # ctx_cfm_<page>_<start_pk>
+CTX_RESEND = f"{CTX_PREFIX}res_"  # ctx_res_<page>_<start_pk>
 CTX_CLOSE = f"{CTX_PREFIX}close"
 
 async def context_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -133,6 +134,11 @@ async def show_context_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         InlineKeyboardButton("🗑️ Delete this Interaction", callback_data=f"{CTX_CONFIRM}{page}_{start_pk}")
     ])
     
+    if asst_count > 0:
+        buttons.append([
+            InlineKeyboardButton("📤 Resend Assistant Reply", callback_data=f"{CTX_RESEND}{page}_{start_pk}")
+        ])
+    
     buttons.append([InlineKeyboardButton("Done", callback_data=CTX_CLOSE)])
     
     keyboard = InlineKeyboardMarkup(buttons)
@@ -166,6 +172,39 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             ]
         ]
         await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
+        return
+
+    if data.startswith(CTX_RESEND):
+        # Format: ctx_res_<page>_<start_pk>
+        _, _, page_str, start_pk_str = data.split("_")
+        start_pk = int(start_pk_str)
+        chat_id = update.effective_chat.id
+        
+        raw_history = await storage_manager.get_thread_history_with_pk(chat_id, limit=200)
+        
+        # Group to find the assistant messages in this block
+        assistant_contents = []
+        found_start = False
+        
+        for msg in raw_history:
+            if msg['id'] == start_pk:
+                found_start = True
+                if msg['role'] != 'user':
+                    assistant_contents.append(msg['content'])
+                continue
+            
+            if found_start:
+                if msg['role'] == 'user':
+                    break
+                assistant_contents.append(msg['content'])
+                
+        if assistant_contents:
+            joined_response = "\n\n".join(assistant_contents)
+            await query.answer("Resending...", show_alert=False)
+            from bot.messaging import send_safe_message
+            await send_safe_message(context, update, joined_response)
+        else:
+            await query.answer("No AI response found in this interaction to resend.", show_alert=True)
         return
 
     if data.startswith(CTX_DEL):
