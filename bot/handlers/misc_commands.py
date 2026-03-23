@@ -79,7 +79,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 • Configure in /config → Auto-Search settings"""
     await send_safe_message(context, update, help_text)
 
-async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, placeholder_message = None) -> None:
+async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, placeholder_message = None, skip_save: bool = False) -> None:
     """
     Performs a web search, gets a response from the LLM, and saves the original
     query to history, not the augmented prompt.
@@ -175,7 +175,7 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
             logger.info(f"{log_prefix}Skipping save of search query: Identical to last user message.")
             should_save_query = False
 
-    if should_save_query:
+    if should_save_query and not skip_save:
         try:
             await storage_manager.save_message(chat_id, 'user', query)
         except Exception as e:
@@ -195,12 +195,13 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
 
     await send_safe_message(context, update, final_response, placeholder_message)
 
-    try:
-        # Save the assistant's response (Append-Only)
-        await storage_manager.save_message(chat_id, 'assistant', final_response)
-        logger.info(f"{log_prefix}Search command successful. Response saved.")
-    except Exception as e:
-        logger.error(f"{log_prefix}Failed to save assistant response: {e}", exc_info=True)
+    if not skip_save:
+        try:
+            # Save the assistant's response (Append-Only)
+            await storage_manager.save_message(chat_id, 'assistant', final_response)
+            logger.info(f"{log_prefix}Search command successful. Response saved.")
+        except Exception as e:
+            logger.error(f"{log_prefix}Failed to save assistant response: {e}", exc_info=True)
 
 async def retry_search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles the retry search button click."""
