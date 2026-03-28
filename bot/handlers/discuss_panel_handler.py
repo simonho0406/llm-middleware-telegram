@@ -219,7 +219,7 @@ async def _run_refinement_cycle(
                         return proposer_response, 0, iteration
 
                 except Exception as fallback_error:
-                    logger.error(f"Orchestrator's backup failed with exception: {fallback_error}")
+                    logger.exception(f"Orchestrator's backup failed with exception: {fallback_error}")
                     return proposer_response, 0, iteration
             else:
                 logger.error("No fallback provider/model configured for Orchestrator. Cannot proceed with backup.")
@@ -233,7 +233,7 @@ async def _run_refinement_cycle(
         except (asyncio.TimeoutError, telegram.error.TimedOut, telegram.error.NetworkError) as e:
             logger.warning(f"Timeout updating status to 'Critic reviewing' in round {iteration}: {e}")
         except Exception as e:
-            logger.warning(f"Failed to update status to 'Critic reviewing' in round {iteration}: {e}")
+            logger.exception(f"Failed to update status to 'Critic reviewing' in round {iteration}: {e}")
         
         # Execute Critic
         critic_template = config.PROMPTS.get_prompt('panel_critic')
@@ -378,7 +378,7 @@ async def set_panel_commands(application, chat_id: int) -> None:
         )
         logger.info(f"Set panel-specific commands for chat {chat_id}")
     except Exception as e:
-        logger.error(f"Failed to set panel-specific commands for chat {chat_id}: {e}")
+        logger.exception(f"Failed to set panel-specific commands for chat {chat_id}: {e}")
 
 
 def _format_panel_summary(panel_results: dict) -> str:
@@ -940,7 +940,7 @@ async def _run_panel_task_background(update: Update, context: ContextTypes.DEFAU
             else:
                 await context.bot.send_message(chat_id=chat_id, text=error_message, parse_mode=None)
         except Exception as send_error:
-            logger.error(f"Failed to send error message: {send_error}")
+            logger.exception(f"Failed to send error message: {send_error}")
             
         await _cleanup_discussion_state(context, chat_id, assembling_msg)
 
@@ -963,7 +963,7 @@ async def start_panel_discussion(update: Update, context: ContextTypes.DEFAULT_T
         try:
             await update.message.reply_text("A network error occurred, please try again.", parse_mode=None)
         except Exception as e_inner:
-            logger.error(f"Failed to send network error message to user: {e_inner}")
+            logger.exception(f"Failed to send network error message to user: {e_inner}")
         return ConversationHandler.END
     
     await set_panel_commands(context.application, chat_id)
@@ -1023,7 +1023,7 @@ async def handle_follow_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             except (asyncio.TimeoutError, telegram.error.TimedOut) as timeout_e:
                 logger.warning(f"Timeout editing error message in follow_up: {timeout_e}")
             except Exception as edit_e:
-                logger.warning(f"Failed to edit error message in follow_up: {edit_e}")
+                logger.exception(f"Failed to edit error message in follow_up: {edit_e}")
             await _cleanup_discussion_state(context, chat_id, placeholder)
             return ConversationHandler.END
 
@@ -1071,7 +1071,7 @@ async def _cleanup_discussion_state(context: ContextTypes.DEFAULT_TYPE, chat_id:
             except telegram.error.TelegramError as e:
                 logger.warning(f"Could not update placeholder message during cleanup: {e}")
             except Exception as e:
-                logger.error(f"Unexpected error updating placeholder during cleanup: {e}")
+                logger.exception(f"Unexpected error updating placeholder during cleanup: {e}")
         
         try:
             # Await the task to allow it to process the cancellation
@@ -1080,11 +1080,11 @@ async def _cleanup_discussion_state(context: ContextTypes.DEFAULT_TYPE, chat_id:
             except asyncio.CancelledError:
                 logger.info(f"Panel task for chat {chat_id} was already cancelled.")
             except Exception as e:
-                logger.error(f"Error awaiting cancelled panel task for chat {chat_id}: {e}")
+                logger.exception(f"Error awaiting cancelled panel task for chat {chat_id}: {e}")
         except asyncio.CancelledError:
             logger.info(f"Panel task for chat {chat_id} successfully processed cancellation.")
         except Exception as e:
-            logger.error(f"Error awaiting cancelled panel task for chat {chat_id}: {e}")
+            logger.exception(f"Error awaiting cancelled panel task for chat {chat_id}: {e}")
 
     context.user_data.pop('panel_task', None)
     context.user_data.pop('panel_state', None)
@@ -1251,7 +1251,7 @@ async def handle_panel_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             try:
                 await placeholder_msg.edit_text(summary, parse_mode=constants.ParseMode.MARKDOWN_V2)
             except Exception as e:
-                logger.warning(f"Failed to update summary: {e}")
+                logger.exception(f"Failed to update summary: {e}")
                 
         except asyncio.CancelledError:
             logger.info("Panel task cancelled.")
@@ -1297,7 +1297,7 @@ async def reroll_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 await storage_manager.remove_last_assistant_message(chat_id)
                 logger.info(f"[{chat_id}] Removed last assistant message from DB for panel reroll.")
             except Exception as e:
-                logger.error(f"Failed to remove last assistant message during panel reroll: {e}")
+                logger.exception(f"Failed to remove last assistant message during panel reroll: {e}")
 
         try:
             panel_task = asyncio.create_task(
@@ -1321,7 +1321,7 @@ async def reroll_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     # Fallback to send_message if placeholder doesn't exist
                     await context.bot.send_message(chat_id, error_message, parse_mode=constants.ParseMode.MARKDOWN_V2)
             except Exception as send_e:
-                logger.error(f"Failed to send error message to user after reroll failure: {send_e}")
+                logger.exception(f"Failed to send error message to user after reroll failure: {send_e}")
             
             # Do not end the conversation on reroll error, allow user to retry
             return AWAITING_FOLLOW_UP

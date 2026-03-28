@@ -213,7 +213,7 @@ async def run_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         try:
             context_history = await storage_manager.get_thread_history(chat_id, limit=500)
         except Exception as e:
-            logger.error(f"{log_prefix} Failed to fetch thread history: {e}")
+            logger.exception(f"{log_prefix} Failed to fetch thread history: {e}")
             context_history = []
 
         discussion_transcript = [{"role": "user", "content": discussion_data['user_prompt']}]
@@ -257,7 +257,7 @@ async def run_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 msg = {'content': response.strip()}
             except Exception as e:
                 error_msg = f"Error generating response from {provider_name}/{model_id}: {e}"
-                logger.error(f"{log_prefix} {error_msg}")
+                logger.exception(f"{log_prefix} {error_msg}")
                 msg = {'content': f"⚠️ {error_msg}"}
             
             # Add only model response to main transcript
@@ -301,10 +301,10 @@ async def run_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 await storage_manager.save_message(chat_id, 'assistant', final_transcript)
                 logger.info(f"{log_prefix} Archived /discuss interaction.")
             except Exception as e:
-                logger.error(f"{log_prefix} Failed to archive /discuss interaction: {e}")
+                logger.exception(f"{log_prefix} Failed to archive /discuss interaction: {e}")
 
         except Exception as ast_error:
-            logger.error(f"AST processing failed: {ast_error}. Using emergency fallback.")
+            logger.exception(f"AST processing failed: {ast_error}. Using emergency fallback.")
             # Emergency: Send as single plain text message with length truncation
             await send_safe_message(context, update, final_transcript)
             
@@ -313,7 +313,7 @@ async def run_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 await storage_manager.save_message(chat_id, 'user', discussion_data['user_prompt'])
                 await storage_manager.save_message(chat_id, 'assistant', final_transcript)
             except Exception as e:
-                logger.error(f"Failed to save emergency backup message: {e}")
+                logger.exception(f"Failed to save emergency backup message: {e}")
                 pass
 
     except Exception as e:

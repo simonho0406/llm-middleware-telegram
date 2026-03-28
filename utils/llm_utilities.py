@@ -81,7 +81,7 @@ async def get_robust_llm_response(
             
         except Exception as e:
             last_error = str(e)
-            logger.warning(f"{role_name} failed on attempt {attempt + 1}: {last_error}")
+            logger.exception(f"{role_name} failed on attempt {attempt + 1}: {last_error}")
         
         # Wait before retrying (except on the last attempt)
         if attempt < max_retries - 1:
@@ -111,7 +111,7 @@ async def get_robust_llm_response(
                     return {'response': f"[Fallback by {fallback_provider}] {response}", 'retries': retries, 'fallback_used': fallback_used}
                     
         except Exception as fallback_error:
-            logger.error(f"{role_name} fallback also failed: {fallback_error}")
+            logger.exception(f"{role_name} fallback also failed: {fallback_error}")
     
     # Both primary and fallback failed
     error_msg = f"[Error: {role_name} failed after {max_retries} attempts. Last error: {last_error}]"
@@ -256,7 +256,7 @@ Output the properly escaped text only:"""
         return formatted_text, True  # Success!
         
     except Exception as e:
-        logger.warning(f"Formatter Agent failed, using clean raw text fallback: {e}")
+        logger.exception(f"Formatter Agent failed, using clean raw text fallback: {e}")
         
         # Unified fallback: always return clean raw text to ensure consistent UX
         # This follows the UX hierarchy: MarkdownV2 > Clean Raw Text > Never Escaped Text

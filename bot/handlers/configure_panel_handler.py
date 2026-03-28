@@ -146,7 +146,7 @@ async def show_model_selection(update: Update, context: ContextTypes.DEFAULT_TYP
         elif provider_config.get('allowed_models'):
             models_result = provider_config.get('allowed_models')
     except Exception as e:
-        logger.error(f"Failed to get models for provider '{provider}': {e}")
+        logger.exception(f"Failed to get models for provider '{provider}': {e}")
         await send_safe_message(context, update, f"❌ Error fetching models for '{provider}'.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Back to Providers", callback_data=f"{ROLE_CALLBACK_PREFIX}{role}")]]))
         return SELECT_PROVIDER
     
@@ -305,10 +305,10 @@ async def load_panel_config(chat_id: int) -> dict:
             await storage_manager.set_user_setting(chat_id, 'panel_config', None)
             logger.info(f"Cleared corrupted panel_config for chat {chat_id}")
         except Exception as clear_error:
-            logger.error(f"Failed to clear corrupted panel_config for chat {chat_id}: {clear_error}")
+            logger.exception(f"Failed to clear corrupted panel_config for chat {chat_id}: {clear_error}")
         return default_config
     except Exception as e:
-        logger.error(f"Unexpected error loading panel_config for chat {chat_id}: {e}. Using defaults.")
+        logger.exception(f"Unexpected error loading panel_config for chat {chat_id}: {e}. Using defaults.")
         return default_config
 
 async def save_role_config(chat_id: int, role: str, provider: str, model: str) -> None:

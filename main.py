@@ -96,7 +96,7 @@ def main() -> None:
             else:
                 logger.info("No existing chats found for conversation state cleanup.")
         except Exception as e:
-            logger.warning(f"Conversation state cleanup failed: {e}")
+            logger.exception(f"Conversation state cleanup failed: {e}")
 
         # --- Failsafe: Reset command scopes for all known chats ---
         logger.info("Running startup failsafe: resetting command scopes for all known chats...")
@@ -107,12 +107,12 @@ def main() -> None:
                     try:
                         await setup_bot_commands_and_menu(application, chat_id)
                     except Exception as e:
-                        logger.error(f"Failed to reset command scope for chat_id {chat_id} on startup: {e}")
+                        logger.exception(f"Failed to reset command scope for chat_id {chat_id} on startup: {e}")
                 logger.info(f"Completed command scope reset for {len(all_chat_ids)} chats.")
             else:
                 logger.info("No existing chats found to reset command scopes.")
         except Exception as e:
-            logger.error(f"An error occurred during the startup command scope reset: {e}")
+            logger.exception(f"An error occurred during the startup command scope reset: {e}")
 
         # Run connection checks and set up the new global commands/menu
         await run_startup_checks(application)
@@ -123,7 +123,7 @@ def main() -> None:
             token_masked = f"{config.TELEGRAM_BOT_TOKEN[:5]}...{config.TELEGRAM_BOT_TOKEN[-4:]}" if config.TELEGRAM_BOT_TOKEN else "Not Set"
             logger.info(f"Bot initialized: Username='{bot_info.username}', Token='{token_masked}'")
         except Exception as e:
-            logger.error(f"Failed to get bot info: {e}")
+            logger.exception(f"Failed to get bot info: {e}")
 
     async def cleanup_services(application: Application):
         """Lifecycle hook to clean up resources on shutdown."""

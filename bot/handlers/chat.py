@@ -18,7 +18,7 @@ def count_tokens(text: str) -> int:
         encoding = tiktoken.get_encoding("cl100k_base")
         return len(encoding.encode(text, disallowed_special=()))
     except Exception as e:
-        logger.warning(f"Token counting with tiktoken failed: {e}. Falling back to char count.")
+        logger.exception(f"Token counting with tiktoken failed: {e}. Falling back to char count.")
         return len(text) // 4
 
 def escape_meta_tags_for_markdown_attempt(text: str) -> str:
@@ -71,7 +71,7 @@ async def process_buffered_message(context: ContextTypes.DEFAULT_TYPE) -> None:
         try:
             await send_safe_message(context, update, "A network error occurred, please try again.")
         except Exception as e_inner:
-            logger.error(f"Failed to send network error message to user: {e_inner}")
+            logger.exception(f"Failed to send network error message to user: {e_inner}")
     except Exception as e:
         logger.error(f"{log_prefix}Error in process_buffered_message: {e}", exc_info=True)
         await send_safe_message(context, update, "Sorry, a critical error occurred while handling your message.")

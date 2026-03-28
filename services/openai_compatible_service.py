@@ -34,7 +34,7 @@ class OpenAICompatibleService:
             )
             logger.info(f"OpenAICompatibleService initialized for provider '{self.provider_name}' with base URL '{self.base_url}'")
         except Exception as e:
-            logger.error(f"Failed to initialize AsyncOpenAI client for {self.provider_name}: {e}")
+            logger.exception(f"Failed to initialize AsyncOpenAI client for {self.provider_name}: {e}")
             self.client = None
 
         self.max_retries = provider_config.get('max_retries', 3)
@@ -151,7 +151,7 @@ class OpenAICompatibleService:
                             if content:
                                 yield content
                         else:
-                            logger.error(f"[{self.provider_name}] API returned empty/invalid response")
+                            logger.exception(f"[{self.provider_name}] API returned empty/invalid response")
                             yield f"[Error: Provider returned invalid response format.]"
                             return
                     success = True
@@ -206,7 +206,7 @@ class OpenAICompatibleService:
                             yield f"[Error: Provider returned invalid response format.]"
                             return
                     except Exception as fallback_error:
-                        logger.error(f"[{self.provider_name}] Non-streaming fallback also failed: {fallback_error}")
+                        logger.exception(f"[{self.provider_name}] Non-streaming fallback also failed: {fallback_error}")
                         yield f"[Error: Both streaming and non-streaming failed. Provider may be temporarily unavailable.]"
                         return
                 else:
@@ -215,7 +215,7 @@ class OpenAICompatibleService:
                     return
             except Exception as e:
                 if "EngineCore" in str(e):
-                    logger.error(f"[{self.provider_name}] NVIDIA EngineCore Error: {e}")
+                    logger.exception(f"[{self.provider_name}] NVIDIA EngineCore Error: {e}")
                     raise ProviderUnavailableError("NVIDIA service unavailable") from e
                 else:
                     logger.exception(f"[{self.provider_name}] Unexpected error during generation: {e}")
@@ -252,7 +252,7 @@ class OpenAICompatibleService:
             async for chunk in self.generate_response(model, prompt, context_history):
                 full_response += chunk
         except Exception as e:
-            logger.error(f"Error in non-streaming generation for {self.provider_name}/{model}: {e}")
+            logger.exception(f"Error in non-streaming generation for {self.provider_name}/{model}: {e}")
             return f"[Error: {str(e)}]"
         
         return full_response.strip() if full_response else "[Error: Empty response]"

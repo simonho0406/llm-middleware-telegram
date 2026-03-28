@@ -48,4 +48,4 @@ async def setup_bot_commands_and_menu(application: Application, chat_id: int | N
             logger.info(f"Successfully set bot command list for chat {chat_id}.")
 
     except Exception as e:
-        logger.error(f"Failed to set bot commands for scope {scope}: {e}")
+        logger.exception(f"Failed to set bot commands for scope {scope}: {e}")

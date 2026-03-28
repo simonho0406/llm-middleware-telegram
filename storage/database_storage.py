@@ -123,7 +123,7 @@ async def _migrate_user_settings_table(db: aiosqlite.Connection):
                 logger.info(f"Successfully migrated {len(existing_data)} user settings records.")
                 
     except Exception as e:
-        logger.warning(f"Failed to migrate user_settings table: {e}")
+        logger.exception(f"Failed to migrate user_settings table: {e}")
 
 async def get_current_thread_id(chat_id: int) -> str:
     async with aiosqlite.connect(config.DB_PATH) as db:

@@ -51,7 +51,7 @@ async def get_models_for_provider(provider: str) -> List[Dict[str, Any]]:
                 elif isinstance(raw_models[0], dict):
                     models = [{"id": m.get('id'), "name": m.get('name', m.get('id'))} for m in raw_models]
     except Exception as e:
-        logger.warning(f"Failed to list models dynamically for {provider}: {e}")
+        logger.exception(f"Failed to list models dynamically for {provider}: {e}")
 
     # 2. Fallback to Config (Legacy/Static) if dynamic failed or returned empty
     if not models:
@@ -244,7 +244,7 @@ async def select_model_callback(update: Update, context: ContextTypes.DEFAULT_TY
             logger.error(f"Failed to edit keyboard markup: {e}")
             await query.answer("⚠️ Error updating selection")
     except Exception as e:
-         logger.error(f"Unexpected error editing keyboard markup: {e}")
+         logger.exception(f"Unexpected error editing keyboard markup: {e}")
          await query.answer("⚠️ Error updating selection")
 
 
@@ -368,7 +368,7 @@ async def _execute_council_flow(update: Update, context: ContextTypes.DEFAULT_TY
         pk = await storage_manager.save_message(chat_id, 'user', prompt)
         context.user_data['pending_council_message_pk'] = pk
     except Exception as e:
-        logger.error(f"Failed to save user prompt: {e}")
+        logger.exception(f"Failed to save user prompt: {e}")
 
     if status_message:
         try:
@@ -393,7 +393,7 @@ async def _execute_council_flow(update: Update, context: ContextTypes.DEFAULT_TY
     try:
         context_history = await storage_manager.get_thread_history(chat_id, limit=500)
     except Exception as e:
-        logger.error(f"Failed to fetch history for ask_selected: {e}")
+        logger.exception(f"Failed to fetch history for ask_selected: {e}")
         context_history = []
 
     for item in selected_list:
@@ -481,7 +481,7 @@ async def _execute_council_flow(update: Update, context: ContextTypes.DEFAULT_TY
             try:
                 chairman_response = await service_func(chairman_id, synthesis_prompt, []) 
             except Exception as e:
-                logger.error(f"Chairman Synthesis failed: {e}")
+                logger.exception(f"Chairman Synthesis failed: {e}")
                 chairman_response = f"[Error: Chairman Synthesis Failed - {e}]"
        
             # Extract and log grades
@@ -520,7 +520,7 @@ async def _execute_council_flow(update: Update, context: ContextTypes.DEFAULT_TY
         await storage_manager.save_message(chat_id, 'assistant', final_response_markdown)
         logger.info(f"Archived /ask_selected interaction for chat {chat_id}")
     except Exception as e:
-        logger.error(f"Failed to archive /ask_selected interaction: {e}")
+        logger.exception(f"Failed to archive /ask_selected interaction: {e}")
 
 
     # Clean up user_data
@@ -575,7 +575,7 @@ async def conversation_timeout(update: Update, context: ContextTypes.DEFAULT_TYP
         elif update.message:
              await context.bot.send_message(chat_id=chat_id, text="Model selection timed out.")
     except Exception as e:
-        logger.error(f"Error sending timeout message: {e}")
+        logger.exception(f"Error sending timeout message: {e}")
     # Clean up user_data
     context.user_data.pop('ask_selected_prompt', None)
     context.user_data.pop('ask_selected_models', None)

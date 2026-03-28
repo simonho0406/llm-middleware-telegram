@@ -65,7 +65,7 @@ async def generate_response(model: str, prompt: str, context_history: Optional[L
             continue # Go to the next key
 
         except Exception as e:
-            logger.error(f"A non-recoverable Gemini error occurred with Key Index {i} (Model: {model}): {e}")
+            logger.exception(f"A non-recoverable Gemini error occurred with Key Index {i} (Model: {model}): {e}")
             yield f"[Error: A critical error occurred with the Gemini API: {e}]"
             return # Stop on other errors
 
@@ -93,7 +93,7 @@ async def list_models() -> List[Dict[str, Any]]:
             logger.info(f"Successfully listed {len(generative_models)} models with Key Index: {i}.")
             return generative_models
         except Exception as e:
-            logger.warning(f"Failed to list models with Key Index {i}: {e}")
+            logger.exception(f"Failed to list models with Key Index {i}: {e}")
             continue
     
     logger.error("Failed to list models with any of the provided Gemini keys.")
@@ -119,7 +119,7 @@ async def generate_concurrent_responses(prompt: str, context_history: Optional[L
             continue
     
     if not working_key:
-        logger.error("No working Gemini key found for concurrent requests.")
+        logger.exception("No working Gemini key found for concurrent requests.")
         return {model: "[Error: No available API keys]" for model in config.get_gemini_ask_all_models()}
 
     async def _concurrent_task(model_name: str) -> str:
@@ -132,7 +132,7 @@ async def generate_concurrent_responses(prompt: str, context_history: Optional[L
             )
             return response.text.strip() if hasattr(response, 'text') else "[Empty Response]"
         except Exception as e:
-            logger.error(f"Error during concurrent Gemini generation for model {model_name}: {e}")
+            logger.exception(f"Error during concurrent Gemini generation for model {model_name}: {e}")
             return f"[Error: {e}]"
 
     tasks = [_concurrent_task(model) for model in config.get_gemini_ask_all_models()]
@@ -150,7 +150,7 @@ async def _generate_single_model_non_streaming(model_id: str, prompt: str, conte
             full_response += chunk
         return full_response.strip()
     except Exception as e:
-        logger.error(f"Error in _generate_single_model_non_streaming for {model_id}: {e}")
+        logger.exception(f"Error in _generate_single_model_non_streaming for {model_id}: {e}")
         return f"[Error: {e}]"
 
 async def check_status() -> (bool, str):

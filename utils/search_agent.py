@@ -90,7 +90,7 @@ async def iterative_search(agent_service, agent_model: str, initial_query: str, 
         if not plan:
             # Truncate the raw response to avoid excessively long error messages
             raw_response_preview = (agent_response_text[:250] + '...') if len(agent_response_text) > 250 else agent_response_text
-            logger.warning(f"Failed to parse agent's plan. Raw response: {agent_response_text}")
+            logger.exception(f"Failed to parse agent's plan. Raw response: {agent_response_text}")
             return f"[Error: Failed to parse agent's plan. Agent responded with: '{raw_response_preview}']"
 
         # Decide whether to answer or search again

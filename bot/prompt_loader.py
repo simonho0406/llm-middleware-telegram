@@ -19,7 +19,7 @@ class PromptManager:
             logger.error(f"Prompt file not found: {prompt_path}")
             return ""
         except Exception as e:
-            logger.error(f"Error loading prompt file {prompt_path}: {e}")
+            logger.exception(f"Error loading prompt file {prompt_path}: {e}")
             return ""
 
     def _load_all_prompts(self):

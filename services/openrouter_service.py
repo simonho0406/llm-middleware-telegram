@@ -137,7 +137,7 @@ async def generate_response(
                  # Network error on first attempt?
                  # If likely harmless, maybe retry? But let's assume network errors are handled by outer loop if we had one.
                  # Here we just treat as error.
-                 logger.error(f"OpenRouter Error on Attempt 1: {e}")
+                 logger.exception(f"OpenRouter Error on Attempt 1: {e}")
                  yield f"[Error: {e}]"
                  return
 
@@ -173,7 +173,7 @@ async def process_openrouter_response(response):
             logger.error(f"OpenRouter API Error {response.status_code}: {err_details}")
             yield f"[Error: OpenRouter API Error {response.status_code} - See logs]"
         except Exception as json_e:
-            logger.error(f"OpenRouter API Error {response.status_code} (failed to decode error details: {json_e})")
+            logger.exception(f"OpenRouter API Error {response.status_code} (failed to decode error details: {json_e})")
             yield f"[Error: OpenRouter API Error {response.status_code}]"
         return # Stop processing
 

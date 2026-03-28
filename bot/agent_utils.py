@@ -37,5 +37,5 @@ async def is_search_required(prompt: str) -> tuple[bool, bool]:
         return "YES" in decision, False
 
     except Exception as e:
-        logger.error(f"Search detection agent failed: {e}")
+        logger.exception(f"Search detection agent failed: {e}")
         return False, True

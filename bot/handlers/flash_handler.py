@@ -50,7 +50,7 @@ async def flash_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             parse_mode="Markdown"
         )
     except Exception as e:
-        logger.warning(f"Failed to send placeholder: {e}")
+        logger.exception(f"Failed to send placeholder: {e}")
 
     # 3. Get Thread ID
     current_thread_id = await storage_manager.get_current_thread_id(chat_id)

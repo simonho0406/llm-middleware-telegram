@@ -280,7 +280,7 @@ async def rename_thread(chat_id: int, new_name: str) -> bool:
         await set_thread_key(chat_id, 'name', new_name, thread_id=current_thread_id)
         return True
     except Exception as e:
-        logger.error(f"Failed to rename thread for chat {chat_id}: {e}")
+        logger.exception(f"Failed to rename thread for chat {chat_id}: {e}")
         return False
 
 async def get_thread_history(chat_id: int, thread_id: Optional[str] = None) -> List[Dict[str, str]]:

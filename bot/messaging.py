@@ -153,7 +153,7 @@ async def send_safe_message(
             # Fall through to fallback logic
 
     except Exception as e:
-        logger.warning(f"{log_prefix}AST pipeline failed: {e}. Falling back to simple text.")
+        logger.exception(f"{log_prefix}AST pipeline failed: {e}. Falling back to simple text.")
         # The existing fallback logic remains the same.
         try:
             plain_text = escape_meta_tags(text)
@@ -177,5 +177,5 @@ async def send_safe_message(
             return True
 
         except Exception as final_e:
-            logger.error(f"{log_prefix}Final fallback to plain text also failed: {final_e}")
+            logger.exception(f"{log_prefix}Final fallback to plain text also failed: {final_e}")
             return False

@@ -91,7 +91,7 @@ def truncate_text_to_tokens(text: str, max_tokens: int) -> str:
                 return _TIKTOKEN_ENCODER.decode(truncated_tokens)
             return text
         except Exception as e:
-            logger.warning(f"Tiktoken encode failed during hard truncation: {e}")
+            logger.exception(f"Tiktoken encode failed during hard truncation: {e}")
             pass
             
     # Fallback to heuristic (4 chars per token)

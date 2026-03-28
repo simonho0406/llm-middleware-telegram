@@ -216,7 +216,7 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
     final_content = raw_full_llm_response.strip()
     if not final_content:
         if not force_truncate and not llm_error_reported_by_model:
-             logger.warning(f"{log_prefix}Empty response received from model. Retrying with forced context truncation...")
+             logger.exception(f"{log_prefix}Empty response received from model. Retrying with forced context truncation...")
              return await _generate_llm_response(context, chat_id, prompt, is_reroll, force_truncate=True, operation_id=operation_id)
         
         final_content = "[Error: The AI returned an empty response. This might be due to a content filter or an issue with the selected model. Please try rerolling or using a different model.]"
@@ -247,7 +247,7 @@ async def _generate_and_send_response_task(update: Update, context: ContextTypes
                 pk = await storage_manager.save_message(chat_id, 'user', prompt)
                 context.chat_data['pending_user_message_pk'] = pk
         except Exception as e:
-            logger.error(f"{log_prefix}Failed to save/update initial state: {e}")
+            logger.exception(f"{log_prefix}Failed to save/update initial state: {e}")
             # Proceeding might be risky if we can't save, but we try to answer anyway?
             # Ideally we should warn, but let's proceed.
     else:
@@ -275,13 +275,13 @@ async def _generate_and_send_response_task(update: Update, context: ContextTypes
         try:
             await placeholder_message.delete()
         except Exception as e:
-            logger.warning(f"{log_prefix}Failed to delete placeholder message: {e}")
+            logger.exception(f"{log_prefix}Failed to delete placeholder message: {e}")
 
     # Centralized, safe sending
     try:
         message_sent_successfully = await send_safe_message(context, update, final_content)
     except Exception as e:
-        logger.error(f"{log_prefix}Failed to send message: {e}")
+        logger.exception(f"{log_prefix}Failed to send message: {e}")
         message_sent_successfully = False
 
 
@@ -298,7 +298,7 @@ async def _generate_and_send_response_task(update: Update, context: ContextTypes
             # Clear pending PK since the interaction block is now complete and stable
             context.chat_data.pop('pending_user_message_pk', None)
         except Exception as e_hist:
-            logger.error(f"{log_prefix}Failed to save assistant response: {e_hist}")
+            logger.exception(f"{log_prefix}Failed to save assistant response: {e_hist}")
     elif skip_save:
         logger.info(f"{log_prefix}Skipping output archival (skip_save=True)")
     

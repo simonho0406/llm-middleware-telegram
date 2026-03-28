@@ -87,7 +87,7 @@ def get_provider_details() -> dict:
                     logger.error(f"Failed to initialize client for custom provider '{name}'. Skipping.")
                     continue # Skip adding this provider if client failed
             except Exception as e:
-                logger.error(f"Failed to initialize service instance for custom provider '{name}': {e}. Skipping.")
+                logger.exception(f"Failed to initialize service instance for custom provider '{name}': {e}. Skipping.")
                 continue # Skip adding this provider
 
         # Add details if service was initialized successfully
@@ -134,7 +134,7 @@ async def shutdown_providers():
                  await service.close()
                  logger.debug(f"Closed service: {name}")
              except Exception as e:
-                 logger.error(f"Error closing service '{name}': {e}")
+                 logger.exception(f"Error closing service '{name}': {e}")
      
      _initialized_services.clear()
      logger.info("All LLM providers shutdown.")

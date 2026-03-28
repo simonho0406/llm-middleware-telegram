@@ -54,7 +54,7 @@ async def is_model_available(client: ollama.AsyncClient, model_name: str) -> boo
                 return True
         return False
     except Exception as e:
-        logger.error(f"Error checking model availability: {e}")
+        logger.exception(f"Error checking model availability: {e}")
         return False
 
 async def list_models() -> List[str]:
@@ -76,7 +76,7 @@ async def list_models() -> List[str]:
         logger.info(f"Available Ollama models: {model_names}")
         return model_names
     except Exception as e:
-        logger.error(f"Error fetching Ollama models: {e}")
+        logger.exception(f"Error fetching Ollama models: {e}")
         return []
 
 async def _generate_single_model_non_streaming(model: str, prompt: str, context_history: Optional[List[Dict]] = None) -> str:
@@ -113,7 +113,7 @@ async def _generate_single_model_non_streaming(model: str, prompt: str, context_
         logger.error(f"Ollama API Error (model: {model}): {e.error}")
         return f"[Error: {e.error}]"
     except Exception as e:
-        logger.error(f"Error generating Ollama response (model: {model}): {e}")
+        logger.exception(f"Error generating Ollama response (model: {model}): {e}")
         return f"[Error: {str(e)}]"
 
 async def generate_response(model: str, prompt: str, context_history: Optional[List[Dict]] = None, request_timeout: int = None) -> AsyncGenerator[str, None]:

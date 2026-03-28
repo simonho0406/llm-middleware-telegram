@@ -115,7 +115,7 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
         try:
             await send_safe_message(context, update, "A network error occurred, please try again.")
         except Exception as e_inner:
-            logger.error(f"Failed to send network error message to user: {e_inner}")
+            logger.exception(f"Failed to send network error message to user: {e_inner}")
         return
 
     search_response = await web_search_service.perform_search(query)
@@ -161,7 +161,7 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
     try:
         context_history = await storage_manager.get_thread_history(chat_id, limit=500)
     except Exception as e:
-        logger.error(f"{log_prefix}Failed to retrieve history: {e}")
+        logger.exception(f"{log_prefix}Failed to retrieve history: {e}")
         context_history = []
 
     # Smart History Saving: Check for duplicates
@@ -179,7 +179,7 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
         try:
             await storage_manager.save_message(chat_id, 'user', query)
         except Exception as e:
-            logger.error(f"{log_prefix}Failed to save user query: {e}")
+            logger.exception(f"{log_prefix}Failed to save user query: {e}")
 
     await placeholder_message.edit_text(f"Found results. Asking {session_provider.capitalize()} ({model_to_use}) for analysis...", parse_mode=None)
 
@@ -333,7 +333,7 @@ async def list_models_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         elif provider_config.get('allowed_models'):
             models_result = provider_config.get('allowed_models')
     except Exception as e:
-        logger.error(f"Failed to get models for provider '{provider_name}': {e}")
+        logger.exception(f"Failed to get models for provider '{provider_name}': {e}")
         await send_safe_message(context, update, f"An error occurred while fetching models for '{provider_name}'.")
         return
 
