@@ -158,17 +158,19 @@ class OpenAICompatibleService:
                     break
 
                 except (APIStatusError) as e:
-                    # Special handling for "Reasoning Not Supported" (400 Bad Request)
-                    if e.status_code == 400 and attempt == 0:
+                    error_body = str(e.body) if hasattr(e, 'body') and e.body else str(e)
+                    error_lower = error_body.lower()
+
+                    is_token_overflow = any(kw in error_lower for kw in ["token", "context length", "context_length", "too long", "maximum"])
+                    is_reasoning_rejection = e.status_code == 400 and attempt == 0 and not is_token_overflow
+
+                    if is_token_overflow:
+                        logger.error(f"[{self.provider_name}] Token/context overflow (Status {e.status_code}): {error_body[:300]}")
+                        yield f"[Error: Context too large for model. The conversation history exceeds the model's limit.]"
+                        return
+                    elif is_reasoning_rejection:
                         logger.warning(f"[{self.provider_name}] Model rejected reasoning parameters (400 Bad Request). Retrying without reasoning...")
-                        # We do NOT increment attempt counter for this fallback, or we can just continue to next logic.
-                        # But wait, we need to retry *immediately* without params.
-                        # Ideally we do this in a nested structure, but here we can just "continue" if we ensure next loop doesn't use params.
-                        # Actually, my logic above `if attempt == 0` handles this! 
-                        # If we trigger `continue`, next attempt is 1. `attempt == 0` will be false. Params won't be added.
-                        # So we essentially just treat this as a "failed attempt" that consumes 1 retry quota.
-                        # Given we have 3 retries, this is acceptable.
-                        pass 
+                        pass  # Next attempt won't inject reasoning params (attempt > 0)
                     elif "EngineCore" in str(e):
                         logger.error(f"[{self.provider_name}] NVIDIA EngineCore Error: {e}")
                         raise ProviderUnavailableError("NVIDIA service unavailable") from e

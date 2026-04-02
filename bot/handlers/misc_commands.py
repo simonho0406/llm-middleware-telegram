@@ -142,9 +142,9 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
     service = provider_config['service']
     model_to_use = await storage_manager.get_thread_key(chat_id, 'model', provider_config['default_model'])
 
-    from utils.context_manager import get_model_context_limits, truncate_text_to_tokens
+    from utils.context_manager import get_model_context_limits, truncate_text_to_tokens, ensure_context_fits
     limits = get_model_context_limits(model_to_use, session_provider)
-    # Give search results 50% of context window limit
+    # First-pass safety net: cap absurdly large web scrapes to 50% of model limit
     max_search_tokens = int(limits.effective_input_limit * 0.5)
     truncated_search_results = truncate_text_to_tokens(search_results, max_search_tokens)
     
@@ -157,12 +157,23 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
         f"--- WEB SEARCH RESULTS ---\n{truncated_search_results}"
     )
 
-    # Fetch history for context (limit to recent messages to avoid overload, though context checks handle this)
+    # Fetch history for context
     try:
         context_history = await storage_manager.get_thread_history(chat_id, limit=500)
     except Exception as e:
         logger.exception(f"{log_prefix}Failed to retrieve history: {e}")
         context_history = []
+
+    # CRITICAL FIX: Truncate history to fit alongside the search-augmented prompt.
+    # Without this, full history (~106K) + search results overflows the model's context window.
+    context_history, context_info = await ensure_context_fits(
+        prompt=augmented_prompt,
+        history=context_history,
+        model=model_to_use,
+        provider=session_provider
+    )
+    if context_info:
+        logger.info(f"{log_prefix}Search context adjusted: {context_info}")
 
     # Smart History Saving: Check for duplicates
     # If the last message in history is from 'user' and matches the 'query', SKIP saving.
@@ -185,7 +196,7 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
 
     final_response = ""
     try:
-        # Pass context_history to allow the LLM to understand references like "search for him"
+        # Pass truncated context_history for conversational reference
         async for chunk in service.generate_response(model=model_to_use, prompt=augmented_prompt, context_history=context_history):
             final_response += chunk
     except Exception as e:
@@ -195,13 +206,15 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
 
     await send_safe_message(context, update, final_response, placeholder_message)
 
-    if not skip_save:
+    if not skip_save and not final_response.startswith("[Error:"):
         try:
-            # Save the assistant's response (Append-Only)
+            # Save the assistant's response (Append-Only) — but NEVER save error strings
             await storage_manager.save_message(chat_id, 'assistant', final_response)
             logger.info(f"{log_prefix}Search command successful. Response saved.")
         except Exception as e:
             logger.error(f"{log_prefix}Failed to save assistant response: {e}", exc_info=True)
+    elif final_response.startswith("[Error:"):
+        logger.warning(f"{log_prefix}Search returned an error response. NOT saving to history.")
 
 async def retry_search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles the retry search button click."""
