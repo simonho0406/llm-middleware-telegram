@@ -121,7 +121,8 @@ expert_panel:
 
 # --- Web Search Configuration ---
 web_search:
-  provider: "google"
+  manual_provider: "tavily"
+  automated_provider: "google"
 
 # --- Rate Limiting Configuration ---
 # Conservative limits to respect free tier quotas

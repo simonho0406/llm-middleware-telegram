@@ -1,7 +1,9 @@
 import httpx
+import json
+import asyncio
 import logging
 import config
-from typing import AsyncGenerator, List, Dict, Optional, Any # Import Any
+from typing import AsyncGenerator, List, Dict, Optional, Any
 
 logger = logging.getLogger(__name__)
 
@@ -59,71 +61,14 @@ async def generate_response(
             reasoning_data.update({
                 "include_reasoning": True,
                 "reasoning": {"effort": "high"},
-                # "thinking": True # OpenRouter might not need this as much as 'include_reasoning', but harmless
             })
             
-            # Attempt 1: Try with reasoning
-            try:
-                response = await client.request(
-                    "POST",
-                    "https://openrouter.ai/api/v1/chat/completions",
-                    headers=headers,
-                    json=reasoning_data,
-                    timeout=timeout_config
-                )
-                
-                # Check for 400 Bad Request regarding parameters
-                if response.status_code == 400:
-                    logger.warning(f"OpenRouter model {model} rejected reasoning params (400). Retrying without...")
-                    # Fallback to original data
-                    response = await client.request(
-                        "POST",
-                        "https://openrouter.ai/api/v1/chat/completions",
-                        headers=headers,
-                        json=data,
-                        timeout=timeout_config
-                    )
-            except httpx.RequestError as e:
-                logger.error(f"OpenRouter Connection Error: {e}")
-                yield f"[Error: OpenRouter Connection Error]"
-                return
-
-            if True: # Just to keep indentation or structure consistent with original stream context
-                pass
-
-            # Since we manually requested above to check status, we now need to stream properly
-            # Actually, `client.stream` context manager enters the request. 
-            # We cannot easily "check status then stream" without re-requesting or using a different flow.
-            # Only `client.send` with `stream=True` returns a streamable response object without reading body.
-            
-            # Refactored Approach:
-            # We will use a loop to retry logic similar to OpenAI service.
-            
-            payload_to_use = reasoning_data
-            
-            # Inner function to avoid duplication? Or just simple loop.
-            async def make_stream_request(payload):
-                 return client.stream("POST", "https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload)
-
-            # We need to use manual __aenter__ because 'async with' is strict
-            # Or just use the loop strictly.
-            
-            # Let's use a simpler "Attempt with Fallback" structure that is compatible with `async with client.stream`:
-            
-            # We can't wrap `async with` easily in a try/except for status code fallbacks unless we nest or duplicate.
-            # Duplicate is safest.
-            
-            # ATTEMPT 1: Reasoning
+            # ATTEMPT 1: Try with reasoning parameters (streaming)
             try:
                 async with client.stream("POST", "https://openrouter.ai/api/v1/chat/completions", headers=headers, json=reasoning_data) as response:
                     if response.status_code == 400:
                          logger.warning(f"OpenRouter model {model} rejected reasoning params. Fallback triggered.")
                          raise ValueError("fallback") # Trigger fallback
-                    
-                    # IF SUCCESS (not 400), PROCEED
-                    # We have to duplicate the processing code or put it in a function.
-                    # Since processing is complex (yields), function is tricky (async generator).
-                    # Actually, we can use `yield from process_response(response)`
                     
                     async for chunk in process_openrouter_response(response):
                         yield chunk
@@ -134,14 +79,11 @@ async def generate_response(
                 else:
                     raise e
             except Exception as e:
-                 # Network error on first attempt?
-                 # If likely harmless, maybe retry? But let's assume network errors are handled by outer loop if we had one.
-                 # Here we just treat as error.
                  logger.exception(f"OpenRouter Error on Attempt 1: {e}")
                  yield f"[Error: {e}]"
                  return
 
-            # FALLBACK ATTEMPT: Standard
+            # FALLBACK ATTEMPT: Standard payload without reasoning params
             async with client.stream("POST", "https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data) as response:
                  async for chunk in process_openrouter_response(response):
                      yield chunk
@@ -183,7 +125,7 @@ async def process_openrouter_response(response):
             if line_data == "[DONE]":
                 break
             try:
-                import json
+
                 chunk_data = json.loads(line_data)
                 if 'choices' in chunk_data and chunk_data['choices']:
                     delta = chunk_data['choices'][0].get('delta', {})
@@ -327,7 +269,7 @@ async def generate_concurrent_free_responses(prompt: str, context_history: Optio
 
     # Run tasks concurrently and gather results
     # Use asyncio.gather with return_exceptions=True
-    import asyncio
+
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     response_dict = {}

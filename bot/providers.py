@@ -75,7 +75,9 @@ def get_provider_details() -> dict:
         if name not in _initialized_services:
             try:
                 # Add the fetched API key to the provider config before initialization
-                provider_conf['api_key'] = os.getenv(f"{provider_conf['name'].upper()}_API_KEY")
+                env_var_override = provider_conf.get('api_key')
+                default_env_var = f"{name.upper()}_API_KEY"
+                provider_conf['api_key'] = os.getenv(env_var_override) if env_var_override and os.getenv(env_var_override) else os.getenv(default_env_var)
                 if not provider_conf['api_key']:
                     logger.warning(f"API key environment variable for custom provider '{name}' not found. Skipping.")
                     continue

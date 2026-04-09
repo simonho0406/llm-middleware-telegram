@@ -641,6 +641,17 @@ async def _run_panel_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     logger.info(f"Successfully parsed orchestrator's plan. Search required: {requires_search}, Tasks: {len(tasks_list)}")
     
+    # Store the tasks in the SQLite Scratchpad for Agentic context injection
+    from storage import storage_manager
+    if hasattr(storage_manager, 'clear_panel_tasks') and storage_manager.clear_panel_tasks:
+        try:
+            await storage_manager.clear_panel_tasks(chat_id)
+            for task_data in tasks_list:
+                await storage_manager.save_panel_task(chat_id, task_data.get('role', 'Unknown'), json.dumps(task_data))
+            logger.info("Saved Panel Plan to Agentic Scratchpad.")
+        except Exception as e:
+            logger.error(f"Failed to persist orchestrator plan to state db: {e}")
+
     # If search is required, check user setting and conditionally perform it
     if requires_search and search_query:
                         # Check if advanced search is enabled for panel discussions
@@ -933,12 +944,13 @@ async def _run_panel_task_background(update: Update, context: ContextTypes.DEFAU
     except Exception as e:
         logger.error(f"Panel workflow failed in background task: {e}", exc_info=True)
         
+        from bot.messaging import send_plain_message
         error_message = f"An error occurred: {str(e)}"
         try:
             if assembling_msg:
                 await assembling_msg.edit_text(error_message, parse_mode=None)
             else:
-                await context.bot.send_message(chat_id=chat_id, text=error_message, parse_mode=None)
+                await send_plain_message(context, chat_id, error_message)
         except Exception as send_error:
             logger.exception(f"Failed to send error message: {send_error}")
             
@@ -952,11 +964,12 @@ async def start_panel_discussion(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text("Usage: /discuss_panel <topic>", parse_mode=None)
         return ConversationHandler.END
 
+    from bot.messaging import send_plain_message
     try:
-        assembling_msg = await context.bot.send_message(
-            chat_id=chat_id,
-            text="Assembling an expert panel...",
-            parse_mode=None
+        assembling_msg = await send_plain_message(
+            context,
+            chat_id,
+            "Assembling an expert panel..."
         )
     except telegram.error.NetworkError as e:
         logger.error(f"Network error while sending initial message in start_panel_discussion: {e}")
@@ -1036,7 +1049,6 @@ async def handle_follow_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         
         # AST-Based Architecture: Parse, Split, and Send
         pure_summary = _format_panel_summary(new_panel_results)
-        pure_markdown_content = f"{pure_summary}\n\n---\n\n{new_final_answer}"
         pure_markdown_content = f"{pure_summary}\n\n---\n\n{new_final_answer}"
         if await send_safe_message(context, update, pure_markdown_content):
             # Incremental Archival: Save the panel's result immediately
@@ -1137,16 +1149,18 @@ async def search_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     query = " ".join(context.args)
     placeholder_msg = await update.message.reply_text(f"Searching the web for: \"{query}\"...", parse_mode=None)
 
-    search_results = await web_search_service.perform_search(query)
+    search_results = await web_search_service.perform_search(query, manual=True)
 
-    if search_results.startswith("Error:"):
-        await placeholder_msg.edit_text(search_results, parse_mode=None)
+    if search_results.get('status') == 'error':
+        error_msg = search_results.get('message', 'Unknown error occurred.')
+        await placeholder_msg.edit_text(f"⚠️ Search error: {error_msg}", parse_mode=None)
         return AWAITING_FOLLOW_UP
 
+    search_content = search_results.get('content', '')
     panel_state = context.user_data.get('panel_state')
     if panel_state and panel_state.get('full_transcript'):
         async with panel_state["lock"]:
-            panel_state['full_transcript'].append({'role': 'user', 'content': f"Search results for '{query}':\n{search_results}"})
+            panel_state['full_transcript'].append({'role': 'user', 'content': f"Search results for '{query}':\n{search_content}"})
             await placeholder_msg.edit_text("✅ Search results have been added to the discussion context." , parse_mode=None)
     else:
         await placeholder_msg.edit_text("⚠️ Could not find an active discussion to add search results to.", parse_mode=None)
@@ -1315,11 +1329,13 @@ async def reroll_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             error_message = f"An error occurred during the reroll: `{escaped_error}`"
             try:
                 if placeholder_msg:
+                    from bot.messaging import send_plain_message
                     # Use edit_text for an existing message
-                    await placeholder_msg.edit_text(error_message, parse_mode=constants.ParseMode.MARKDOWN_V2)
+                    await placeholder_msg.edit_text(error_message, parse_mode=None)
                 else:
-                    # Fallback to send_message if placeholder doesn't exist
-                    await context.bot.send_message(chat_id, error_message, parse_mode=constants.ParseMode.MARKDOWN_V2)
+                    from bot.messaging import send_plain_message
+                    # Fallback to send_plain_message if placeholder doesn't exist
+                    await send_plain_message(context, chat_id, error_message)
             except Exception as send_e:
                 logger.exception(f"Failed to send error message to user after reroll failure: {send_e}")
             
@@ -1361,7 +1377,8 @@ async def timeout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         #     except Exception as e:
         #         logger.error(f"Failed to save final answer during timeout for chat {chat_id}: {e}")
 
-        await context.bot.send_message(chat_id, "Panel discussion has timed out due to inactivity.", parse_mode=None)
+        from bot.messaging import send_plain_message
+        await send_plain_message(context, chat_id, "Panel discussion has timed out due to inactivity.")
         await _cleanup_discussion_state(context, chat_id)
     return ConversationHandler.END
 

@@ -79,7 +79,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 • Configure in /config → Auto-Search settings"""
     await send_safe_message(context, update, help_text)
 
-async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, placeholder_message = None, skip_save: bool = False) -> None:
+async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, placeholder_message = None, skip_save: bool = False, automated: bool = False) -> None:
     """
     Performs a web search, gets a response from the LLM, and saves the original
     query to history, not the augmented prompt.
@@ -102,12 +102,23 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
 
     logger.info(f"{log_prefix}User {user_id} initiated /search with query: '{query}'")
 
+    from utils.hooks import hook_runner
+    try:
+        hook_runner.run_pre_tool_use('search', {'query': query, 'user_id': user_id, 'chat_id': chat_id})
+    except PermissionError as e:
+        logger.warning(f"{log_prefix}Search tool denied by hook: {e}")
+        if placeholder_message:
+             await placeholder_message.delete()
+        await send_safe_message(context, update, f"❌ Search tool denied by local policy.\n\nReason: _{str(e)}_")
+        return
+
     # Register task for cancellation
     context.chat_data['llm_task'] = asyncio.current_task()
 
     try:
+        from bot.messaging import send_plain_message
         if placeholder_message is None:
-            placeholder_message = await context.bot.send_message(chat_id, f'Searching the web for: "{query}"...', parse_mode=None)
+            placeholder_message = await send_plain_message(context, chat_id, f'Searching the web for: "{query}"...')
         else:
             await placeholder_message.edit_text(f'Searching the web for: "{query}"...', parse_mode=None)
     except telegram.error.NetworkError as e:
@@ -118,7 +129,7 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
             logger.exception(f"Failed to send network error message to user: {e_inner}")
         return
 
-    search_response = await web_search_service.perform_search(query)
+    search_response = await web_search_service.perform_search(query, manual=not automated)
 
     if search_response['status'] == 'error':
         keyboard = [[InlineKeyboardButton("🔄 Retry Search", callback_data="retry_search")]]

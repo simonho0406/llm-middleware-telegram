@@ -24,11 +24,11 @@ async def test_search_retry_flow():
     
     # Mock placeholder message
     mock_placeholder = AsyncMock()
-    # Ensure send_message is an AsyncMock that returns the placeholder
-    mock_context.bot.send_message = AsyncMock(return_value=mock_placeholder)
+    # We patch send_plain_message now
     
     # 1. Simulate Search Failure
-    with patch('services.web_search_service.perform_search', new_callable=AsyncMock) as mock_search:
+    with patch('services.web_search_service.perform_search', new_callable=AsyncMock) as mock_search, \
+         patch('bot.messaging.send_plain_message', new_callable=AsyncMock, return_value=mock_placeholder):
         mock_search.return_value = {'status': 'error', 'message': 'Simulated failure'}
         
         # Call search command
@@ -70,6 +70,7 @@ async def test_search_retry_flow():
              patch('bot.handlers.misc_commands.storage_manager.get_thread_key', new_callable=AsyncMock) as mock_get_key, \
              patch('bot.handlers.misc_commands.storage_manager.save_message', new_callable=AsyncMock) as mock_save, \
              patch('bot.handlers.misc_commands.storage_manager.get_thread_history', new_callable=AsyncMock) as mock_history, \
+             patch('bot.messaging.send_plain_message', new_callable=AsyncMock, return_value=mock_placeholder), \
              patch('bot.response_generator._generate_llm_response', new_callable=AsyncMock) as mock_gen_llm:
             
             mock_get_providers.return_value = {
@@ -91,6 +92,6 @@ async def test_search_retry_flow():
                 await misc_commands.retry_search_callback(mock_update, mock_context)
                 
                 # Verify search was called again
-                mock_search.assert_called_with('test query')
+                mock_search.assert_called_with('test query', manual=True)
             else:
                 pytest.fail("retry_search_callback not implemented yet")

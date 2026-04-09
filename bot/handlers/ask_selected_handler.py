@@ -323,10 +323,11 @@ async def _execute_council_flow(update: Update, context: ContextTypes.DEFAULT_TY
             pass 
             
         # Send a FRESH status message
-        status_message = await context.bot.send_message(
-            chat_id=chat_id,
-            text="Council is deliberating... 🏛️",
-            parse_mode=None
+        from bot.messaging import send_plain_message
+        status_message = await send_plain_message(
+            context,
+            chat_id,
+            "Council is deliberating... 🏛️"
         )
     else:
         # Case 2: User sent a text prompt (Wait for prompt)
@@ -573,7 +574,8 @@ async def conversation_timeout(update: Update, context: ContextTypes.DEFAULT_TYP
         if update.callback_query:
             await update.callback_query.edit_message_text("Model selection timed out.")
         elif update.message:
-             await context.bot.send_message(chat_id=chat_id, text="Model selection timed out.")
+             from bot.messaging import send_plain_message
+             await send_plain_message(context, chat_id, "Model selection timed out.")
     except Exception as e:
         logger.exception(f"Error sending timeout message: {e}")
     # Clean up user_data

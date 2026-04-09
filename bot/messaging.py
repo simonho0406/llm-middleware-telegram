@@ -145,37 +145,68 @@ async def send_safe_message(
     except BadRequest as e:
         if "message is not modified" in str(e).lower():
             # This is benign; we tried to update with the same content.
-            # Treat it as a success to avoid scary logs and retries.
             logger.debug(f"{log_prefix}Swallowed MessageNotModified error.")
             return True
         else:
-            logger.warning(f"{log_prefix}AST pipeline failed: {e}. Falling back to simple text.")
-            # Fall through to fallback logic
+            logger.warning(f"{log_prefix}AST pipeline BadRequest: {e}. Falling back to plain text.")
 
     except Exception as e:
         logger.exception(f"{log_prefix}AST pipeline failed: {e}. Falling back to simple text.")
-        # The existing fallback logic remains the same.
-        try:
-            plain_text = escape_meta_tags(text)
-            chunks = [plain_text[i:i+TELEGRAM_MAX_LEN] for i in range(0, len(plain_text), TELEGRAM_MAX_LEN)]
-            for i, chunk in enumerate(chunks):
-                if is_edit and i == 0:
-                     await context.bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=update.callback_query.message.message_id,
-                        text=chunk,
-                        parse_mode=None,
-                        reply_markup=reply_markup if i == len(chunks) - 1 else None
-                    )
-                else:
-                    await context.bot.send_message(
-                        chat_id=chat_id,
-                        text=chunk,
-                        parse_mode=None,
-                        reply_markup=reply_markup if i == len(chunks) - 1 else None
-                    )
-            return True
 
-        except Exception as final_e:
-            logger.exception(f"{log_prefix}Final fallback to plain text also failed: {final_e}")
-            return False
+    # Shared plaintext fallback for both BadRequest and generic Exception
+    try:
+        plain_text = escape_meta_tags(text)
+        chunks = [plain_text[i:i+TELEGRAM_MAX_LEN] for i in range(0, len(plain_text), TELEGRAM_MAX_LEN)]
+        for i, chunk in enumerate(chunks):
+            if is_edit and i == 0:
+                 await context.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=update.callback_query.message.message_id,
+                    text=chunk,
+                    parse_mode=None,
+                    reply_markup=reply_markup if i == len(chunks) - 1 else None
+                )
+            else:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=chunk,
+                    parse_mode=None,
+                    reply_markup=reply_markup if i == len(chunks) - 1 else None
+                )
+        return True
+
+    except Exception as final_e:
+        logger.exception(f"{log_prefix}Final fallback to plain text also failed: {final_e}")
+        return False
+
+async def send_plain_message(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    text: str,
+    reply_markup=None,
+    reply_to_message_id=None
+): # Returns Optional[telegram.Message]
+    """
+    Sends a plain text message chunked to TELEGRAM_MAX_LEN.
+    Used for safe delivery of raw internal errors, system notices, or raw strings 
+    that should not be parsed as Markdown to avoid BadRequest crashes.
+    Returns the last sent Message object.
+    """
+    if not text:
+        return None
+
+    try:
+        last_msg = None
+        chunks = [text[i:i+TELEGRAM_MAX_LEN] for i in range(0, len(text), TELEGRAM_MAX_LEN)]
+        for i, chunk in enumerate(chunks):
+            last_msg = await context.bot.send_message(
+                chat_id=chat_id,
+                text=chunk,
+                parse_mode=None, # Explicitly safe
+                reply_markup=reply_markup if i == len(chunks) - 1 else None,
+                reply_to_message_id=reply_to_message_id if i == 0 else None
+            )
+        return last_msg
+    except Exception as e:
+        logger.exception(f"(Chat {chat_id}) send_plain_message failed: {e}")
+        return None

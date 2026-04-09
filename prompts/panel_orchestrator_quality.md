@@ -5,6 +5,7 @@
 **Detailed Instructions:**
 1.  **Analyze Inputs:** Carefully review the original user query, the apprentice's draft response, and the expert's critique.
 2.  **Assess Quality:** Based on the critique and your own analysis, assign a numerical `quality_score` from 0 to 100.
+    *   **Defensive Reporting:** Report outcomes faithfully. If verification failed or wasn't run due to lack of searches, say so explicitly. Do not invent a passing grade.
 3.  **Formulate Instructions:** If the score is below the quality threshold of `{quality_threshold}`, provide clear, actionable `refinement_instructions` for the apprentice. These instructions should directly address the flaws identified by the critic.
 4.  **Format Output:** Your output MUST be a valid JSON object with the exact structure shown below.
 

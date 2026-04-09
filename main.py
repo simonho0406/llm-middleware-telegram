@@ -1,7 +1,7 @@
 import logging
 import asyncio
 from telegram import Update
-from telegram.ext import CommandHandler, Application, ContextTypes
+from telegram.ext import CommandHandler, Application, ContextTypes, TypeHandler
 from bot.menu_setup import setup_bot_commands_and_menu
 
 # Import the function to create the application
@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 
 # --- Basic Command Handlers ---
 
-# --- Basic Command Handlers ---
 
 # --- Startup Checks Function ---
 async def run_startup_checks(application: Application) -> None:
@@ -30,7 +29,6 @@ async def run_startup_checks(application: Application) -> None:
         return_exceptions=True
     )
     
-    service_names = ["Ollama", "OpenRouter"]
     service_names = ["Ollama", "OpenRouter"]
     for name, result in zip(service_names, results):
         if isinstance(result, Exception):
@@ -63,6 +61,7 @@ def main() -> None:
     from bot.handlers.configure_panel_handler import configure_panel_conv_handler
     from bot.handlers.flash_handler import flash_handler
     from bot.handlers.context_sidebar_handler import context_sidebar_handler, context_callback_handler
+    from bot.middleware import auth_middleware
 
     async def post_init_with_commands(application: Application):
         logger.info("Initializing provider details...")
@@ -144,8 +143,9 @@ def main() -> None:
                 try:
                     chat_id = update.effective_chat.id if update.effective_chat else None
                     if chat_id:
+                        from bot.messaging import send_plain_message
                         await asyncio.wait_for(
-                            context.bot.send_message(chat_id=chat_id, text=error_msg, parse_mode=None),
+                            send_plain_message(context, chat_id, error_msg),
                             timeout=10.0
                         )
                 except (asyncio.TimeoutError, Exception) as fallback_error:
@@ -170,6 +170,9 @@ def main() -> None:
             app = create_application(post_init_hook=post_init_with_commands, post_shutdown_hook=cleanup_services)
 
             # Register Handlers
+            # Auth Middleware (Global check at highest priority)
+            app.add_handler(TypeHandler(Update, auth_middleware), group=-1)
+
             # High-priority: Flash (Global Escape Hatch)
             app.add_handler(flash_handler, group=0)
             

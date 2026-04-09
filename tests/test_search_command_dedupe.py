@@ -17,8 +17,7 @@ async def test_search_deduplication():
     update.effective_chat.id = chat_id
     update.effective_user.id = 456
     
-    # Needs to be AsyncMock context.bot.send_message
-    context.bot.send_message = AsyncMock()
+    # We will patch send_plain_message
     
     # Mock storage_manager
     with patch('bot.handlers.misc_commands.storage_manager') as mock_storage:
@@ -27,7 +26,8 @@ async def test_search_deduplication():
             # Mock providers
             with patch('bot.handlers.misc_commands.providers') as mock_providers:
                 # Mock messaging
-                with patch('bot.handlers.misc_commands.send_safe_message') as mock_send_msg:
+                with patch('bot.handlers.misc_commands.send_safe_message') as mock_send_msg, \
+                     patch('bot.messaging.send_plain_message', new_callable=AsyncMock) as mock_send_plain:
                     
                     # Mock config default provider
                     with patch('bot.handlers.misc_commands.config') as mock_config:
@@ -97,12 +97,13 @@ async def test_search_reply_handling():
     update.message.reply_to_message = MagicMock()
     update.message.reply_to_message.text = "reply query"
     
-    context.bot.send_message = AsyncMock()
+    # We will patch send_plain_message
     
     with patch('bot.handlers.misc_commands.storage_manager') as mock_storage:
         with patch('bot.handlers.misc_commands.web_search_service') as mock_search:
             with patch('bot.handlers.misc_commands.providers') as mock_providers:
-                with patch('bot.handlers.misc_commands.send_safe_message') as mock_send_msg:
+                with patch('bot.handlers.misc_commands.send_safe_message') as mock_send_msg, \
+                     patch('bot.messaging.send_plain_message', new_callable=AsyncMock) as mock_send_plain:
                     # Mock config default provider
                     with patch('bot.handlers.misc_commands.config') as mock_config:
                         mock_config.get_default_provider.return_value = 'ollama'
@@ -134,7 +135,7 @@ async def test_search_reply_handling():
                     await misc_commands.search_command(update, context)
                     
                     # Verify search performed with reply text
-                    mock_search.perform_search.assert_called_with("reply query")
+                    mock_search.perform_search.assert_called_with("reply query", manual=True)
                     
                     # Verify user query saved (since history empty)
                     mock_storage.save_message.assert_any_call(123, 'user', 'reply query')

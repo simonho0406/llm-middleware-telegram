@@ -26,10 +26,13 @@ class StorageManager:
             self.save_message = database_storage.save_message
             self.get_all_chat_ids = database_storage.get_all_chat_ids
             self.get_user_setting = database_storage.get_user_setting
-            self.get_user_setting = database_storage.get_user_setting
             self.set_user_setting = database_storage.set_user_setting
             self.get_thread_history_with_pk = getattr(database_storage, 'get_thread_history_with_pk', None)
             self.delete_messages = getattr(database_storage, 'delete_messages', None)
+            self.save_panel_task = getattr(database_storage, 'save_panel_task', None)
+            self.update_panel_task_status = getattr(database_storage, 'update_panel_task_status', None)
+            self.get_panel_tasks = getattr(database_storage, 'get_panel_tasks', None)
+            self.clear_panel_tasks = getattr(database_storage, 'clear_panel_tasks', None)
         elif backend == "file":
             self.init = file_storage.init_file_storage
             self.get_current_thread_id = file_storage.get_current_thread_id

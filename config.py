@@ -104,8 +104,11 @@ def get_openrouter_allowed_models():
 def get_openrouter_http_referer():
     return _yaml_config.get("openrouter_http_referer", "YOUR_APP_URL_OR_NAME")
 
-def get_web_search_provider():
-    return _yaml_config.get("web_search", {}).get("provider", "tavily")
+def get_manual_search_provider():
+    return _yaml_config.get("web_search", {}).get("manual_provider", "tavily")
+
+def get_automated_search_provider():
+    return _yaml_config.get("web_search", {}).get("automated_provider", "google")
 
 def get_session_file_path():
     return _yaml_config.get("session_file_path", "data/sessions.json")

@@ -37,17 +37,11 @@ async def flash_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     # 2. Send a placeholder
     placeholder_message = None
     try:
-        from bot.messaging import send_safe_message
-        # We manually send a message and get the object to pass as placeholder
-        # Note: send_safe_message handles splitting, but for short placeholders it returns the last message object usually.
-        # But send_safe_message returns True/False usually in my code?
-        # Let's check messaging.py. 
-        # Actually send_safe_message returns bool. I need the actual message object to delete it.
-        # I'll use context.bot.send_message directly for the placeholder, relying on standard behavior.
-        placeholder_message = await context.bot.send_message(
+        from bot.messaging import send_plain_message
+        placeholder_message = await send_plain_message(
+            context=context,
             chat_id=chat_id, 
-            text="🕵️‍♂️ *Running Flash Request...*", 
-            parse_mode="Markdown"
+            text="🕵️‍♂️ Running Flash Request..."
         )
     except Exception as e:
         logger.exception(f"Failed to send placeholder: {e}")

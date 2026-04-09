@@ -109,12 +109,17 @@ async def execute_parallel_google_searches(queries: list[str]) -> dict:
             
     return successful_results
 
-async def perform_search(query: str) -> dict:
+async def perform_search(query: str, manual: bool = False) -> dict:
     """
-    Dispatcher function to perform a web search using the configured provider.
+    Dispatcher function to perform a web search based on manual/automated intent.
+    Manual searches use Tavily for high-quality summaries. Automated searches use Google CSE.
     """
-    provider = config.get_web_search_provider().lower()
-    logger.info(f"Performing web search for '{query}' using provider: {provider}")
+    if manual:
+        provider = config.get_manual_search_provider().lower()
+    else:
+        provider = config.get_automated_search_provider().lower()
+
+    logger.info(f"Performing {'MANUAL' if manual else 'AUTOMATED'} web search for '{query}' using provider: {provider}")
 
     if provider == "tavily":
         return await _tavily_search(query)

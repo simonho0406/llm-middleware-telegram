@@ -57,6 +57,12 @@ async def init_database():
                 FOREIGN KEY (thread_fk) REFERENCES threads(thread_pk) ON DELETE CASCADE
             )""")
         await db.execute("""
+            CREATE TABLE IF NOT EXISTS panel_tasks (
+                task_pk INTEGER PRIMARY KEY AUTOINCREMENT, thread_fk INTEGER NOT NULL,
+                role TEXT NOT NULL, plan_json TEXT NOT NULL, status TEXT NOT NULL, timestamp INTEGER NOT NULL,
+                FOREIGN KEY (thread_fk) REFERENCES threads(thread_pk) ON DELETE CASCADE
+            )""")
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS user_settings (
                 chat_id INTEGER NOT NULL,
                 key TEXT NOT NULL,
@@ -132,6 +138,45 @@ async def get_current_thread_id(chat_id: int) -> str:
             await cursor.execute("SELECT current_thread_id FROM chats WHERE chat_id = ?", (chat_id,))
             row = await cursor.fetchone()
             return row[0] if row else _DEFAULT_THREAD_ID
+
+async def save_panel_task(chat_id: int, role: str, plan_json: str, status: str = 'pending', thread_id: Optional[str] = None) -> int:
+    """Saves a panel task to the state tracker."""
+    async with aiosqlite.connect(config.DB_PATH) as db:
+        thread_pk = await _get_thread_pk(db, chat_id, thread_id)
+        if not thread_pk: return -1
+        timestamp = int(time.time())
+        async with db.cursor() as cursor:
+            await cursor.execute(
+                "INSERT INTO panel_tasks (thread_fk, role, plan_json, status, timestamp) VALUES (?, ?, ?, ?, ?)",
+                (thread_pk, role, plan_json, status, timestamp)
+            )
+            await db.commit()
+            return cursor.lastrowid
+
+async def update_panel_task_status(task_pk: int, status: str) -> None:
+    async with aiosqlite.connect(config.DB_PATH) as db:
+        await db.execute("UPDATE panel_tasks SET status = ? WHERE task_pk = ?", (status, task_pk))
+        await db.commit()
+
+async def get_panel_tasks(chat_id: int, thread_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Retrieves all tasks for the current panel session."""
+    async with aiosqlite.connect(config.DB_PATH) as db:
+        thread_pk = await _get_thread_pk(db, chat_id, thread_id)
+        if not thread_pk: return []
+        async with db.cursor() as cursor:
+            await cursor.execute(
+                "SELECT task_pk, role, plan_json, status FROM panel_tasks WHERE thread_fk = ? ORDER BY timestamp ASC",
+                (thread_pk,)
+            )
+            rows = await cursor.fetchall()
+            return [{'task_pk': row[0], 'role': row[1], 'plan_json': row[2], 'status': row[3]} for row in rows]
+
+async def clear_panel_tasks(chat_id: int, thread_id: Optional[str] = None) -> None:
+    async with aiosqlite.connect(config.DB_PATH) as db:
+        thread_pk = await _get_thread_pk(db, chat_id, thread_id)
+        if not thread_pk: return
+        await db.execute("DELETE FROM panel_tasks WHERE thread_fk = ?", (thread_pk,))
+        await db.commit()
 
 async def set_current_thread_id(chat_id: int, thread_id: str) -> None:
     async with aiosqlite.connect(config.DB_PATH) as db:

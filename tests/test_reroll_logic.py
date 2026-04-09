@@ -254,6 +254,7 @@ async def test_panel_timeout_data_loss(mock_update_context):
     }
     
     with patch('bot.handlers.discuss_panel_handler._cleanup_discussion_state', new_callable=AsyncMock) as mock_cleanup, \
+         patch('bot.messaging.send_plain_message', new_callable=AsyncMock) as mock_send_plain, \
          patch('bot.handlers.discuss_panel_handler.storage_manager.save_message', new_callable=AsyncMock) as mock_save:
         
         await discuss_panel_handler.timeout_handler(mock_update, mock_context)
@@ -261,7 +262,7 @@ async def test_panel_timeout_data_loss(mock_update_context):
         # Verify: cleanup called
         assert mock_cleanup.called
         # Verify: User notified
-        mock_context.bot.send_message.assert_called_with(chat_id, "Panel discussion has timed out due to inactivity.", parse_mode=None)
+        mock_send_plain.assert_called_with(mock_context, chat_id, "Panel discussion has timed out due to inactivity.")
         # Note: We do NOT expect save_message here anymore as it's handled upstream (incremental save)
 
 @pytest.mark.asyncio

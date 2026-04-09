@@ -109,9 +109,10 @@ async def iterative_search(agent_service, agent_model: str, initial_query: str, 
         # Perform the next web search
         logger.info(f"Performing new search: '{next_query}'")
         search_result = await web_search_service.perform_search(next_query)
+        search_content = search_result.get('content', '') if isinstance(search_result, dict) else str(search_result)
         
         # Append results for the next iteration
-        search_results_context += f"\n\n--- Search Result for '{next_query}' ---\n{search_result}"
+        search_results_context += f"\n\n--- Search Result for '{next_query}' ---\n{search_content}"
 
     logger.warning("Search process reached max iterations without a final answer.")
     return "[Error: The search process did not complete within the maximum number of iterations.]"

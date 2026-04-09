@@ -1,7 +1,14 @@
 import os
 import logging
+import datetime
 
 logger = logging.getLogger(__name__)
+
+def get_environment_context() -> str:
+    now = datetime.datetime.now(datetime.timezone.utc)
+    date_str = now.strftime('%Y-%m-%d')
+    time_str = now.strftime('%H:%M:%S UTC')
+    return f"\n\n---\n\n# Current Environment\nDate: {date_str}\nTime: {time_str}\n"
 
 class PromptManager:
     def __init__(self, prompt_dir='prompts'):
@@ -37,10 +44,12 @@ class PromptManager:
                 else:
                     logger.warning(f"Failed to load prompt: {key}")
 
-    def get_prompt(self, name: str) -> str | None:
-        """Gets a raw prompt template by name."""
+    def get_prompt(self, name: str, inject_environment: bool = True) -> str:
+        """Gets a raw prompt template by name, optionally injecting temporal context."""
         prompt_template = self.prompts.get(name.upper())
         if prompt_template:
+            if inject_environment:
+                return prompt_template + get_environment_context()
             return prompt_template
         raise FileNotFoundError(f"Prompt '{name}' not found.")
 

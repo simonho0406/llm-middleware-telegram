@@ -11,16 +11,6 @@ from bot.response_generator import _generate_and_send_response
 
 logger = logging.getLogger(__name__)
 
-STREAMING_THROTTLE_SECONDS = 3.0
-
-def count_tokens(text: str) -> int:
-    try:
-        encoding = tiktoken.get_encoding("cl100k_base")
-        return len(encoding.encode(text, disallowed_special=()))
-    except Exception as e:
-        logger.exception(f"Token counting with tiktoken failed: {e}. Falling back to char count.")
-        return len(text) // 4
-
 def escape_meta_tags_for_markdown_attempt(text: str) -> str:
     if not text:
         return ""
@@ -95,9 +85,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         logger.info(f"{log_prefix}Ignoring message starting with '/' (detected as potential command).")
         return
 
-    if config.get_allowed_chat_ids() and chat_id not in config.get_allowed_chat_ids():
-        logger.warning(f"{log_prefix}Unauthorized chat ID. User: {user_id}.")
-        return
+
 
     # Initialize buffer if needed
     if 'message_buffer' not in context.chat_data:

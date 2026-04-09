@@ -140,6 +140,7 @@ async def test_panel_orchestrator_integration():
     
     # Mock dependencies
     with patch('bot.handlers.discuss_panel_handler.get_robust_llm_response', new_callable=AsyncMock) as mock_llm, \
+         patch('bot.handlers.discuss_panel_handler.config.get_expert_panel_config', return_value={'orchestrator': {'provider': 'test', 'model': 'test'}, 'roles': {'Proposer': {'provider': 'test', 'model': 'test'}, 'Critic': {'provider': 'test', 'model': 'test'}}}), \
          patch('bot.handlers.discuss_panel_handler.storage_manager', new_callable=AsyncMock) as mock_storage, \
          patch('bot.handlers.discuss_panel_handler.send_safe_message', new_callable=AsyncMock) as mock_send:
              
