@@ -12,22 +12,30 @@ from services import gemini_service
 async def test_generate_response_passes_max_output_tokens():
     """
     Tests that generate_response correctly passes the max_output_tokens
-    from the config to the Gemini API call.
+    from the config to the Gemini API call using the v2 SDK.
     """
     # 1. Arrange
     # Mock the config functions
     with patch('config.GEMINI_API_KEYS', ['fake_key']):
         with patch('config.get_gemini_max_output_tokens', return_value=4096) as mock_get_tokens:
-            # Mock the google.generativeai library
-            mock_generative_model = AsyncMock()
-            # We need to make the model itself an async iterator to simulate the stream
-            mock_generative_model.generate_content_async.return_value.__aiter__.return_value = [MagicMock(text="response")]
+            # Mock the google.genai Client
+            mock_client_instance = MagicMock()
+            mock_client_instance.aio.models.generate_content_stream = AsyncMock()
+            
+            # Create a mock chunk that has a text attribute
+            mock_chunk = MagicMock()
+            mock_chunk.text = "response"
+            mock_chunk.candidates = None # Prevent the finish_reason check from erroring
+            
+            mock_client_instance.aio.models.generate_content_stream.return_value.__aiter__.return_value = [mock_chunk]
 
-            with patch('google.generativeai.GenerativeModel', return_value=mock_generative_model) as mock_gen_model_class:
+            with patch('google.genai.Client', return_value=mock_client_instance) as mock_gen_client_class:
                 
                 # 2. Act
+                service = gemini_service.GeminiService()
+                
                 # We only need to consume one item from the generator to trigger the API call
-                async for _ in gemini_service.generate_response("gemini-pro", "test prompt"):
+                async for _ in service.generate_response("gemini-pro", "test prompt"):
                     break
 
                 # 3. Assert
@@ -35,13 +43,12 @@ async def test_generate_response_passes_max_output_tokens():
                 mock_get_tokens.assert_called_once()
 
                 # Assert that the Gemini client was called with the correct generation_config
-                mock_generative_model.generate_content_async.assert_called_once()
+                mock_client_instance.aio.models.generate_content_stream.assert_called_once()
                 
                 # Get the keyword arguments passed to the call
-                kwargs = mock_generative_model.generate_content_async.call_args.kwargs
+                kwargs = mock_client_instance.aio.models.generate_content_stream.call_args.kwargs
                 
-                # Check for the presence and value of generation_config
-                assert 'generation_config' in kwargs
-                generation_config = kwargs['generation_config']
-                assert 'max_output_tokens' in generation_config
-                assert generation_config['max_output_tokens'] == 4096
+                assert 'config' in kwargs
+                generation_config = kwargs['config']
+                # Check that max_output_tokens is set to 4096 in the Types object
+                assert generation_config.max_output_tokens == 4096

@@ -146,3 +146,8 @@ rate_limits:
 # allowed_chat_ids:
 #   - 123456789
 #   - -987654321
+
+# --- Utility Agent Configuration ---
+utility_agent:
+  provider: "gemini"
+  model: "gemini-1.5-flash-latest"

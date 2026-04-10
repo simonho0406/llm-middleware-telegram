@@ -137,3 +137,9 @@ def get_expert_panel_config():
 
 def get_enable_streaming():
     return _yaml_config.get("enable_streaming", True)
+
+def get_utility_model_provider():
+    return _yaml_config.get("utility_agent", {}).get("provider", "gemini")
+
+def get_utility_model_name():
+    return _yaml_config.get("utility_agent", {}).get("model", "gemini-1.5-flash-latest")

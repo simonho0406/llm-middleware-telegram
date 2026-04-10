@@ -161,21 +161,21 @@ async def handle_edited_message(update: Update, context: ContextTypes.DEFAULT_TY
         await context.application.process_update(new_update)
         return
 
-    history = await storage_manager.get_thread_history(chat_id)
+    history = await storage_manager.get_thread_history_with_pk(chat_id)
 
     if not history:
         logger.info(f"{log_prefix}Ignoring edit in empty history.")
         return
 
     # Find the last user message in the history
-    last_user_message_index = -1
+    last_user_message = None
     for i in range(len(history) - 1, -1, -1):
         if history[i]['role'] == 'user':
-            last_user_message_index = i
+            last_user_message = history[i]
             break
 
     # If there's no user message, we can't do anything
-    if last_user_message_index == -1:
+    if not last_user_message:
         logger.info(f"{log_prefix}Ignoring edit, no previous user message found.")
         return
 
@@ -184,15 +184,14 @@ async def handle_edited_message(update: Update, context: ContextTypes.DEFAULT_TY
         context.chat_data['llm_task'].cancel()
         logger.info(f"{log_prefix}Cancelled in-flight LLM task due to message edit.")
 
-    # Remove all messages after the last user message (i.e., any assistant responses)
-    history = history[:last_user_message_index + 1]
+    target_pk = last_user_message['id']
 
-    # Update the content of the last user message
-    history[last_user_message_index]['content'] = edited_text
+    # Update the content of the last user message atomically
+    await storage_manager.update_message_content(target_pk, edited_text)
 
-    # Save the corrected history
-    await storage_manager.set_thread_history(chat_id, history)
-    logger.info(f"{log_prefix}Corrected history after edit.")
+    # Remove all messages after the last user message (i.e., any assistant responses) atomically
+    await storage_manager.delete_messages_after(chat_id, target_pk)
+    logger.info(f"{log_prefix}Corrected history atomically after edit (User PK: {target_pk}).")
 
     # Trigger a new response generation
     current_thread_id = await storage_manager.get_current_thread_id(chat_id)

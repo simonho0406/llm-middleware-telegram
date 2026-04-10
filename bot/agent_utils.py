@@ -22,10 +22,10 @@ async def is_search_required(prompt: str) -> tuple[bool, bool]:
             f"Respond with only YES or NO."
         )
 
-        service = providers.get_service_for_provider('gemini')
+        service = providers.get_service_for_provider(config.get_utility_model_provider())
         response_chunks = [
             chunk async for chunk in service.generate_response(
-                model='gemini-1.5-flash-latest',
+                model=config.get_utility_model_name(),
                 prompt=meta_prompt,
                 context_history=None,
                 request_timeout=15

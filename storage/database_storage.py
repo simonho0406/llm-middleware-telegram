@@ -258,12 +258,39 @@ async def delete_messages(chat_id: int, message_ids: List[int]) -> bool:
         logger.info(f"Deleted {cursor.rowcount} messages for chat {chat_id}")
         return cursor.rowcount > 0
 
+async def delete_messages_after(chat_id: int, target_pk: int, thread_id: Optional[str] = None) -> int:
+    """Atomically deletes all messages in a thread that occur strictly after a specific message_pk."""
+    async with aiosqlite.connect(config.DB_PATH) as db:
+        thread_pk = await _get_thread_pk(db, chat_id, thread_id)
+        if not thread_pk: return 0
+        
+        cursor = await db.execute(
+            "DELETE FROM messages WHERE thread_fk = ? AND message_pk > ?", 
+            (thread_pk, target_pk)
+        )
+        await db.commit()
+        logger.info(f"Deleted {cursor.rowcount} messages after PK {target_pk} for chat {chat_id}")
+        return cursor.rowcount
+
+async def update_message_content(message_pk: int, new_content: str) -> bool:
+    """Atomically updates the content of a specific message by its PK."""
+    async with aiosqlite.connect(config.DB_PATH) as db:
+        cursor = await db.execute(
+            "UPDATE messages SET content = ? WHERE message_pk = ?", 
+            (new_content, message_pk)
+        )
+        await db.commit()
+        logger.info(f"Updated content for message PK {message_pk}")
+        return cursor.rowcount > 0
+
 async def replace_thread_history_dangerous(chat_id: int, history: List[Dict[str, str]], thread_id: Optional[str] = None) -> None:
     """
     DEPRECATED: Completely replaces thread history. 
     Use save_message (append) for normal chat flow.
     Only use this for hard resets (e.g., /new or tests).
     """
+    import warnings
+    warnings.warn("replace_thread_history_dangerous is deprecated. Use targeted atomic methods.", DeprecationWarning, stacklevel=2)
     async with aiosqlite.connect(config.DB_PATH) as db:
         thread_pk = await _get_thread_pk(db, chat_id, thread_id)
         if not thread_pk: return

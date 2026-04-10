@@ -44,12 +44,13 @@ def get_provider_details() -> dict:
     _initialized_services['ollama'] = ollama_service
     # Gemini
     if config.GEMINI_API_KEYS: # Only add if keys are configured
+        gemini_instance = gemini_service.GeminiService()
         details['gemini'] = {
-            'service': gemini_service,
+            'service': gemini_instance,
             'default_model': config.get_default_gemini_model(),
             'allowed_models': config.get_gemini_ask_all_models() # Use ask_all list for selection
         }
-        _initialized_services['gemini'] = gemini_service
+        _initialized_services['gemini'] = gemini_instance
     else:
         logger.warning("Gemini provider disabled: No API keys found.")
         
