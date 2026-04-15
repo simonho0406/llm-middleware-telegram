@@ -276,7 +276,7 @@ async def _generate_and_send_response_task(update: Update, context: ContextTypes
         from .handlers import misc_commands
         logger.info(f"{log_prefix}Auto-search triggered. Delegating to search_command: '{response_data['search_query']}'")
         context.args = [response_data['search_query']]
-        await misc_commands.search_command(update, context, placeholder_message, skip_save=skip_save, automated=True)
+        await misc_commands.search_command(update, context, placeholder_message, skip_save=skip_save, automated=True, fallback_content=response_data.get('content'))
         return
 
     final_content = response_data.get('content', "[Error: Empty response from AI]")

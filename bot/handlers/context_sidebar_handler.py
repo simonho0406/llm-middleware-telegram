@@ -62,9 +62,9 @@ async def show_context_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         await _respond(update, text, close_button=True)
         return
 
-    # Pagination Logic
-    if page < 0: page = 0
-    if page >= total_blocks: page = total_blocks - 1
+    # Circular Pagination Logic
+    if total_blocks > 0:
+        page = page % total_blocks
     
     block = blocks[page]
     
@@ -122,12 +122,14 @@ async def show_context_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     buttons = []
     
     # Nav Row
-    nav_row = []
-    if page > 0:
-        nav_row.append(InlineKeyboardButton("⬅️ Newer", callback_data=f"{CTX_NAV}{page-1}"))
-    if page < total_blocks - 1:
-        nav_row.append(InlineKeyboardButton("Older ➡️", callback_data=f"{CTX_NAV}{page+1}"))
-    buttons.append(nav_row)
+    if total_blocks > 1:
+        prev_page = (page - 1) % total_blocks
+        next_page = (page + 1) % total_blocks
+        nav_row = [
+            InlineKeyboardButton("⬅️ Newer", callback_data=f"{CTX_NAV}{prev_page}"),
+            InlineKeyboardButton("Older ➡️", callback_data=f"{CTX_NAV}{next_page}")
+        ]
+        buttons.append(nav_row)
     
     # Action Row
     buttons.append([

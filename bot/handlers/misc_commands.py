@@ -79,7 +79,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 • Configure in /config → Auto-Search settings"""
     await send_safe_message(context, update, help_text)
 
-async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, placeholder_message = None, skip_save: bool = False, automated: bool = False) -> None:
+async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, placeholder_message = None, skip_save: bool = False, automated: bool = False, fallback_content: str = None) -> None:
     """
     Performs a web search, gets a response from the LLM, and saves the original
     query to history, not the augmented prompt.
@@ -132,6 +132,18 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
     search_response = await web_search_service.perform_search(query, manual=not automated)
 
     if search_response['status'] == 'error':
+        if automated and fallback_content:
+            logger.info(f"{log_prefix}Auto-search API failed, falling back to standard LLM content.")
+            await send_safe_message(context, update, f"_{search_response['message']}. Falling back to standard model knowledge:_\n\n{fallback_content}")
+            if placeholder_message:
+                try:
+                    await placeholder_message.delete()
+                except Exception:
+                    pass
+            if not skip_save:
+                await storage_manager.save_message(chat_id, 'assistant', fallback_content)
+            return
+
         keyboard = [[InlineKeyboardButton("🔄 Retry Search", callback_data="retry_search")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
@@ -384,20 +396,22 @@ async def list_models_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         
         context.user_data['model_metadata'][model_hash] = {'provider': provider_name, 'model_id': model_id}
         
-        display_name_short = (display_name[:25] + '...') if len(display_name) > 28 else display_name
+        display_name_short = display_name if len(display_name) <= 40 else f"{display_name[:37]}..."
         buttons.append([InlineKeyboardButton(display_name_short, callback_data=f"{MODEL_CALLBACK_PREFIX}{model_hash}")])
 
-    pagination_row = []
-    if start_index > 0:
-        pagination_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"{MODEL_LIST_PAGE_CALLBACK_PREFIX}{provider_name}:{page-1}"))
-    if end_index < total_models:
-        pagination_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"{MODEL_LIST_PAGE_CALLBACK_PREFIX}{provider_name}:{page+1}"))
+    total_pages = (total_models + MODELS_PER_PAGE - 1) // MODELS_PER_PAGE
     
-    if pagination_row:
+    if total_pages > 1:
+        prev_page = total_pages if page == 1 else page - 1
+        next_page = 1 if page == total_pages else page + 1
+        
+        pagination_row = [
+            InlineKeyboardButton("⬅️ Prev", callback_data=f"{MODEL_LIST_PAGE_CALLBACK_PREFIX}{provider_name}:{prev_page}"),
+            InlineKeyboardButton("Next ➡️", callback_data=f"{MODEL_LIST_PAGE_CALLBACK_PREFIX}{provider_name}:{next_page}")
+        ]
         buttons.append(pagination_row)
 
     reply_markup = InlineKeyboardMarkup(buttons)
-    total_pages = (total_models + MODELS_PER_PAGE - 1) // MODELS_PER_PAGE
     message_text = f"Select a model for *{provider_name}* (Page {page}/{total_pages}):"
     
     await send_safe_message(context, update, message_text, reply_markup=reply_markup)
