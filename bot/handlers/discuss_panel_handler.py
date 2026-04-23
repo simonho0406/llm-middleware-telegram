@@ -7,7 +7,7 @@ from telegram import Update, BotCommand
 from telegram.error import BadRequest
 from telegram.error import TimedOut
 from httpx import ConnectTimeout
-from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, MessageHandler, filters
+from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 from telegram import BotCommandScopeChat
 
 from utils import text_processing
@@ -909,8 +909,13 @@ async def _run_panel_task_background(update: Update, context: ContextTypes.DEFAU
         pk = await storage_manager.save_message(chat_id, 'user', user_prompt)
         context.user_data['pending_panel_message_pk'] = pk
 
+        inject_history = await storage_manager.get_user_setting(chat_id, 'inject_history_in_panel', USER_SETTINGS['inject_history_in_panel']['default'])
+        initial_history = []
+        if inject_history:
+            initial_history = await storage_manager.get_thread_history(chat_id)
+
         panel_results, final_answer, proposer_response = await _run_panel_workflow(
-            update, context, user_prompt, [], assembling_msg, chat_id
+            update, context, user_prompt, initial_history, assembling_msg, chat_id
         )
         
         # Store state
@@ -1407,8 +1412,71 @@ async def panel_cancel_command(update: Update, context: ContextTypes.DEFAULT_TYP
     await _cleanup_discussion_state(context, chat_id)
     return ConversationHandler.END
 
+async def resume_panel_discussion_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Entry point for resuming a panel from a context history block."""
+    query = update.callback_query
+    await query.answer()
+
+    # Format: ctx_pnl_<page>_<start_pk>
+    try:
+        data = query.data
+        _, _, page_str, start_pk_str = data.split("_")
+        start_pk = int(start_pk_str)
+    except ValueError:
+        await query.edit_message_text("Invalid panel resumption data.")
+        return ConversationHandler.END
+
+    chat_id = update.effective_chat.id
+    raw_history = await storage_manager.get_thread_history_with_pk(chat_id, limit=200)
+
+    user_prompt = ""
+    assistant_contents = []
+    found_start = False
+
+    for msg in raw_history:
+        if msg['id'] == start_pk:
+            found_start = True
+            if msg['role'] == 'user':
+                user_prompt = msg['content']
+            else:
+                assistant_contents.append(msg['content'])
+            continue
+
+        if found_start:
+            if msg['role'] == 'user':
+                break
+            assistant_contents.append(msg['content'])
+
+    if not user_prompt and not assistant_contents:
+        await query.edit_message_text("Could not find the interaction in history.", parse_mode=None)
+        return ConversationHandler.END
+
+    final_answer = "\n\n".join(assistant_contents) if assistant_contents else "(No previous AI response)"
+
+    context.user_data['panel_state'] = {
+        "original_prompt": user_prompt,
+        "panel_results": {},
+        "final_answer": final_answer,
+        "full_transcript": [
+            {"role": "user", "content": user_prompt},
+            {"role": "assistant", "content": final_answer}
+        ],
+        "lock": asyncio.Lock()
+    }
+
+    await set_panel_commands(context.application, chat_id)
+    await query.edit_message_text(
+        f"🏛️ **Panel Session Resumed**\n\n_Original User Prompt:_\n{user_prompt}\n\nPlease type your follow-up prompt to resume discussion:",
+        parse_mode="Markdown"
+    )
+
+    return AWAITING_FOLLOW_UP
+
 discuss_panel_conv_handler = ConversationHandler(
-    entry_points=[CommandHandler('discuss_panel', start_panel_discussion)],
+    entry_points=[
+        CommandHandler('discuss_panel', start_panel_discussion),
+        CallbackQueryHandler(resume_panel_discussion_entry, pattern="^ctx_pnl_")
+    ],
     states={
         AWAITING_FOLLOW_UP: [
             CommandHandler('reroll', reroll_discussion),

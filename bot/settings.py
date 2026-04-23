@@ -17,6 +17,11 @@ USER_SETTINGS = {
         'type': bool,
         'default': False,
     },
+    'inject_history_in_panel': {
+        'display_name': "Inject History in Panels",
+        'type': bool,
+        'default': False,
+    },
     'panel_config': {
         'display_name': "Expert Panel Configuration",
         'type': dict,

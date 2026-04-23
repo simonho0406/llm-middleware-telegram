@@ -55,12 +55,22 @@ async def get_robust_llm_response(
             if service is None:
                 raise ValueError(f"Service for '{provider_name}' not configured or available.")
             
+            from utils.context_manager import ensure_context_fits
+            truncated_history, context_info = await ensure_context_fits(
+                prompt=prompt,
+                history=history if history is not None else [],
+                model=model,
+                provider=provider_name
+            )
+            if context_info:
+                logger.debug(f"{role_name} Context Info: {context_info}")
+            
             # Make the primary API call
             response_chunks = []
             async for chunk in service.generate_response(
                 model=model,
                 prompt=prompt,
-                context_history=history,
+                context_history=truncated_history,
                 request_timeout=request_timeout
             ):
                 response_chunks.append(chunk)
@@ -94,11 +104,21 @@ async def get_robust_llm_response(
         try:
             fallback_service = providers.get_service_for_provider(fallback_provider)
             if fallback_service is not None:
+                from utils.context_manager import ensure_context_fits
+                truncated_fallback_history, fallback_context_info = await ensure_context_fits(
+                    prompt=prompt,
+                    history=history if history is not None else [],
+                    model=fallback_model,
+                    provider=fallback_provider
+                )
+                if fallback_context_info:
+                    logger.debug(f"Fallback {role_name} Context Info: {fallback_context_info}")
+
                 response_chunks = []
                 async for chunk in fallback_service.generate_response(
                     model=fallback_model,
                     prompt=prompt,
-                    context_history=history,
+                    context_history=truncated_fallback_history,
                     request_timeout=request_timeout
                 ):
                     response_chunks.append(chunk)

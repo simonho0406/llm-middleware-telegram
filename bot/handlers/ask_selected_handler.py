@@ -62,11 +62,17 @@ async def get_models_for_provider(provider: str) -> List[Dict[str, Any]]:
     return models
 
 
-def build_provider_keyboard() -> InlineKeyboardMarkup:
+import json
+def build_provider_keyboard(last_models: list = None) -> InlineKeyboardMarkup:
     """Builds a dynamic provider selection keyboard."""
     provider_names = providers.get_available_provider_names()
     buttons = [InlineKeyboardButton(p, callback_data=f"{CALLBACK_PROVIDER_PREFIX}{p}") for p in provider_names]
     keyboard = [buttons[i:i + 2] for i in range(0, len(buttons), 2)] # 2 buttons per row
+    
+    if last_models and len(last_models) > 0:
+        model_count = len(last_models)
+        keyboard.append([InlineKeyboardButton(f"🚀 Quick Run ({model_count} cached models)", callback_data=f"{CALLBACK_ACTION_PREFIX}run_last")])
+        
     keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data=f"{CALLBACK_ACTION_PREFIX}cancel")])
     return InlineKeyboardMarkup(keyboard)
 
@@ -167,7 +173,19 @@ async def ask_selected_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.user_data['ask_selected_models_set'] = set() # Store as set for fast lookup
     context.user_data['model_metadata'] = {} # Initialize metadata mapping
 
-    reply_markup = build_provider_keyboard()
+    # Retrieve cached models for Quick Run
+    try:
+        last_models_json = await storage_manager.get_user_setting(chat_id, "last_ask_selected_models")
+        if last_models_json:
+            last_models = json.loads(last_models_json)
+            context.user_data['last_ask_selected_models'] = last_models
+        else:
+            context.user_data['last_ask_selected_models'] = []
+    except Exception as e:
+        logger.error(f"Failed to load cached models: {e}")
+        context.user_data['last_ask_selected_models'] = []
+
+    reply_markup = build_provider_keyboard(context.user_data['last_ask_selected_models'])
     await update.message.reply_text("Please select a provider to choose models from:", reply_markup=reply_markup)
     return SELECT_PROVIDER
 
@@ -272,9 +290,41 @@ async def back_to_providers_callback(update: Update, context: ContextTypes.DEFAU
     """Handles going back to provider selection."""
     query = update.callback_query
     await query.answer()
-    reply_markup = build_provider_keyboard()
+    last_models = context.user_data.get('last_ask_selected_models', [])
+    reply_markup = build_provider_keyboard(last_models)
     await query.edit_message_text("Please select a provider to choose models from:", reply_markup=reply_markup)
     return SELECT_PROVIDER
+
+async def run_last_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Bypasses provider/model selection using previously cached models."""
+    query = update.callback_query
+    await query.answer()
+    
+    last_models = context.user_data.get('last_ask_selected_models')
+    if not last_models:
+        reply_markup = build_provider_keyboard()
+        await query.edit_message_text("No cached models found. Please select a provider:", reply_markup=reply_markup)
+        return SELECT_PROVIDER
+        
+    context.user_data['ask_selected_models'] = last_models
+    context.user_data['ask_selected_models_set'] = set(last_models)
+    
+    context.user_data.setdefault('model_metadata', {})
+    for item in last_models:
+        if ':' in item:
+            provider, actual_id = item.split(":", 1)
+            context.user_data['model_metadata'][f"direct_{item}"] = {
+                'display': actual_id,
+                'actual_id': actual_id,
+                'provider': provider
+            }
+
+    prompt = context.user_data.get('ask_selected_prompt', '')
+    if not prompt:
+         await query.edit_message_text("Please enter your prompt now:")
+         return WAIT_FOR_PROMPT
+
+    return await _execute_council_flow(update, context, prompt, last_models, context.user_data['model_metadata'])
 
 async def done_selecting_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Confirms selection and executes the concurrent query."""
@@ -370,6 +420,11 @@ async def _execute_council_flow(update: Update, context: ContextTypes.DEFAULT_TY
         context.user_data['pending_council_message_pk'] = pk
     except Exception as e:
         logger.exception(f"Failed to save user prompt: {e}")
+
+    try:
+        await storage_manager.set_user_setting(chat_id, "last_ask_selected_models", json.dumps(selected_list))
+    except Exception as e:
+        logger.error(f"Failed to cache models layout: {e}")
 
     if status_message:
         try:
@@ -585,6 +640,19 @@ async def conversation_timeout(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data.pop('current_provider_selection', None)
     context.user_data.pop('model_metadata', None)
 
+    # Cancel any running LLM task
+    llm_task = context.chat_data.get('llm_task')
+    if llm_task and not llm_task.done():
+        llm_task.cancel()
+        logger.info(f"/ask_selected LLM task cancelled due to timeout for chat_id: {chat_id}")
+    context.chat_data.pop('llm_task', None)
+
+    # Surgical cleanup of orphaned user prompt
+    pending_pk = context.user_data.pop('pending_council_message_pk', None)
+    if pending_pk is not None:
+        await storage_manager.delete_messages(chat_id, [pending_pk])
+        logger.info(f"Cleaned up orphaned council prompt PK {pending_pk} due to timeout in chat {chat_id}.")
+
 
 # --- Handler Export ---
 ask_selected_conv_handler = ConversationHandler(
@@ -595,6 +663,7 @@ ask_selected_conv_handler = ConversationHandler(
     states={
         SELECT_PROVIDER: [
             CallbackQueryHandler(select_provider_callback, pattern=f"^{CALLBACK_PROVIDER_PREFIX}"),
+            CallbackQueryHandler(run_last_callback, pattern=f"^{CALLBACK_ACTION_PREFIX}run_last$"),
             CallbackQueryHandler(cancel_callback, pattern=f"^{CALLBACK_ACTION_PREFIX}cancel$"),
         ],
     SELECT_MODELS: [

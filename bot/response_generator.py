@@ -225,6 +225,10 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
             search_query = None  # Clear search query since we're not using it
 
     final_content = raw_full_llm_response.strip()
+
+    # Strip <thinking> blocks — these are internal reasoning not meant for the user
+    final_content = re.sub(r'<thinking>.*?</thinking>\s*', '', final_content, flags=re.DOTALL).strip()
+
     if not final_content:
         if not force_truncate and not llm_error_reported_by_model:
              logger.exception(f"{log_prefix}Empty response received from model. Retrying with forced context truncation...")

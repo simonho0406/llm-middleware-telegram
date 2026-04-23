@@ -14,6 +14,7 @@ CTX_NAV = f"{CTX_PREFIX}nav_"    # ctx_nav_<page>
 CTX_DEL = f"{CTX_PREFIX}del_"    # ctx_del_<page>_<hash_or_id?>
 CTX_CONFIRM = f"{CTX_PREFIX}cfm_" # ctx_cfm_<page>_<start_pk>
 CTX_RESEND = f"{CTX_PREFIX}res_"  # ctx_res_<page>_<start_pk>
+CTX_PANEL = f"{CTX_PREFIX}pnl_"   # ctx_pnl_<page>_<start_pk>
 CTX_CLOSE = f"{CTX_PREFIX}close"
 
 async def context_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -133,7 +134,8 @@ async def show_context_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     
     # Action Row
     buttons.append([
-        InlineKeyboardButton("🗑️ Delete this Interaction", callback_data=f"{CTX_CONFIRM}{page}_{start_pk}")
+        InlineKeyboardButton("🗑️ Delete this Interaction", callback_data=f"{CTX_CONFIRM}{page}_{start_pk}"),
+        InlineKeyboardButton("💬 Resume as Panel", callback_data=f"{CTX_PANEL}{page}_{start_pk}")
     ])
     
     if asst_count > 0:
@@ -150,6 +152,12 @@ async def show_context_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     data = query.data
+    
+    # CTX_PANEL callbacks are handled by the discuss_panel_conv_handler entry point.
+    # Do NOT answer or consume them here — just pass through.
+    if data.startswith(CTX_PANEL):
+        return
+    
     await query.answer()
     
     if data == CTX_CLOSE:
