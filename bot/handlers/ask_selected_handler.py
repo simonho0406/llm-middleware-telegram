@@ -129,14 +129,15 @@ async def build_model_keyboard(provider: str, selected_models: set, context: Con
     if row:
         keyboard.append(row)
 
-    # Navigation Buttons
-    nav_buttons = []
-    if page > 1:
-        nav_buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"{CALLBACK_ACTION_PREFIX}page:{page-1}"))
-    if end_idx < total_models:
-        nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"{CALLBACK_ACTION_PREFIX}page:{page+1}"))
-    if nav_buttons:
-        keyboard.append(nav_buttons)
+    # Navigation Buttons (circular)
+    total_pages = (total_models - 1) // MODELS_PER_PAGE + 1
+    if total_pages > 1:
+        prev_page = ((page - 2) % total_pages) + 1
+        next_page = (page % total_pages) + 1
+        keyboard.append([
+            InlineKeyboardButton("⬅️ Prev", callback_data=f"{CALLBACK_ACTION_PREFIX}page:{prev_page}"),
+            InlineKeyboardButton("Next ➡️", callback_data=f"{CALLBACK_ACTION_PREFIX}page:{next_page}")
+        ])
 
     # Add action buttons
     keyboard.append([

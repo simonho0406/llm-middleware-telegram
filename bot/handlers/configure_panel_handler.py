@@ -182,14 +182,14 @@ async def show_model_selection(update: Update, context: ContextTypes.DEFAULT_TYP
         
         keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
     
-    nav_buttons = []
-    if page > 1:
-        nav_buttons.append(InlineKeyboardButton("◀️ Previous", callback_data=f"{MODEL_PAGE_CALLBACK_PREFIX}{page-1}"))
-    if end_index < total_models:
-        nav_buttons.append(InlineKeyboardButton("Next ▶️", callback_data=f"{MODEL_PAGE_CALLBACK_PREFIX}{page+1}"))
-    
-    if nav_buttons:
-        keyboard.append(nav_buttons)
+    total_pages = (total_models - 1) // MODELS_PER_PAGE + 1
+    if total_pages > 1:
+        prev_page = ((page - 2) % total_pages) + 1
+        next_page = (page % total_pages) + 1
+        keyboard.append([
+            InlineKeyboardButton("◀️ Previous", callback_data=f"{MODEL_PAGE_CALLBACK_PREFIX}{prev_page}"),
+            InlineKeyboardButton("Next ▶️", callback_data=f"{MODEL_PAGE_CALLBACK_PREFIX}{next_page}")
+        ])
     
     keyboard.append([InlineKeyboardButton("◀️ Back to Providers", callback_data=f"{ROLE_CALLBACK_PREFIX}{role}")])
     

@@ -113,6 +113,20 @@ class GeminiService:
         logger.error("Failed to list models with any of the provided Gemini keys.")
         return []
 
+    async def check_status(self) -> tuple[bool, str]:
+        """Checks the status of the Gemini API by verifying key configuration and attempting to list models."""
+        if not self.api_keys:
+            return False, "Not configured (missing API keys)"
+            
+        try:
+            models = await self.list_models()
+            if models:
+                return True, f"Online ({len(models)} models available, {len(self.api_keys)} keys active)"
+            else:
+                return False, "Offline (Failed to connect or list models)"
+        except Exception as e:
+            return False, f"Error connecting: {e}"
+
     async def generate_concurrent_responses(self, prompt: str, context_history: Optional[List[Dict]] = None) -> Dict[str, str]:
         """Generates responses from multiple configured Gemini models concurrently."""
         if not self.api_keys:

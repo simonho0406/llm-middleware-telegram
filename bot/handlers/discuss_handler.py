@@ -82,13 +82,14 @@ def build_model_selection_keyboard(context: ContextTypes.DEFAULT_TYPE):
             callback_data=f"{CALLBACK_MODEL_SELECT_PREFIX}{model_hash}"
         )])
 
-    pagination_row = []
-    if page > 1:
-        pagination_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"{CALLBACK_MODEL_PAGE_PREFIX}{page-1}"))
-    if end_idx < total_models:
-        pagination_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"{CALLBACK_MODEL_PAGE_PREFIX}{page+1}"))
-    if pagination_row:
-        buttons.append(pagination_row)
+    total_pages = (total_models - 1) // MODELS_PER_PAGE + 1
+    if total_pages > 1:
+        prev_page = ((page - 2) % total_pages) + 1
+        next_page = (page % total_pages) + 1
+        buttons.append([
+            InlineKeyboardButton("⬅️ Prev", callback_data=f"{CALLBACK_MODEL_PAGE_PREFIX}{prev_page}"),
+            InlineKeyboardButton("Next ➡️", callback_data=f"{CALLBACK_MODEL_PAGE_PREFIX}{next_page}")
+        ])
 
     nav_row = []
     if len(selected_models) >= 2:
