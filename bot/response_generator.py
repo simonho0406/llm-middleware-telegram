@@ -209,16 +209,17 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
 
     # Handle search queries
     search_query = None
-    search_tag_match = re.search(r"<search>(.*?)</search>", raw_full_llm_response, re.DOTALL)
-    if search_tag_match:
-        search_query = search_tag_match.group(1).strip()
+    search_queries = re.findall(r"<search>(.*?)</search>", raw_full_llm_response, re.DOTALL)
+    if search_queries:
+        # Join multiple search queries if the LLM provided more than one
+        search_query = " ".join([sq.strip() for sq in search_queries if sq.strip()])
 
         if not autosearch_enabled:
-            logger.info(f"{log_prefix}Auto-search disabled. Removing search tag and providing fallback answer.")
-            # Remove the search tag entirely, but keep any additional content the LLM provided
-            raw_full_llm_response = raw_full_llm_response.replace(search_tag_match.group(0), "").strip()
+            logger.info(f"{log_prefix}Auto-search disabled. Removing search tags and providing fallback answer.")
+            # Remove all search tags entirely, but keep any additional content the LLM provided
+            raw_full_llm_response = re.sub(r"<search>.*?</search>", "", raw_full_llm_response, flags=re.DOTALL).strip()
 
-            # If there's still content after removing the search tag, keep it
+            # If there's still content after removing the search tags, keep it
             # If not, provide a helpful message
             if not raw_full_llm_response:
                 raw_full_llm_response = f"I'd need to search for current information about '{search_query}' to give you an accurate answer. Auto-search is disabled - you can enable it in /config or try the /search command directly."
