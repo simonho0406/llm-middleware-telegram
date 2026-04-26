@@ -128,3 +128,49 @@ async def perform_search(query: str, manual: bool = False) -> dict:
     else:
         logger.error(f"Unsupported web search provider: {provider}")
         return {'status': 'error', 'message': f"Unsupported web search provider '{provider}'."}
+
+async def perform_multi_search(queries: list[str], manual: bool = False) -> dict:
+    """
+    Dispatcher function to perform multiple web searches concurrently.
+    Returns a combined string of all results.
+    """
+    if manual:
+        provider = config.get_manual_search_provider().lower()
+    else:
+        provider = config.get_automated_search_provider().lower()
+
+    # Deduplicate queries while preserving order
+    unique_queries = list(dict.fromkeys(queries))
+    logger.info(f"Performing {'MANUAL' if manual else 'AUTOMATED'} multi-search for {len(unique_queries)} queries using provider: {provider}")
+
+    if provider == "google":
+        successful_results = await execute_parallel_google_searches(unique_queries)
+        if not successful_results:
+             return {'status': 'error', 'message': "All parallel search requests failed or returned no results."}
+        
+        combined_content = []
+        for q, res in successful_results.items():
+             combined_content.append(f"=== Search Results for: '{q}' ===\n{res}")
+        return {'status': 'success', 'content': "\n\n".join(combined_content)}
+        
+    elif provider == "tavily":
+        tasks = [_tavily_search(q) for q in unique_queries]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        combined_content = []
+        has_success = False
+        for q, res in zip(unique_queries, results):
+             if not isinstance(res, Exception) and res.get('status') == 'success':
+                 has_success = True
+                 combined_content.append(f"=== Search Results for: '{q}' ===\n{res['content']}")
+             else:
+                 logger.error(f"Error during parallel Tavily search for '{q}': {res}")
+        
+        if not has_success:
+             return {'status': 'error', 'message': "All parallel search requests failed or returned no results."}
+             
+        return {'status': 'success', 'content': "\n\n".join(combined_content)}
+        
+    else:
+        logger.error(f"Unsupported web search provider: {provider}")
+        return {'status': 'error', 'message': f"Unsupported web search provider '{provider}'."}

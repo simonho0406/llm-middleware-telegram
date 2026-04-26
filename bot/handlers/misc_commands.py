@@ -79,7 +79,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 • Configure in /config → Auto-Search settings"""
     await send_safe_message(context, update, help_text)
 
-async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, placeholder_message = None, skip_save: bool = False, automated: bool = False, fallback_content: str = None) -> None:
+async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, placeholder_message = None, skip_save: bool = False, automated: bool = False, fallback_content: str = None, search_queries: list[str] = None) -> None:
     """
     Performs a web search, gets a response from the LLM, and saves the original
     query to history, not the augmented prompt.
@@ -88,23 +88,31 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
     user_id = update.effective_user.id
     log_prefix = f"(Chat {chat_id}) "
 
-    # Handle reply-to message if no args provided
-    if not context.args and update.message and update.message.reply_to_message:
-        query = update.message.reply_to_message.text
-        if not query:
-             await send_safe_message(context, update, "The replied message has no text to search.")
-             return
-    elif not context.args:
-        await send_safe_message(context, update, "Please provide a query to search. Usage: /search <query> or reply to a message with /search")
-        return
+    # Determine if we're doing a single manual search or a multi-search
+    is_multi_search = bool(search_queries)
+    
+    if is_multi_search:
+        query_display_text = ", ".join([f'"{q}"' for q in search_queries])
     else:
-        query = " ".join(context.args)
+        # Handle reply-to message if no args provided
+        if not context.args and update.message and update.message.reply_to_message:
+            query = update.message.reply_to_message.text
+            if not query:
+                 await send_safe_message(context, update, "The replied message has no text to search.")
+                 return
+        elif not context.args:
+            await send_safe_message(context, update, "Please provide a query to search. Usage: /search <query> or reply to a message with /search")
+            return
+        else:
+            query = " ".join(context.args)
+        query_display_text = f'"{query}"'
 
-    logger.info(f"{log_prefix}User {user_id} initiated /search with query: '{query}'")
+    logger.info(f"{log_prefix}User {user_id} initiated /search with queries: {query_display_text}")
 
     from utils.hooks import hook_runner
     try:
-        hook_runner.run_pre_tool_use('search', {'query': query, 'user_id': user_id, 'chat_id': chat_id})
+        hook_query = search_queries[0] if is_multi_search else query
+        hook_runner.run_pre_tool_use('search', {'query': hook_query, 'user_id': user_id, 'chat_id': chat_id})
     except PermissionError as e:
         logger.warning(f"{log_prefix}Search tool denied by hook: {e}")
         if placeholder_message:
@@ -118,9 +126,9 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
     try:
         from bot.messaging import send_plain_message
         if placeholder_message is None:
-            placeholder_message = await send_plain_message(context, chat_id, f'Searching the web for: "{query}"...')
+            placeholder_message = await send_plain_message(context, chat_id, f'Searching the web for: {query_display_text}...')
         else:
-            await placeholder_message.edit_text(f'Searching the web for: "{query}"...', parse_mode=None)
+            await placeholder_message.edit_text(f'Searching the web for: {query_display_text}...', parse_mode=None)
     except telegram.error.NetworkError as e:
         logger.error(f"Network error while sending initial message in search_command: {e}")
         try:
@@ -129,7 +137,10 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
             logger.exception(f"Failed to send network error message to user: {e_inner}")
         return
 
-    search_response = await web_search_service.perform_search(query, manual=not automated)
+    if is_multi_search:
+        search_response = await web_search_service.perform_multi_search(search_queries, manual=not automated)
+    else:
+        search_response = await web_search_service.perform_search(query, manual=not automated)
 
     if search_response['status'] == 'error':
         if automated and fallback_content:
@@ -148,7 +159,7 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         # Store the query in user_data for the retry callback
-        context.user_data['last_search_query'] = query
+        context.user_data['last_search_query'] = search_queries if is_multi_search else query
         
         await placeholder_message.edit_text(
             f"⚠️ Web search failed: {search_response['message']}", 

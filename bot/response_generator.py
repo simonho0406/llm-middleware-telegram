@@ -208,11 +208,10 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
         llm_error_reported_by_model = True
 
     # Handle search queries
-    search_query = None
-    search_queries = re.findall(r"<search>(.*?)</search>", raw_full_llm_response, re.DOTALL)
-    if search_queries:
-        # Join multiple search queries if the LLM provided more than one
-        search_query = " ".join([sq.strip() for sq in search_queries if sq.strip()])
+    extracted_search_queries = None
+    search_queries_raw = re.findall(r"<search>(.*?)</search>", raw_full_llm_response, re.DOTALL)
+    if search_queries_raw:
+        extracted_search_queries = [sq.strip() for sq in search_queries_raw if sq.strip()]
 
         if not autosearch_enabled:
             logger.info(f"{log_prefix}Auto-search disabled. Removing search tags and providing fallback answer.")
@@ -222,8 +221,9 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
             # If there's still content after removing the search tags, keep it
             # If not, provide a helpful message
             if not raw_full_llm_response:
-                raw_full_llm_response = f"I'd need to search for current information about '{search_query}' to give you an accurate answer. Auto-search is disabled - you can enable it in /config or try the /search command directly."
-            search_query = None  # Clear search query since we're not using it
+                queries_str = ", ".join(f"'{q}'" for q in extracted_search_queries)
+                raw_full_llm_response = f"I'd need to search for current information about {queries_str} to give you an accurate answer. Auto-search is disabled - you can enable it in /config or try the /search command directly."
+            extracted_search_queries = None  # Clear search queries since we're not using them
 
     final_content = raw_full_llm_response.strip()
 
@@ -243,7 +243,7 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
         'error': 'llm_error' if llm_error_reported_by_model else None,
         'truncated_history': truncated_history,
         'provider_info': provider_info,
-        'search_query': search_query,
+        'search_queries': extracted_search_queries,
         'processed_history': processed_history
     }
 
@@ -277,11 +277,18 @@ async def _generate_and_send_response_task(update: Update, context: ContextTypes
         await send_safe_message(context, update, "Context window is full. Please use /config to manage conversation history.")
         return
 
-    if response_data.get('search_query'):
+    if response_data.get('search_queries'):
         from .handlers import misc_commands
-        logger.info(f"{log_prefix}Auto-search triggered. Delegating to search_command: '{response_data['search_query']}'")
-        context.args = [response_data['search_query']]
-        await misc_commands.search_command(update, context, placeholder_message, skip_save=skip_save, automated=True, fallback_content=response_data.get('content'))
+        logger.info(f"{log_prefix}Auto-search triggered. Delegating to search_command: {response_data['search_queries']}")
+        await misc_commands.search_command(
+            update, 
+            context, 
+            placeholder_message, 
+            skip_save=skip_save, 
+            automated=True, 
+            fallback_content=response_data.get('content'),
+            search_queries=response_data['search_queries']
+        )
         return
 
     final_content = response_data.get('content', "[Error: Empty response from AI]")
