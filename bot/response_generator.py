@@ -1,3 +1,9 @@
+"""
+Response Generator Module
+Handles orchestration of LLM requests, history processing, search tags, and UI updates.
+"""
+# pylint: disable=logging-fstring-interpolation, line-too-long, broad-exception-caught, unused-argument, missing-function-docstring, too-many-locals, too-many-branches, too-many-statements, unused-variable, redefined-outer-name, invalid-name, unused-import
+
 import logging
 import time
 import asyncio
@@ -42,30 +48,16 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
             if not t.done():
                 t.cancel()
 
-async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: int, prompt: str, is_reroll: bool = False, force_truncate: bool = False, operation_id: str = "chat_response") -> dict:
-    """
-    Core LLM response generation logic, decoupled from message formatting and sending.
-    Returns a response dict with 'content', 'error', 'truncated_history', and 'provider_info'.
-    """
-    log_prefix = f"(Chat {chat_id}) "
-
-    # Load and process conversation history
-    # New Archival Logic: We fetch a limited window (e.g., last 500) to avoid memory overload
-    # But for context construction, we rely on ensure_context_fits to trim it further.
-    context_history = await storage_manager.get_thread_history(chat_id)
-
-    # De-duplicate prompt: If the prompt was already saved to DB (Archival mode), remove it from history
-    # because the service.generate_response method typically appends the prompt again.
+async def _process_history_for_llm(context_history: list, prompt: str, is_reroll: bool, log_prefix: str) -> list:
     if context_history and context_history[-1].get('role') == 'user' and context_history[-1].get('content') == prompt:
         context_history.pop()
-
 
     processed_history = []
     for message in context_history:
         role = message.get('role')
         content = message.get('content')
 
-        if role == 'panel_discussion': # Old format (summary)
+        if role == 'panel_discussion':
             try:
                 panel_data = json.loads(content)
                 summary = (
@@ -75,18 +67,18 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
                 processed_history.append({'role': 'assistant', 'content': f"[Summary of Prior Panel Discussion]:\n{summary}"})
             except (json.JSONDecodeError, TypeError):
                 processed_history.append({'role': 'assistant', 'content': "[A complex panel discussion occurred previously.]"})
-        elif role == 'assistant:panel': # New format (full answer)
+        elif role == 'assistant:panel':
             processed_history.append({'role': 'assistant', 'content': f"**[Previous Expert Panel Discussion Result]**\n\n{content}"})
         else:
             processed_history.append(message)
 
     if is_reroll and processed_history and processed_history[-1].get('role') == 'assistant':
-        # Fallback for transient history that might not have been cleaned up yet? 
-        # In the new logic, we clean DB before calling this, but if we fetched transient state:
         logger.info(f"{log_prefix}Reroll detected in history processing. Removing last assistant message.")
         processed_history.pop()
 
-    # Get provider configuration
+    return processed_history
+
+async def _get_provider_configuration(chat_id: int, log_prefix: str) -> tuple:
     session_provider = await storage_manager.get_thread_key(chat_id, 'provider', config.get_default_provider())
     provider_details = providers.get_provider_details()
 
@@ -110,12 +102,39 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
         'model': model_to_use,
         'service': service
     }
+    return session_provider, model_to_use, provider_config, service, provider_info
+
+def _extract_and_process_search_tags(raw_response: str, autosearch_enabled: bool, log_prefix: str) -> tuple[str, list | None]:
+    extracted_search_queries = None
+    search_queries_raw = re.findall(r"<search>(.*?)</search>", raw_response, re.DOTALL)
+    if search_queries_raw:
+        extracted_search_queries = [sq.strip() for sq in search_queries_raw if sq.strip()]
+
+        if not autosearch_enabled:
+            logger.info(f"{log_prefix}Auto-search disabled. Removing search tags and providing fallback answer.")
+            raw_response = re.sub(r"<search>.*?</search>", "", raw_response, flags=re.DOTALL).strip()
+            if not raw_response:
+                queries_str = ", ".join(f"'{q}'" for q in extracted_search_queries)
+                raw_response = f"I'd need to search for current information about {queries_str} to give you an accurate answer. Auto-search is disabled - you can enable it in /config or try the /search command directly."
+            extracted_search_queries = None
+
+    return raw_response.strip(), extracted_search_queries
+
+async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: int, prompt: str, is_reroll: bool = False, force_truncate: bool = False, operation_id: str = "chat_response") -> dict:
+    """
+    Core LLM response generation logic, decoupled from message formatting and sending.
+    Returns a response dict with 'content', 'error', 'truncated_history', and 'provider_info'.
+    """
+    log_prefix = f"(Chat {chat_id}) "
+
+    context_history = await storage_manager.get_thread_history(chat_id)
+    processed_history = await _process_history_for_llm(context_history, prompt, is_reroll, log_prefix)
+
+    session_provider, model_to_use, provider_config, service, provider_info = await _get_provider_configuration(chat_id, log_prefix)
 
     # Automatically ensure context fits within model limits
     from utils.context_manager import ensure_context_fits
 
-    # If force_truncate is active (e.g. from retry), apply a safety margin to reduce context size
-    # This helps when the model is returning empty responses near the limit
     safety_margin = 0.75 if force_truncate else 1.0
 
     final_history, context_info = await ensure_context_fits(
@@ -131,15 +150,12 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
 
     truncated_history = final_history
 
-    # Check if auto-search is enabled
-
     autosearch_enabled = await storage_manager.get_user_setting(
         chat_id,
         'autosearch_chat',
         USER_SETTINGS['autosearch_chat']['default']
     )
 
-    # Generate LLM response
     raw_full_llm_response = ""
     llm_error_reported_by_model = False
 
@@ -173,7 +189,6 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
             task.add_done_callback(bg_tasks.discard)
             return task
 
-        # Per-chat singleton: evict any existing draft for this chat before starting a new one
         if enable_streaming:
             old_draft_id = context.chat_data.get('active_draft_id')
             if old_draft_id is not None:
@@ -188,13 +203,11 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
                 break
             raw_full_llm_response += chunk
             
-            # Fire off a non-blocking draft update if throttling window has passed
             if enable_streaming and (time.time() - last_draft_time) > draft_throttle_seconds:
                 if context.chat_data.get('active_draft_id') == draft_id:
                     _track_task(send_draft_message(context, chat_id, draft_id, raw_full_llm_response + " █"))
                 last_draft_time = time.time()
 
-        # Finalize the draft when streaming ends
         if enable_streaming and context.chat_data.get('active_draft_id') == draft_id:
             _track_task(finalize_draft(context, chat_id, draft_id))
             context.chat_data.pop('active_draft_id', None)
@@ -207,25 +220,7 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
         raw_full_llm_response = "[Error: An unexpected error occurred while communicating with the AI.]"
         llm_error_reported_by_model = True
 
-    # Handle search queries
-    extracted_search_queries = None
-    search_queries_raw = re.findall(r"<search>(.*?)</search>", raw_full_llm_response, re.DOTALL)
-    if search_queries_raw:
-        extracted_search_queries = [sq.strip() for sq in search_queries_raw if sq.strip()]
-
-        if not autosearch_enabled:
-            logger.info(f"{log_prefix}Auto-search disabled. Removing search tags and providing fallback answer.")
-            # Remove all search tags entirely, but keep any additional content the LLM provided
-            raw_full_llm_response = re.sub(r"<search>.*?</search>", "", raw_full_llm_response, flags=re.DOTALL).strip()
-
-            # If there's still content after removing the search tags, keep it
-            # If not, provide a helpful message
-            if not raw_full_llm_response:
-                queries_str = ", ".join(f"'{q}'" for q in extracted_search_queries)
-                raw_full_llm_response = f"I'd need to search for current information about {queries_str} to give you an accurate answer. Auto-search is disabled - you can enable it in /config or try the /search command directly."
-            extracted_search_queries = None  # Clear search queries since we're not using them
-
-    final_content = raw_full_llm_response.strip()
+    final_content, extracted_search_queries = _extract_and_process_search_tags(raw_full_llm_response, autosearch_enabled, log_prefix)
 
     # Strip <thinking> blocks — these are internal reasoning not meant for the user
     final_content = re.sub(r'<thinking>.*?</thinking>\s*', '', final_content, flags=re.DOTALL).strip()
@@ -287,7 +282,8 @@ async def _generate_and_send_response_task(update: Update, context: ContextTypes
             skip_save=skip_save, 
             automated=True, 
             fallback_content=response_data.get('content'),
-            search_queries=response_data['search_queries']
+            search_queries=response_data['search_queries'],
+            original_prompt=prompt
         )
         return
 

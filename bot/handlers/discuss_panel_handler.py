@@ -1134,13 +1134,7 @@ async def end_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     return ConversationHandler.END
 
-async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Cancels the active panel discussion via a command."""
-    chat_id = update.effective_chat.id
-    await update.message.reply_text("Cancelling discussion...", parse_mode=None)
-    await _cleanup_discussion_state(context, chat_id)
-    await update.message.reply_text("Panel discussion cancelled.", parse_mode=None)
-    return ConversationHandler.END
+
 
 async def search_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handles the /search command within a panel discussion."""
@@ -1484,6 +1478,7 @@ discuss_panel_conv_handler = ConversationHandler(
             # Block common commands that shouldn't work during panel discussions
             CommandHandler(['config', 'set_model', 'set_ollama_model', 'set_gemini_model', 'providers', 'models'], blocked_command_handler),
             CommandHandler(['ask_all_gemini', 'discuss', 'help'], blocked_command_handler),
+            MessageHandler(filters.UpdateType.EDITED_MESSAGE, handle_panel_edit),
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_follow_up),
         ],
     },

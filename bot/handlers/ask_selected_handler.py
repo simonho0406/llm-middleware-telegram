@@ -130,7 +130,7 @@ async def build_model_keyboard(provider: str, selected_models: set, context: Con
         keyboard.append(row)
 
     # Navigation Buttons (circular)
-    total_pages = (total_models - 1) // MODELS_PER_PAGE + 1
+    total_pages = (total_models - 1) // ITEMS_PER_PAGE + 1
     if total_pages > 1:
         prev_page = ((page - 2) % total_pages) + 1
         next_page = (page % total_pages) + 1

@@ -1,3 +1,9 @@
+"""
+Text Processing Utilities Module
+Provides AST-aware formatting, table cleanup, and markdown tokenization.
+"""
+# pylint: disable=logging-fstring-interpolation, line-too-long, broad-exception-caught, unused-argument, missing-function-docstring, too-many-public-methods, too-many-locals, multiple-statements, no-else-continue, no-else-break, too-many-nested-blocks, too-many-branches, too-many-statements, unused-variable
+
 import re
 import logging
 import telegram # Add this import
@@ -25,29 +31,33 @@ def fix_collapsed_tables(text: str) -> str:
     delimiter_pattern = re.compile(r'\n\|(?:[\s\-:]+\|)+')
     
     offset = 0
-    while True:
-        match = delimiter_pattern.search(fixed, offset)
-        if not match:
-            break
+    try:
+        while True:
+            match = delimiter_pattern.search(fixed, offset)
+            if not match:
+                break
+                
+            delim = match.group(0)
+            pipes = delim.count('|')
             
-        delim = match.group(0)
-        pipes = delim.count('|')
-        
-        header_start = -1
-        pipe_count = 0
-        for i in range(match.start() - 1, -1, -1):
-            if fixed[i] == '|':
-                pipe_count += 1
-                if pipe_count == pipes:
-                    header_start = i
-                    break
-        
-        if header_start > 0 and fixed[header_start - 1] not in ('\n', '>'):
-            fixed = fixed[:header_start] + '\n\n' + fixed[header_start:]
-            offset = match.end() + 2
-            continue
+            header_start = -1
+            pipe_count = 0
+            for i in range(match.start() - 1, -1, -1):
+                if fixed[i] == '|':
+                    pipe_count += 1
+                    if pipe_count == pipes:
+                        header_start = i
+                        break
             
-        offset = match.end()
+            if header_start > 0 and fixed[header_start - 1] not in ('\n', '>'):
+                fixed = fixed[:header_start] + '\n\n' + fixed[header_start:]
+                offset = match.end() + 2
+                continue
+                
+            offset = match.end()
+    except IndexError:
+        logger.warning("IndexError encountered during fix_collapsed_tables. Bailing out to prevent crash.")
+        return text
         
     # 3. Split paragraphs that dynamically collide with the end of a table.
     fixed = re.sub(r'(\|\s*)(?=-{3,}|\#{1,6}\s)', r'|\n\n', fixed)

@@ -79,7 +79,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 • Configure in /config → Auto-Search settings"""
     await send_safe_message(context, update, help_text)
 
-async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, placeholder_message = None, skip_save: bool = False, automated: bool = False, fallback_content: str = None, search_queries: list[str] = None) -> None:
+async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, placeholder_message = None, skip_save: bool = False, automated: bool = False, fallback_content: str = None, search_queries: list[str] = None, original_prompt: str = None) -> None:
     """
     Performs a web search, gets a response from the LLM, and saves the original
     query to history, not the augmented prompt.
@@ -93,6 +93,7 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
     
     if is_multi_search:
         query_display_text = ", ".join([f'"{q}"' for q in search_queries])
+        query = original_prompt if original_prompt else ", ".join(search_queries)
     else:
         # Handle reply-to message if no args provided
         if not context.args and update.message and update.message.reply_to_message:

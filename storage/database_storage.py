@@ -207,7 +207,7 @@ async def set_thread_key(chat_id: int, key: str, value: Any, thread_id: Optional
         # This is the new, critical check
         if key == 'history':
             # Redirect to the correct function instead of failing
-            return await set_thread_history(chat_id, value, thread_id)
+            return await replace_thread_history_dangerous(chat_id, value, thread_id)
         raise ValueError(f"Invalid key '{key}' for set_thread_key. Must be one of {valid_keys}")
 
     async with aiosqlite.connect(config.DB_PATH) as db:

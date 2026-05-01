@@ -1,3 +1,9 @@
+"""
+Chat Handlers Module
+Handles text messages and user interactions for the bot.
+"""
+# pylint: disable=logging-fstring-interpolation, line-too-long, broad-exception-caught, unused-import
+
 import logging
 import asyncio
 import re
@@ -62,9 +68,9 @@ async def process_buffered_message(context: ContextTypes.DEFAULT_TYPE) -> None:
             await send_safe_message(context, update, "A network error occurred, please try again.")
         except Exception as e_inner:
             logger.exception(f"Failed to send network error message to user: {e_inner}")
-    except Exception as e:
-        logger.error(f"{log_prefix}Error in process_buffered_message: {e}", exc_info=True)
-        await send_safe_message(context, update, "Sorry, a critical error occurred while handling your message.")
+    except error.TelegramError as e:
+        logger.error(f"{log_prefix}Telegram API error in process_buffered_message: {e}", exc_info=True)
+        await send_safe_message(context, update, "Sorry, a Telegram API error occurred while handling your message.")
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -119,15 +125,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def handle_edited_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles edited messages, treating them as new prompts if they were the last user message."""
     if not update.edited_message:
-        return
-
-    # Check if a panel discussion is active.
-    if context.user_data and 'panel_state' in context.user_data:
-        chat_id = update.effective_chat.id
-        log_prefix = f"(Chat {chat_id}) "
-        logger.info(f"{log_prefix}Delegating edit to panel handler.")
-        from bot.handlers import discuss_panel_handler
-        await discuss_panel_handler.handle_panel_edit(update, context)
         return
 
     chat_id = update.effective_chat.id

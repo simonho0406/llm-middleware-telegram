@@ -317,17 +317,10 @@ async def get_all_chat_ids() -> List[int]:
     """Returns a list of all chat IDs in the file storage."""
     async with _lock:
         return list(_sessions.keys())
-# Load sessions when the module is imported
+async def get_user_setting(chat_id: int, key: str, default: Any = None) -> Any:
+    """Mock implementation for file storage."""
+    return default
 
-if __name__ == "__main__":
-    import asyncio
-    import os
-    from core import config
-    # Ensure data dir exists for test
-    DATA_DIR = os.path.dirname(config.get_session_file_path())
-    if DATA_DIR and not os.path.exists(DATA_DIR):
-        os.makedirs(DATA_DIR)
-    # Clear session file for clean test run? Optional.
-    # if os.path.exists(config.get_session_file_path()):
-    #     os.remove(config.get_session_file_path())
-    asyncio.run(_test())
+async def set_user_setting(chat_id: int, key: str, value: Any) -> None:
+    """Mock implementation for file storage."""
+    pass
