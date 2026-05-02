@@ -156,6 +156,9 @@ async def show_model_selection(update: Update, context: ContextTypes.DEFAULT_TYP
     
     models_result.sort(key=lambda m: m['name'].lower() if isinstance(m, dict) else m.lower())
     total_models = len(models_result)
+    total_pages = max(1, (total_models - 1) // MODELS_PER_PAGE + 1)
+    page = ((page - 1) % total_pages) + 1
+
     start_index = (page - 1) * MODELS_PER_PAGE
     end_index = min(start_index + MODELS_PER_PAGE, total_models)
     models_page = models_result[start_index:end_index]
@@ -163,7 +166,7 @@ async def show_model_selection(update: Update, context: ContextTypes.DEFAULT_TYP
     current_config = await load_panel_config(update.effective_chat.id)
     current_model = current_config.get('roles', {}).get(role, {}).get('model', None)
     
-    menu_text = f"*🔧 Configure {role} → {provider}*\n\n*Current Model:* `{current_model or 'Not Set'}`\n\n*Select a Model* (Page {page}/{(total_models - 1) // MODELS_PER_PAGE + 1}):"
+    menu_text = f"*🔧 Configure {role} → {provider}*\n\n*Current Model:* `{current_model or 'Not Set'}`\n\n*Select a Model* (Page {page}/{total_pages}):"
     
     keyboard = []
     for model in models_page:
@@ -182,7 +185,6 @@ async def show_model_selection(update: Update, context: ContextTypes.DEFAULT_TYP
         
         keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
     
-    total_pages = (total_models - 1) // MODELS_PER_PAGE + 1
     if total_pages > 1:
         prev_page = ((page - 2) % total_pages) + 1
         next_page = (page % total_pages) + 1

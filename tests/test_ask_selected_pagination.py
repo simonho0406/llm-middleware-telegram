@@ -45,5 +45,10 @@ async def test_build_model_keyboard_pagination(mock_get_models):
     # + 1 row for navigation
     # + 1 row for actions
     # + 1 row for Cancel
-    # Total rows = 7
-    assert len(keyboard_markup_p2.inline_keyboard) == 7
+    # Test Page 20 (Out of bounds, should modulo to page 5 because 15 models // 8 = 2 pages)
+    # Actually, 15 models // 8 ITEMS_PER_PAGE = 2 pages (Page 1: 8 models, Page 2: 7 models).
+    # If total_pages = 2, then page 20: ((20 - 1) % 2) + 1 = (19 % 2) + 1 = 1 + 1 = 2.
+    # So page 20 should cleanly modulo back to page 2!
+    keyboard_markup_p20 = await ask_selected_handler.build_model_keyboard("test_provider", set(), context, page=20)
+    assert context.user_data['ask_selected_page'] == 2 # verify it clamped properly
+    assert len(keyboard_markup_p20.inline_keyboard) == 7

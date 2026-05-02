@@ -74,3 +74,4 @@ obj/
 
 ### Claude Code ###
 .claude/
+data/logs.txt

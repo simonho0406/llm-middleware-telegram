@@ -392,6 +392,9 @@ async def list_models_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     models_result.sort(key=lambda m: m['name'].lower() if isinstance(m, dict) else m.lower())
 
     total_models = len(models_result)
+    total_pages = max(1, (total_models + MODELS_PER_PAGE - 1) // MODELS_PER_PAGE)
+    page = ((page - 1) % total_pages) + 1
+
     start_index = (page - 1) * MODELS_PER_PAGE
     end_index = start_index + MODELS_PER_PAGE
     paginated_models = models_result[start_index:end_index]
@@ -411,11 +414,9 @@ async def list_models_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         display_name_short = display_name if len(display_name) <= 40 else f"{display_name[:37]}..."
         buttons.append([InlineKeyboardButton(display_name_short, callback_data=f"{MODEL_CALLBACK_PREFIX}{model_hash}")])
 
-    total_pages = (total_models + MODELS_PER_PAGE - 1) // MODELS_PER_PAGE
-    
     if total_pages > 1:
-        prev_page = total_pages if page == 1 else page - 1
-        next_page = 1 if page == total_pages else page + 1
+        prev_page = ((page - 2) % total_pages) + 1
+        next_page = (page % total_pages) + 1
         
         pagination_row = [
             InlineKeyboardButton("⬅️ Prev", callback_data=f"{MODEL_LIST_PAGE_CALLBACK_PREFIX}{provider_name}:{prev_page}"),
