@@ -515,9 +515,22 @@ async def _run_panel_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE
         return {}, f"[System Error: {e}]", ""
 
     plan_template = config.PROMPTS.get_prompt('panel_orchestrator_plan')
+    
+    # Trim the injected history to prevent context overflow for the orchestrator
+    from utils.context_manager import ensure_context_fits
+    # Estimate base prompt size without history
+    base_prompt_est = plan_template.format(user_prompt=user_prompt, full_history_json="")
+    trimmed_history, _ = await ensure_context_fits(
+        prompt=base_prompt_est,
+        history=full_history,
+        model=orchestrator_model,
+        provider=orchestrator_provider,
+        safety_margin=0.85 # Leave 15% buffer for JSON formatting overhead
+    )
+    
     meta_prompt = plan_template.format(
         user_prompt=user_prompt,
-        full_history_json=json.dumps(full_history, indent=2)
+        full_history_json=json.dumps(trimmed_history, indent=2)
     )
 
     # Use consolidated LLM response function for initial Orchestrator call with integrated JSON parsing retry
