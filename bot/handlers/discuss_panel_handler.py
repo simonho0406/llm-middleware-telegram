@@ -844,8 +844,28 @@ async def _run_panel_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE
     critic_response = panel_results.get("Critic", {}).get('response', 'No response from critic.')
     
     synthesis_template = config.PROMPTS.get_prompt('panel_synthesis')
+
+    # Determine which model the synthesis prompt will be sent to.
+    # If a Refiner is configured, the synthesis result feeds into the Refiner;
+    # otherwise, it goes directly to the orchestrator's synthesizer.
+    # We use the orchestrator model as the conservative baseline for truncation.
+    from utils.context_manager import ensure_context_fits
+    base_synthesis_est = synthesis_template.format(
+        full_history="",
+        user_prompt=user_prompt,
+        proposer_response=proposer_response,
+        critic_response=critic_response
+    )
+    trimmed_synthesis_history, _ = await ensure_context_fits(
+        prompt=base_synthesis_est,
+        history=full_history,
+        model=orchestrator_model,
+        provider=orchestrator_provider,
+        safety_margin=0.85
+    )
+
     synthesis_prompt = synthesis_template.format(
-        full_history=json.dumps(full_history, indent=2),
+        full_history=json.dumps(trimmed_synthesis_history, indent=2),
         user_prompt=user_prompt,
         proposer_response=proposer_response,
         critic_response=critic_response
