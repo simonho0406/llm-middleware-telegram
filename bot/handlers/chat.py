@@ -7,6 +7,7 @@ Handles text messages and user interactions for the bot.
 import logging
 import asyncio
 import re
+import copy
 from telegram import Update, constants, error
 from telegram.ext import MessageHandler, filters, ContextTypes
 import config
@@ -146,7 +147,6 @@ async def handle_edited_message(update: Update, context: ContextTypes.DEFAULT_TY
         # but we can try to rely on the fact that handlers look at update.message.
         # A safer approach for PTB v20+ is to use the existing update but 'move' the edited_message to message.
         
-        import copy
         new_update = copy.copy(update)
         new_update.message = update.edited_message
         new_update.edited_message = None

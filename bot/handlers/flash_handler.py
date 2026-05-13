@@ -2,7 +2,7 @@ import logging
 from telegram import Update
 from telegram.ext import ContextTypes, CommandHandler
 from bot.response_generator import _generate_and_send_response
-from bot.messaging import send_safe_message
+from bot.messaging import send_safe_message, send_plain_message
 from storage import storage_manager
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,6 @@ async def flash_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     # 2. Send a placeholder
     placeholder_message = None
     try:
-        from bot.messaging import send_plain_message
         placeholder_message = await send_plain_message(
             context=context,
             chat_id=chat_id, 

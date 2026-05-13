@@ -254,7 +254,7 @@ async def test_panel_timeout_data_loss(mock_update_context):
     }
     
     with patch('bot.handlers.discuss_panel_handler._cleanup_discussion_state', new_callable=AsyncMock) as mock_cleanup, \
-         patch('bot.messaging.send_plain_message', new_callable=AsyncMock) as mock_send_plain, \
+         patch('bot.handlers.discuss_panel_handler.send_plain_message', new_callable=AsyncMock) as mock_send_plain, \
          patch('bot.handlers.discuss_panel_handler.storage_manager.save_message', new_callable=AsyncMock) as mock_save:
         
         await discuss_panel_handler.timeout_handler(mock_update, mock_context)

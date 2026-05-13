@@ -120,7 +120,10 @@ class OpenAICompatibleService:
                 }
                 # Use per-request timeout or fallback to global default
                 timeout_value = request_timeout if request_timeout is not None else config.get_request_timeout_seconds()
-                api_kwargs["timeout"] = timeout_value
+                if use_streaming:
+                    api_kwargs["timeout"] = httpx.Timeout(timeout_value, connect=15.0, read=45.0)
+                else:
+                    api_kwargs["timeout"] = timeout_value
 
                 # Targeted Reasoning Payload: Maximize test-time scaling globally.
                 reasoning_payload = {

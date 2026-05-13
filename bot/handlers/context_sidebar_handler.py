@@ -4,6 +4,8 @@ import html
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, constants
 from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler, ConversationHandler
 from storage import storage_manager
+from bot.messaging import send_safe_message
+import tiktoken
 import config
 
 logger = logging.getLogger(__name__)
@@ -74,7 +76,6 @@ async def show_context_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     # Heuristic is fine for speed, but user requested accuracy.
     # Let's try to use tiktoken if available, else fallback.
     try:
-        import tiktoken
         encoding = tiktoken.get_encoding("cl100k_base")
         block_tokens = len(encoding.encode(block_text))
     except Exception:
@@ -90,7 +91,6 @@ async def show_context_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     # Global calc - Iterate all blocks
     total_tokens = 0
     try:
-        import tiktoken
         encoding = tiktoken.get_encoding("cl100k_base")
         for b in blocks:
             for m in b:
@@ -211,7 +211,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         if assistant_contents:
             joined_response = "\n\n".join(assistant_contents)
             await query.answer("Resending...", show_alert=False)
-            from bot.messaging import send_safe_message
             await send_safe_message(context, update, joined_response)
         else:
             await query.answer("No AI response found in this interaction to resend.", show_alert=True)

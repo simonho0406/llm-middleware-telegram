@@ -27,19 +27,39 @@ async def get_settings_summary_text(chat_id: int) -> str:
     """Builds a read-only markdown summary of user settings."""
     summary_parts = ["*Current Bot Settings:*"]
     for key, details in USER_SETTINGS.items():
+        if details['type'] != bool:
+            continue
         current_value = await storage_manager.get_user_setting(
             chat_id, key, details['default']
         )
         status = "Enabled" if current_value else "Disabled"
+        desc = details.get('description', '')
         summary_parts.append(f"\\- `{details['display_name']}`: *{status}*")
+        if desc:
+            summary_parts.append(f"  _{desc}_")
     
     summary_parts.append("\nTo change these, please ensure no panel discussion is active and use /config")
     return "\n".join(summary_parts)
+
+def _build_settings_description_text() -> str:
+    """Builds a description block explaining each boolean setting."""
+    lines = ["⚙️ *User Settings*\n"]
+    for key, details in USER_SETTINGS.items():
+        if details['type'] != bool:
+            continue
+        desc = details.get('description', '')
+        if desc:
+            lines.append(f"• *{details['display_name']}* — _{desc}_")
+    lines.append("\nTap a toggle to change:")
+    return "\n".join(lines)
+
 
 async def build_settings_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     """Dynamically builds the settings keyboard based on the registry."""
     buttons = []
     for key, details in USER_SETTINGS.items():
+        if details['type'] != bool:
+            continue
         current_value = await storage_manager.get_user_setting(
             chat_id, key, details['default']
         )
@@ -68,7 +88,8 @@ async def config_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     logger.debug(f"Config entry point accessed for chat {chat_id} - clearing any stale states")
     
     keyboard = await build_settings_keyboard(chat_id)
-    await send_safe_message(context, update, "User Settings:", reply_markup=keyboard)
+    description_text = _build_settings_description_text()
+    await send_safe_message(context, update, description_text, reply_markup=keyboard)
     return CONFIG_MENU
 
 async def handle_setting_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:

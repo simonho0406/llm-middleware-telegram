@@ -24,9 +24,11 @@ from telegram.error import BadRequest
 import config
 from bot import providers
 from storage import storage_manager
-from bot.messaging import send_safe_message
+from bot.messaging import send_safe_message, send_plain_message
 from services import web_search_service
 from bot.response_generator import _generate_and_send_response
+from utils.hooks import hook_runner
+from utils.context_manager import get_model_context_limits, truncate_text_to_tokens, ensure_context_fits
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +112,6 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
 
     logger.info(f"{log_prefix}User {user_id} initiated /search with queries: {query_display_text}")
 
-    from utils.hooks import hook_runner
     try:
         hook_query = search_queries[0] if is_multi_search else query
         hook_runner.run_pre_tool_use('search', {'query': hook_query, 'user_id': user_id, 'chat_id': chat_id})
@@ -125,7 +126,6 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
     context.chat_data['llm_task'] = asyncio.current_task()
 
     try:
-        from bot.messaging import send_plain_message
         if placeholder_message is None:
             placeholder_message = await send_plain_message(context, chat_id, f'Searching the web for: {query_display_text}...')
         else:
@@ -177,7 +177,6 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
     service = provider_config['service']
     model_to_use = await storage_manager.get_thread_key(chat_id, 'model', provider_config['default_model'])
 
-    from utils.context_manager import get_model_context_limits, truncate_text_to_tokens, ensure_context_fits
     limits = get_model_context_limits(model_to_use, session_provider)
     # First-pass safety net: cap absurdly large web scrapes to 50% of model limit
     max_search_tokens = int(limits.effective_input_limit * 0.5)

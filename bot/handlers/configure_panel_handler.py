@@ -1,5 +1,7 @@
 import logging
 import json
+import asyncio
+import copy
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, constants
 from telegram.ext import (
     ContextTypes, ConversationHandler, CommandHandler, 
@@ -221,7 +223,6 @@ async def handle_model_selection(update: Update, context: ContextTypes.DEFAULT_T
     
     await send_safe_message(context, update, confirmation_text)
     
-    import asyncio
     await asyncio.sleep(2)
     
     return await show_main_menu(update, context)
@@ -251,7 +252,6 @@ async def handle_reset_config(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     await send_safe_message(context, update, "🔄 *Configuration Reset*\n\nAll settings have been reset to defaults.\nReturning to menu...")
     
-    import asyncio
     await asyncio.sleep(2)
     
     return await show_main_menu(update, context)
@@ -279,7 +279,6 @@ async def cancel_configure_panel(update: Update, context: ContextTypes.DEFAULT_T
 def deep_merge_configs(base_config: dict, user_overrides: dict) -> dict:
     if not isinstance(user_overrides, dict):
         return base_config
-    import copy
     merged = copy.deepcopy(base_config)
     for key, value in user_overrides.items():
         if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
@@ -289,7 +288,6 @@ def deep_merge_configs(base_config: dict, user_overrides: dict) -> dict:
     return merged
 
 async def load_panel_config(chat_id: int) -> dict:
-    import copy
     default_config = copy.deepcopy(config.get_expert_panel_config())
     try:
         custom_overrides_json = await storage_manager.get_user_setting(chat_id, 'panel_config', None)

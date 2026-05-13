@@ -9,6 +9,7 @@ import time
 import asyncio
 import re
 import json
+import random
 import tiktoken
 from telegram import Update, constants, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import MessageHandler, filters, ContextTypes
@@ -19,7 +20,7 @@ from services import ollama_service, gemini_service, openrouter_service
 from services.openai_compatible_service import OpenAICompatibleService
 
 from storage import storage_manager
-from bot.messaging import send_safe_message, finalize_draft
+from bot.messaging import send_safe_message, finalize_draft, send_draft_message
 from utils.context_manager import ensure_context_fits
 from bot.settings import USER_SETTINGS
 
@@ -120,7 +121,7 @@ def _extract_and_process_search_tags(raw_response: str, autosearch_enabled: bool
 
     return raw_response.strip(), extracted_search_queries
 
-async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: int, prompt: str, is_reroll: bool = False, force_truncate: bool = False, operation_id: str = "chat_response") -> dict:
+async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: int, prompt: str, is_reroll: bool = False, force_truncate: bool = False, operation_id: str = "chat_response", is_retry: bool = False) -> dict:
     """
     Core LLM response generation logic, decoupled from message formatting and sending.
     Returns a response dict with 'content', 'error', 'truncated_history', and 'provider_info'.
@@ -133,8 +134,6 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
     session_provider, model_to_use, provider_config, service, provider_info = await _get_provider_configuration(chat_id, log_prefix)
 
     # Automatically ensure context fits within model limits
-    from utils.context_manager import ensure_context_fits
-
     safety_margin = 0.75 if force_truncate else 1.0
 
     final_history, context_info = await ensure_context_fits(
@@ -168,9 +167,6 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
         else:
              augmented_prompt = prompt
 
-        import random
-        from bot.messaging import send_draft_message
-        
         enable_streaming = config.get_enable_streaming()
         if provider_config.get('enable_streaming') is False:
              enable_streaming = False
@@ -228,10 +224,25 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
     if not final_content:
         if not force_truncate and not llm_error_reported_by_model:
              logger.exception(f"{log_prefix}Empty response received from model. Retrying with forced context truncation...")
-             return await _generate_llm_response(context, chat_id, prompt, is_reroll, force_truncate=True, operation_id=operation_id)
+             return await _generate_llm_response(context, chat_id, prompt, is_reroll, force_truncate=True, operation_id=operation_id, is_retry=is_retry)
         
         final_content = "[Error: The AI returned an empty response. This might be due to a content filter or an issue with the selected model. Please try rerolling or using a different model.]"
         llm_error_reported_by_model = True
+
+    # Auto-retry: If we got an error and this is not already a retry, check the user setting
+    if llm_error_reported_by_model and not is_retry:
+        auto_retry = await storage_manager.get_user_setting(
+            chat_id, 'auto_retry_on_error',
+            USER_SETTINGS['auto_retry_on_error']['default']
+        )
+        if auto_retry:
+            logger.warning(f"{log_prefix}LLM error detected. Auto-retrying once...")
+            return await _generate_llm_response(
+                context, chat_id, prompt, is_reroll,
+                force_truncate=force_truncate,
+                operation_id=operation_id,
+                is_retry=True
+            )
 
     return {
         'content': final_content,
@@ -259,8 +270,8 @@ async def _generate_and_send_response_task(update: Update, context: ContextTypes
                 context.chat_data['pending_user_message_pk'] = pk
         except Exception as e:
             logger.exception(f"{log_prefix}Failed to save/update initial state: {e}")
-            # Proceeding might be risky if we can't save, but we try to answer anyway?
-            # Ideally we should warn, but let's proceed.
+            await send_safe_message(context, update, "⚠️ An error occurred while saving your message. Please try again.")
+            return
     else:
         logger.info(f"{log_prefix}Skipping input archival (skip_save=True)")
 
@@ -273,6 +284,7 @@ async def _generate_and_send_response_task(update: Update, context: ContextTypes
         return
 
     if response_data.get('search_queries'):
+        # Inline import prevents circular dependency since misc_commands imports _generate_and_send_response
         from .handlers import misc_commands
         logger.info(f"{log_prefix}Auto-search triggered. Delegating to search_command: {response_data['search_queries']}")
         await misc_commands.search_command(

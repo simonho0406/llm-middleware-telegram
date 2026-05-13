@@ -1,6 +1,7 @@
 import httpx
 import logging
 import config
+import asyncio
 from typing import List, Dict, Any
 
 logger = logging.getLogger(__name__)
@@ -90,8 +91,6 @@ async def _google_search(query: str) -> dict:
     except Exception as e:
         logger.exception(f"An unexpected error occurred during Google Search: {e}")
         return {'status': 'error', 'message': "An unexpected error occurred during the Google search."}
-
-import asyncio
 
 async def execute_parallel_google_searches(queries: list[str]) -> dict:
     """

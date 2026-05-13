@@ -19,7 +19,9 @@ from services import web_search_service
 from bot.menu_setup import setup_bot_commands_and_menu
 from storage import storage_manager
 from bot.settings import USER_SETTINGS  # Added for settings access
-from bot.messaging import send_safe_message
+from bot.messaging import send_safe_message, send_plain_message
+from bot.handlers.configure_panel_handler import load_panel_config
+from utils.context_manager import ensure_context_fits, get_model_context_limits, truncate_text_to_tokens
 from .misc_commands import cancel_command
 from bot.errors import ProviderUnavailableError
 
@@ -438,7 +440,6 @@ async def _run_panel_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE
     # Validate expert panel configuration
     try:
         # Import the necessary helper functions
-        from bot.handlers.configure_panel_handler import load_panel_config
 
         # Use the centralized function to load and merge the config
         panel_config = await load_panel_config(chat_id)
@@ -517,7 +518,6 @@ async def _run_panel_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE
     plan_template = config.PROMPTS.get_prompt('panel_orchestrator_plan')
     
     # Trim the injected history to prevent context overflow for the orchestrator
-    from utils.context_manager import ensure_context_fits
     # Estimate base prompt size without history
     base_prompt_est = plan_template.format(user_prompt=user_prompt, full_history_json="")
     trimmed_history, _ = await ensure_context_fits(
@@ -655,7 +655,6 @@ async def _run_panel_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE
     logger.info(f"Successfully parsed orchestrator's plan. Search required: {requires_search}, Tasks: {len(tasks_list)}")
     
     # Store the tasks in the SQLite Scratchpad for Agentic context injection
-    from storage import storage_manager
     if hasattr(storage_manager, 'clear_panel_tasks') and storage_manager.clear_panel_tasks:
         try:
             await storage_manager.clear_panel_tasks(chat_id)
@@ -733,7 +732,6 @@ async def _run_panel_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE
                             # Augment Proposer's prompt with the combined research dossier
                             proposer_task = next((task for task in tasks_list if task.get("role") == "Proposer"), None)
                             if proposer_task:
-                                from utils.context_manager import get_model_context_limits, truncate_text_to_tokens
                                 role_configs = panel_config.get('roles', {})
                                 proposer_config = role_configs.get('Proposer', {})
                                 proposer_provider_name = proposer_config.get('provider', config.get_default_provider())
@@ -849,7 +847,6 @@ async def _run_panel_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE
     # If a Refiner is configured, the synthesis result feeds into the Refiner;
     # otherwise, it goes directly to the orchestrator's synthesizer.
     # We use the orchestrator model as the conservative baseline for truncation.
-    from utils.context_manager import ensure_context_fits
     base_synthesis_est = synthesis_template.format(
         full_history="",
         user_prompt=user_prompt,
@@ -982,7 +979,6 @@ async def _run_panel_task_background(update: Update, context: ContextTypes.DEFAU
     except Exception as e:
         logger.error(f"Panel workflow failed in background task: {e}", exc_info=True)
         
-        from bot.messaging import send_plain_message
         error_message = f"An error occurred: {str(e)}"
         try:
             if assembling_msg:
@@ -1002,7 +998,6 @@ async def start_panel_discussion(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text("Usage: /discuss_panel <topic>", parse_mode=None)
         return ConversationHandler.END
 
-    from bot.messaging import send_plain_message
     try:
         assembling_msg = await send_plain_message(
             context,
@@ -1361,11 +1356,9 @@ async def reroll_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             error_message = f"An error occurred during the reroll: `{escaped_error}`"
             try:
                 if placeholder_msg:
-                    from bot.messaging import send_plain_message
                     # Use edit_text for an existing message
                     await placeholder_msg.edit_text(error_message, parse_mode=None)
                 else:
-                    from bot.messaging import send_plain_message
                     # Fallback to send_plain_message if placeholder doesn't exist
                     await send_plain_message(context, chat_id, error_message)
             except Exception as send_e:
@@ -1409,7 +1402,6 @@ async def timeout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         #     except Exception as e:
         #         logger.error(f"Failed to save final answer during timeout for chat {chat_id}: {e}")
 
-        from bot.messaging import send_plain_message
         await send_plain_message(context, chat_id, "Panel discussion has timed out due to inactivity.")
         await _cleanup_discussion_state(context, chat_id)
     return ConversationHandler.END

@@ -19,7 +19,7 @@ import re # Import regex for parsing grades
 import config
 from services import ollama_service, gemini_service, openrouter_service, openai_compatible_service
 from storage import storage_manager
-from bot.messaging import send_safe_message
+from bot.messaging import send_safe_message, send_plain_message
 from bot import providers # Ensure this import exists
 
 logger = logging.getLogger(__name__)
@@ -377,7 +377,6 @@ async def _execute_council_flow(update: Update, context: ContextTypes.DEFAULT_TY
             pass 
             
         # Send a FRESH status message
-        from bot.messaging import send_plain_message
         status_message = await send_plain_message(
             context,
             chat_id,
@@ -424,6 +423,12 @@ async def _execute_council_flow(update: Update, context: ContextTypes.DEFAULT_TY
         context.user_data['pending_council_message_pk'] = pk
     except Exception as e:
         logger.exception(f"Failed to save user prompt: {e}")
+        if status_message:
+            try:
+                await status_message.edit_text("⚠️ An error occurred while saving your message. Please try again.")
+            except BadRequest:
+                pass
+        return ConversationHandler.END
 
     try:
         await storage_manager.set_user_setting(chat_id, "last_ask_selected_models", json.dumps(selected_list))
@@ -633,7 +638,6 @@ async def conversation_timeout(update: Update, context: ContextTypes.DEFAULT_TYP
         if update.callback_query:
             await update.callback_query.edit_message_text("Model selection timed out.")
         elif update.message:
-             from bot.messaging import send_plain_message
              await send_plain_message(context, chat_id, "Model selection timed out.")
     except Exception as e:
         logger.exception(f"Error sending timeout message: {e}")

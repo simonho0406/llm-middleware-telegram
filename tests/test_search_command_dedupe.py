@@ -27,7 +27,7 @@ async def test_search_deduplication():
             with patch('bot.handlers.misc_commands.providers') as mock_providers:
                 # Mock messaging
                 with patch('bot.handlers.misc_commands.send_safe_message') as mock_send_msg, \
-                     patch('bot.messaging.send_plain_message', new_callable=AsyncMock) as mock_send_plain:
+                     patch('bot.handlers.misc_commands.send_plain_message', new_callable=AsyncMock) as mock_send_plain:
                     
                     # Mock config default provider
                     with patch('bot.handlers.misc_commands.config') as mock_config:
@@ -103,7 +103,7 @@ async def test_search_reply_handling():
         with patch('bot.handlers.misc_commands.web_search_service') as mock_search:
             with patch('bot.handlers.misc_commands.providers') as mock_providers:
                 with patch('bot.handlers.misc_commands.send_safe_message') as mock_send_msg, \
-                     patch('bot.messaging.send_plain_message', new_callable=AsyncMock) as mock_send_plain:
+                     patch('bot.handlers.misc_commands.send_plain_message', new_callable=AsyncMock) as mock_send_plain:
                     # Mock config default provider
                     with patch('bot.handlers.misc_commands.config') as mock_config:
                         mock_config.get_default_provider.return_value = 'ollama'

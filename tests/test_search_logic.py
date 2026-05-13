@@ -25,7 +25,7 @@ async def test_search_instruction_logic():
                  'mock_provider': {'service': mock_service, 'default_model': 'm'}
              }
              
-             with patch('utils.context_manager.ensure_context_fits', new_callable=AsyncMock) as mock_fits:
+             with patch('bot.response_generator.ensure_context_fits', new_callable=AsyncMock) as mock_fits:
                  mock_fits.return_value = ([], "info")
                  
                  mock_context = MagicMock()
@@ -55,7 +55,7 @@ async def test_search_instruction_logic():
                  'mock_provider': {'service': mock_service, 'default_model': 'm'}
              }
              
-             with patch('utils.context_manager.ensure_context_fits', new_callable=AsyncMock) as mock_fits:
+             with patch('bot.response_generator.ensure_context_fits', new_callable=AsyncMock) as mock_fits:
                  mock_fits.return_value = ([], "info")
                  
                  mock_context = MagicMock()
@@ -89,7 +89,7 @@ async def test_panel_labeling():
                  'mock_provider': {'service': mock_service, 'default_model': 'm'}
              }
              
-             with patch('utils.context_manager.ensure_context_fits', new_callable=AsyncMock) as mock_fits:
+             with patch('bot.response_generator.ensure_context_fits', new_callable=AsyncMock) as mock_fits:
                  mock_fits.return_value = ([], "info")
                  
                  mock_context = MagicMock()
