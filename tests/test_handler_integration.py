@@ -16,6 +16,7 @@ async def test_panel_workflow_with_advanced_search(caplog, advanced_search_enabl
     caplog.set_level(logging.INFO)
     update = MagicMock()
     context = MagicMock()
+    context.application.bot_data = {}  # prevent MagicMock from faking mcp_service
     placeholder_msg = AsyncMock()
     chat_id = 12345
     user_prompt = "What is the 'halting problem' in computer science?"
@@ -23,17 +24,17 @@ async def test_panel_workflow_with_advanced_search(caplog, advanced_search_enabl
     # CORRECTED MOCK: Use a side_effect to handle different settings
     # Mock the LLM calls
     llm_side_effects = [
-        {'response': '{"requires_search": true, "search_query": "halting problem", "tasks": [{"role": "Proposer", "prompt": "p"}, {"role": "Critic", "prompt": "c"}]}', 'retries': 0, 'fallback_used': False},
+        {'response': '{"requires_search": true, "search_query": "halting problem", "tasks": [{"role": "Proposer", "prompt": "p"}, {"role": "Critic", "prompt": "c"}]}', 'retries': 0, 'fallback_used': False, 'is_error': False},
     ]
     if should_run_advanced_search:
         llm_side_effects.extend([
-            {'response': '["implications of halting problem", "Turing machines"]', 'retries': 0, 'fallback_used': False},
+            {'response': '["implications of halting problem", "Turing machines"]', 'retries': 0, 'fallback_used': False, 'is_error': False},
         ])
     llm_side_effects.extend([
-        {'response': 'Proposer response.', 'retries': 0, 'fallback_used': False},
-        {'response': 'Critic response.', 'retries': 0, 'fallback_used': False},
-        {'response': '{"quality_score": 95}', 'retries': 0, 'fallback_used': False},
-        {'response': '{"quality_score": 95}', 'retries': 0, 'fallback_used': False},
+        {'response': 'Proposer response.', 'retries': 0, 'fallback_used': False, 'is_error': False},
+        {'response': 'Critic response.', 'retries': 0, 'fallback_used': False, 'is_error': False},
+        {'response': '{"quality_score": 95}', 'retries': 0, 'fallback_used': False, 'is_error': False},
+        {'response': '{"quality_score": 95}', 'retries': 0, 'fallback_used': False, 'is_error': False},
         MagicMock(), # Add a mock for the final call
     ])
     mock_llm_call = AsyncMock(side_effect=llm_side_effects)

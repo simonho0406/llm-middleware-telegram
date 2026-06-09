@@ -1,5 +1,7 @@
 # Ticket: Migrate Gemini Service to `google-genai` SDK
 
+**Status:** ✅ Completed & Verified
+
 ## Context
 The `google.generativeai` package is now deprecated and Enf-of-Life (EOL). Google has released a new SDK `google-genai` (v1.0+) which is incompatible with the old API.
 Startup logs currently show a `FutureWarning` advising immediate migration.

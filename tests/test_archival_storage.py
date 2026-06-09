@@ -13,13 +13,14 @@ from bot import response_generator
 import config
 
 # Setup temporary DB for testing
-TEST_DB_PATH = "./test_archival.db"
+original_db_path = config.DB_PATH
 
 @pytest_asyncio.fixture
-async def setup_db():
-    config.DB_PATH = TEST_DB_PATH
-    if os.path.exists(TEST_DB_PATH):
-        os.remove(TEST_DB_PATH)
+async def setup_db(tmp_path):
+    test_db = tmp_path / "test_archival.db"
+    global original_db_path
+    original_db_path = config.DB_PATH
+    config.DB_PATH = str(test_db)
     
     await database_storage.init_database()
     
@@ -31,8 +32,7 @@ async def setup_db():
     
     yield
     
-    if os.path.exists(TEST_DB_PATH):
-        os.remove(TEST_DB_PATH)
+    config.DB_PATH = original_db_path
 
 @pytest.mark.asyncio
 async def test_append_message(setup_db):
@@ -57,7 +57,7 @@ async def test_timestamp_stability(setup_db):
     # Insert first message
     await database_storage.save_message(chat_id, "user", "Msg 1")
     
-    async with aiosqlite.connect(TEST_DB_PATH) as db:
+    async with aiosqlite.connect(config.DB_PATH) as db:
         async with db.execute("SELECT timestamp FROM messages WHERE content = 'Msg 1'") as cursor:
             ts1 = (await cursor.fetchone())[0]
             
@@ -67,7 +67,7 @@ async def test_timestamp_stability(setup_db):
     # Insert second message
     await database_storage.save_message(chat_id, "assistant", "Msg 2")
     
-    async with aiosqlite.connect(TEST_DB_PATH) as db:
+    async with aiosqlite.connect(config.DB_PATH) as db:
         async with db.execute("SELECT timestamp FROM messages WHERE content = 'Msg 1'") as cursor:
             ts1_new = (await cursor.fetchone())[0]
         async with db.execute("SELECT timestamp FROM messages WHERE content = 'Msg 2'") as cursor:

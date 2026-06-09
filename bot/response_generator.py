@@ -16,7 +16,7 @@ from telegram.ext import MessageHandler, filters, ContextTypes
 from telegram.error import RetryAfter, TimedOut, BadRequest
 import config
 from bot import providers
-from services import ollama_service, gemini_service, openrouter_service
+from services import ollama_service, gemini_service
 from services.openai_compatible_service import OpenAICompatibleService
 
 from storage import storage_manager
@@ -25,6 +25,50 @@ from utils.context_manager import ensure_context_fits
 from bot.settings import USER_SETTINGS
 
 logger = logging.getLogger(__name__)
+
+
+def _build_tool_catalog_section(mcp_tools: list, skill_tools: list) -> str:
+    """
+    Builds a markdown section listing active MCP servers and skills for injection
+    into the system prompt.  Grouped by server so the model understands what
+    each data source is for; individual tool schemas are already passed via the
+    tools= API parameter.
+    """
+    if not mcp_tools and not skill_tools:
+        return ""
+
+    lines = ["\n\n---\n\n# Connected Tools\n"]
+
+    if mcp_tools:
+        by_server: dict[str, list] = {}
+        for tool in mcp_tools:
+            name = tool["function"]["name"]
+            server = name.split("__")[0] if "__" in name else name
+            by_server.setdefault(server, []).append(tool)
+
+        lines.append("## MCP Servers\n")
+        for server, tools in sorted(by_server.items()):
+            count = len(tools)
+            samples = [
+                (n.split("__", 1)[1] if "__" in n else n)
+                for t in tools[:3]
+                for n in [t["function"]["name"]]
+            ]
+            sample_str = ", ".join(f"`{s}`" for s in samples)
+            if count > 3:
+                sample_str += f" … ({count} total)"
+            lines.append(f"- **{server}** — {count} tool(s). Example calls: {sample_str}")
+        lines.append("")
+
+    if skill_tools:
+        lines.append("## Skills\n")
+        for tool in skill_tools:
+            fn = tool["function"]
+            desc = fn.get("description", "")
+            lines.append(f"- **{fn['name']}** — {desc}" if desc else f"- **{fn['name']}**")
+        lines.append("")
+
+    return "\n".join(lines)
 
 async def _generate_and_send_response(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int, prompt: str, current_thread_id: str, is_reroll: bool = False, force_truncate: bool = False, placeholder_message = None, skip_save: bool = False, task_key: str = 'llm_task') -> None:
     """Wraps the response generation in a cancellable task."""
@@ -131,6 +175,13 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
     context_history = await storage_manager.get_thread_history(chat_id)
     processed_history = await _process_history_for_llm(context_history, prompt, is_reroll, log_prefix)
 
+    # Dynamically inject CHAT_SYSTEM_PROMPT into historical context before truncation and generation
+    try:
+        system_prompt = config.PROMPTS.get_prompt('CHAT_SYSTEM_PROMPT')
+        processed_history = [{"role": "system", "content": system_prompt}] + processed_history
+    except Exception as e:
+        logger.warning(f"{log_prefix}Failed to dynamically inject CHAT_SYSTEM_PROMPT: {e}")
+
     session_provider, model_to_use, provider_config, service, provider_info = await _get_provider_configuration(chat_id, log_prefix)
 
     # Automatically ensure context fits within model limits
@@ -155,71 +206,243 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
         USER_SETTINGS['autosearch_chat']['default']
     )
 
+    enable_mcp = await storage_manager.get_user_setting(
+        chat_id,
+        'enable_mcp',
+        USER_SETTINGS['enable_mcp']['default']
+    )
+
+    enable_skills = await storage_manager.get_user_setting(
+        chat_id,
+        'enable_skills',
+        USER_SETTINGS['enable_skills']['default']
+    )
+
+    from utils.service_registry import get_or_init_mcp_service, get_or_init_skill_service
+    app = getattr(context, 'application', None)
+    mcp_service = await get_or_init_mcp_service(app, enable_mcp)
+    skill_service = await get_or_init_skill_service(app, enable_skills)
+
+    # Pre-fetch tools once — sessions don't change mid-conversation.
+    # This also lets us build the tool catalog for the system prompt.
+    _mcp_tools: list = []
+    _skill_tools: list = []
+    if enable_mcp and mcp_service:
+        _mcp_tools = await mcp_service.get_all_tools()
+    if enable_skills and skill_service:
+        _skill_tools = skill_service.get_skills_as_tools()
+
+    # Inject live tool catalog into the system message so the model knows
+    # what servers are connected and can make informed routing decisions.
+    catalog_section = _build_tool_catalog_section(_mcp_tools, _skill_tools)
+    if catalog_section:
+        # truncated_history[0] is the system message (preserved by ensure_context_fits)
+        if truncated_history and truncated_history[0].get("role") == "system":
+            truncated_history[0] = {
+                **truncated_history[0],
+                "content": truncated_history[0]["content"] + catalog_section,
+            }
+
     raw_full_llm_response = ""
     llm_error_reported_by_model = False
 
-    try:
-        logger.info(f"{log_prefix}Starting LLM generation...")
+    # Tracked background tasks set for safe cleanup on cancellation
+    bg_tasks = context.chat_data.setdefault('_bg_tasks', set())
 
-        if autosearch_enabled:
-             search_instruction = "If you need to perform a web search for current information, include the search query inside <search> tags like <search>latest news on the Artemis mission</search>, but ALWAYS also provide your best answer based on your existing knowledge after the search tags."
-             augmented_prompt = f"{search_instruction}\n\n{prompt}"
-        else:
-             augmented_prompt = prompt
+    def _track_task(coro):
+        """Create a tracked fire-and-forget task."""
+        task = asyncio.create_task(coro)
+        bg_tasks.add(task)
+        task.add_done_callback(bg_tasks.discard)
+        return task
 
-        enable_streaming = config.get_enable_streaming()
-        if provider_config.get('enable_streaming') is False:
-             enable_streaming = False
-             
+    enable_streaming = config.get_enable_streaming()
+    if provider_config.get('enable_streaming') is False:
+         enable_streaming = False
+
+    MAX_TOOL_TURNS = 5
+    augmented_prompt = prompt
+    if autosearch_enabled:
+         search_instruction = "If you need to perform a web search for current information, include the search query inside <search> tags like <search>latest news on the Artemis mission</search>, but ALWAYS also provide your best answer based on your existing knowledge after the search tags."
+         augmented_prompt = f"{search_instruction}\n\n{prompt}"
+
+    for turn in range(MAX_TOOL_TURNS):
+        # 1. Use the pre-fetched tool list (avoid redundant MCP round-trips per turn)
+        tools = list(_mcp_tools) + list(_skill_tools)
+            
+        # 2. Call LLM
+        raw_full_llm_response = ""
+        llm_error_reported_by_model = False
+        
+        # We need a draft ID for this turn
         draft_id = random.randint(100000, 999999)
         last_draft_time = time.time()
         draft_throttle_seconds = 0.5
         
-        # Tracked background tasks set for safe cleanup on cancellation
-        bg_tasks = context.chat_data.setdefault('_bg_tasks', set())
-        
-        def _track_task(coro):
-            """Create a tracked fire-and-forget task."""
-            task = asyncio.create_task(coro)
-            bg_tasks.add(task)
-            task.add_done_callback(bg_tasks.discard)
-            return task
-
         if enable_streaming:
             old_draft_id = context.chat_data.get('active_draft_id')
             if old_draft_id is not None:
-                logger.debug(f"{log_prefix}Evicting previous draft {old_draft_id} for new draft {draft_id}")
                 _track_task(finalize_draft(context, chat_id, old_draft_id))
             context.chat_data['active_draft_id'] = draft_id
-
-        async for chunk in service.generate_response(model=model_to_use, prompt=augmented_prompt, context_history=truncated_history):
-            if chunk.startswith("[Error:") or chunk.startswith("Error:"):
-                raw_full_llm_response = chunk
-                llm_error_reported_by_model = True
-                break
-            raw_full_llm_response += chunk
             
-            if enable_streaming and (time.time() - last_draft_time) > draft_throttle_seconds:
-                if context.chat_data.get('active_draft_id') == draft_id:
-                    _track_task(send_draft_message(context, chat_id, draft_id, raw_full_llm_response + " █"))
-                last_draft_time = time.time()
+        try:
+            logger.info(f"{log_prefix}Starting LLM generation (Turn {turn})...")
+            async for chunk in service.generate_response(
+                model=model_to_use,
+                prompt=augmented_prompt,
+                context_history=truncated_history,
+                tools=tools if tools else None
+            ):
+                raw_full_llm_response += chunk
+                
+                if enable_streaming and (time.time() - last_draft_time) > draft_throttle_seconds:
+                    if context.chat_data.get('active_draft_id') == draft_id:
+                        _track_task(send_draft_message(context, chat_id, draft_id, raw_full_llm_response + " █"))
+                    last_draft_time = time.time()
+                    
+            if enable_streaming and context.chat_data.get('active_draft_id') == draft_id:
+                _track_task(finalize_draft(context, chat_id, draft_id))
+                context.chat_data.pop('active_draft_id', None)
 
-        if enable_streaming and context.chat_data.get('active_draft_id') == draft_id:
-            _track_task(finalize_draft(context, chat_id, draft_id))
-            context.chat_data.pop('active_draft_id', None)
+            # Check the fully-assembled response for the error sentinel — only the
+            # bracket-delimited form [Error: ...] is the provider sentinel; checking
+            # individual streaming chunks risks false positives on partial sentences.
+            if raw_full_llm_response.lstrip().startswith("[Error:"):
+                llm_error_reported_by_model = True
 
-        if not llm_error_reported_by_model:
-            logger.info(f"{log_prefix}LLM generation complete. Length: {len(raw_full_llm_response)}")
+            if llm_error_reported_by_model:
+                break
 
-    except Exception as e:
-        logger.exception(f"{log_prefix}Critical error during LLM stream: {e}")
-        raw_full_llm_response = "[Error: An unexpected error occurred while communicating with the AI.]"
-        llm_error_reported_by_model = True
+            logger.info(f"{log_prefix}LLM generation complete for Turn {turn}. Length: {len(raw_full_llm_response)}")
+            
+        except Exception as e:
+            logger.exception(f"{log_prefix}Critical error during LLM stream: {e}")
+            raw_full_llm_response = "[Error: An unexpected error occurred while communicating with the AI.]"
+            llm_error_reported_by_model = True
+            break
+            
+        # Check if the output is a tool call request.
+        # Use rfind to handle thinking/reasoning models (e.g. Gemini Flash Thinking) that
+        # emit text before the tool-call JSON, producing: "reasoning text...{\"tool_calls\":[...]}"
+        is_tool_call = False
+        parsed_tool_calls = []
+        try:
+            cleaned_response = raw_full_llm_response.strip()
+            json_start = cleaned_response.rfind('{"tool_calls"')
+            if json_start >= 0:
+                parsed = json.loads(cleaned_response[json_start:])
+                if isinstance(parsed, dict) and "tool_calls" in parsed:
+                    is_tool_call = True
+                    parsed_tool_calls = parsed["tool_calls"]
+        except json.JSONDecodeError as e:
+            logger.warning(f"{log_prefix}Turn {turn}: Malformed tool_calls JSON at pos {json_start}: {e}. Treating as plain text.")
+        except Exception as e:
+            logger.exception(f"{log_prefix}Turn {turn}: Unexpected error parsing tool call response: {e}")
 
-    final_content, extracted_search_queries = _extract_and_process_search_tags(raw_full_llm_response, autosearch_enabled, log_prefix)
+        if is_tool_call and parsed_tool_calls:
+            logger.info(f"{log_prefix}Turn {turn}: Tool call request detected: {parsed_tool_calls}")
+            
+            # If we used an augmented user prompt, we must append it to context history
+            if augmented_prompt:
+                truncated_history.append({"role": "user", "content": augmented_prompt})
+                augmented_prompt = None # Reset so we don't pass it again
+                
+            # Defensively call save_message
+            save_kwargs = {}
+            if config.get_storage_backend() == "database":
+                save_kwargs["tool_calls"] = parsed_tool_calls
+            await storage_manager.save_message(chat_id, "assistant", None, **save_kwargs)
+            
+            # Add to memory history
+            truncated_history.append({
+                "role": "assistant",
+                "content": None,
+                "tool_calls": parsed_tool_calls
+            })
+            
+            for tc in parsed_tool_calls:
+                tc_id = tc.get("id")
+                func = tc.get("function", {})
+                tool_name = func.get("name")
+                args_str = func.get("arguments", "{}")
+                
+                try:
+                    args = json.loads(args_str) if isinstance(args_str, str) else args_str
+                except Exception:
+                    args = {"arguments": args_str}
+                    
+                # a. Send dynamic progress message
+                progress_text = f"🔧 Executing {tool_name}..."
+                temp_draft_id = random.randint(100000, 999999)
+                await send_draft_message(context, chat_id, temp_draft_id, f"[{progress_text}]")
+                
+                # b. Validate tool call with hook_runner
+                from utils.hooks import hook_runner
+                tool_result = ""
+                try:
+                    hook_runner.run_pre_tool_use(tool_name, {"arguments": args})
+                    
+                    # c. Execute tool.
+                    # skill_ checked BEFORE __ to prevent a skill named `server__foo`
+                    # from being misrouted to MCP execution.
+                    if tool_name.startswith("skill_"):
+                        skill_name = tool_name[len("skill_"):]
+                        if skill_service:
+                            tool_result = skill_service.get_skill_playbook(skill_name)
+                        else:
+                            tool_result = "[Error: Skill Registry Service is not initialized]"
+                    elif "__" in tool_name:
+                        from utils.service_registry import touch_mcp_last_used
+                        touch_mcp_last_used(app)  # keep watchdog from shutting down mid-call
+                        parts = tool_name.split("__", 1)
+                        server, tool = parts[0], parts[1]
+                        if mcp_service:
+                            tool_result = await mcp_service.execute_tool(server, tool, args)
+                        else:
+                            tool_result = "[Error: MCP Client Service is not initialized]"
+                    else:
+                        tool_result = f"[Error: Unknown tool namespace '{tool_name}']"
+                        
+                except PermissionError as pe:
+                    logger.warning(f"{log_prefix}Hook runner blocked tool {tool_name}: {pe}")
+                    tool_result = f"[Error: Permission denied by hook validation: {str(pe)}]"
+                except Exception as e:
+                    logger.exception(f"{log_prefix}Exception executing tool {tool_name}: {e}")
+                    tool_result = f"[Error: Exception during tool execution: {str(e)}]"
+                    
+                # finalize progress draft
+                await finalize_draft(context, chat_id, temp_draft_id)
+                
+                # d. Save the system tool_result message
+                save_tool_kwargs = {}
+                if config.get_storage_backend() == "database":
+                    save_tool_kwargs["tool_call_id"] = tc_id
+                    
+                await storage_manager.save_message(chat_id, "tool", tool_result, **save_tool_kwargs)
+                
+                # Add tool response to memory history
+                truncated_history.append({
+                    "role": "tool",
+                    "tool_call_id": tc_id,
+                    "name": tool_name,
+                    "content": tool_result
+                })
+                
+            # e. Continue loop
+            continue
+            
+        else:
+            # Output is standard text: exit loop
+            break
+            
+    else:
+        logger.warning(f"{log_prefix}Maximum tool turns (5) reached!")
+        raw_full_llm_response = "[Warning: Maximum tool execution depth of 5 turns reached to prevent runaway billing or infinite loops.]"
 
-    # Strip <thinking> blocks — these are internal reasoning not meant for the user
-    final_content = re.sub(r'<thinking>.*?</thinking>\s*', '', final_content, flags=re.DOTALL).strip()
+    # Strip <thinking> blocks BEFORE search tag extraction so that <search> tags
+    # nested inside a model's internal monologue are never treated as real queries.
+    pre_processed = re.sub(r'<thinking>.*?</thinking>\s*', '', raw_full_llm_response, flags=re.DOTALL).strip()
+    final_content, extracted_search_queries = _extract_and_process_search_tags(pre_processed, autosearch_enabled, log_prefix)
 
     if not final_content:
         if not force_truncate and not llm_error_reported_by_model:

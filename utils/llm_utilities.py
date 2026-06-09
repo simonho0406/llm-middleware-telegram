@@ -40,6 +40,8 @@ async def get_robust_llm_response(
             - 'response': The LLM's response string or an error message.
             - 'retries': The number of retries used.
             - 'fallback_used': A boolean indicating if the fallback provider was used.
+            - 'is_error': True only when the response is an error sentinel, never when a
+              valid response happens to quote an error string as evidence.
     """
     last_error = None
     retries = 0
@@ -82,7 +84,7 @@ async def get_robust_llm_response(
                 raise ValueError(f"Provider returned error: {response}")
             
             logger.debug(f"{role_name} call succeeded on attempt {attempt + 1}")
-            return {'response': response, 'retries': retries, 'fallback_used': fallback_used}
+            return {'response': response, 'retries': retries, 'fallback_used': fallback_used, 'is_error': False}
             
         except asyncio.TimeoutError as e:
             last_error = f"Timeout after {request_timeout}s: {str(e)}"
@@ -127,7 +129,7 @@ async def get_robust_llm_response(
                 
                 if not response.startswith("[Error:") and not response.startswith("Error:"):
                     logger.info(f"{role_name} fallback succeeded")
-                    return {'response': f"[Fallback by {fallback_provider}] {response}", 'retries': retries, 'fallback_used': fallback_used}
+                    return {'response': f"[Fallback by {fallback_provider}] {response}", 'retries': retries, 'fallback_used': fallback_used, 'is_error': False}
                     
         except Exception as fallback_error:
             logger.exception(f"{role_name} fallback also failed: {fallback_error}")
@@ -135,7 +137,7 @@ async def get_robust_llm_response(
     # Both primary and fallback failed
     error_msg = f"[Error: {role_name} failed after {max_retries} attempts. Last error: {last_error}]"
     logger.error(error_msg)
-    return {'response': error_msg, 'retries': retries, 'fallback_used': fallback_used}
+    return {'response': error_msg, 'retries': retries, 'fallback_used': fallback_used, 'is_error': True}
 
 
 async def get_streaming_llm_response(

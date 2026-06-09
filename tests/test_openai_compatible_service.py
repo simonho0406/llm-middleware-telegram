@@ -95,9 +95,14 @@ async def test_generate_response_non_streaming():
     # Mock the AsyncOpenAI client and its methods
     mock_client = MagicMock()
     
-    # Mock the non-streaming response
+    # Mock the non-streaming response.
+    # Explicitly set tool_calls=None so the new tool-call branch doesn't fire
+    # (MagicMock auto-creates attributes which are truthy by default).
+    mock_message = MagicMock()
+    mock_message.content = "This is a non-streaming response."
+    mock_message.tool_calls = None
     mock_response = MagicMock()
-    mock_response.choices = [MagicMock(message=MagicMock(content="This is a non-streaming response."))]
+    mock_response.choices = [MagicMock(message=mock_message)]
     mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
     with patch('services.openai_compatible_service.AsyncOpenAI', return_value=mock_client) as mock_async_openai:

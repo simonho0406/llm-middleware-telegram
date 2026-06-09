@@ -8,7 +8,7 @@ You are a meticulous and expert research assistant. Your task is to analyze a us
 
 **PRELIMINARY SEARCH SUMMARY:**
 ---
-{tavily_results}
+{search_results}
 ---
 
 **YOUR TASK:**

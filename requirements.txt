@@ -12,3 +12,4 @@ backoff
 pytest
 pytest-asyncio
 markdown-it-py
+mcp

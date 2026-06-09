@@ -94,8 +94,8 @@ async def test_get_thread_history_with_pk_mock():
         
         # Mock fetchall
         mock_cursor.fetchall.return_value = [
-            (1, 'user', 'hi', 100),
-            (2, 'assistant', 'hello', 101)
+            (1, 'user', 'hi', 100, None, None),
+            (2, 'assistant', 'hello', 101, None, None)
         ]
         
         from storage import database_storage

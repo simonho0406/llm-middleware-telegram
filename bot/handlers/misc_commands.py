@@ -70,7 +70,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 ├ /model - Show current model
 ├ /list_models - List available models for the provider
 ├ /set_model `<model_name>` - Set a new model
-└ /provider_status - Check the status of all configured providers
+└ /status - Check system capabilities and status
 
 *Thread Management*:
 ├ /threads - List and manage conversation threads
@@ -622,7 +622,9 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await send_safe_message(context, update, "There is no active response generation to cancel.")
 
 async def provider_status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Checks the status of all configured AI providers."""
+    """Checks the status of all configured AI providers, MCP servers, and skills."""
+    import os
+    
     statuses = []
     all_providers = providers.get_provider_details()
 
@@ -637,10 +639,64 @@ async def provider_status_command(update: Update, context: ContextTypes.DEFAULT_
         
         statuses.append(status_message)
 
-    if not statuses:
-        message = "No providers are configured."
-    else:
-        message = "Provider Status:\n\n" + "\n".join(sorted(statuses))
+    provider_section = "No providers are configured."
+    if statuses:
+        provider_section = "\n".join(sorted(statuses))
+
+    # --- Gather MCP Client Subsystem Status ---
+    mcp_status = "❌ MCP Subsystem: Disabled or not configured."
+    server_configs = config._yaml_config.get("mcp_servers", [])
+    if server_configs:
+        app = context.application
+        mcp_service = app.bot_data.get('mcp_service') if app else None
+        
+        if mcp_service:
+            connected_servers = list(mcp_service.sessions.keys())
+            failed_servers = [cfg.get("name") for cfg in server_configs if cfg.get("name") not in mcp_service.sessions]
+            
+            try:
+                tools = await mcp_service.get_all_tools()
+                tools_count = len(tools)
+            except Exception:
+                tools_count = 0
+                
+            status_parts = []
+            if connected_servers:
+                status_parts.append(f"Connected to {len(connected_servers)} servers ({', '.join(connected_servers)}) providing {tools_count} tools")
+            if failed_servers:
+                status_parts.append(f"Failed to connect to {len(failed_servers)} servers ({', '.join(failed_servers)})")
+                
+            icon = "🔌" if connected_servers else "❌"
+            mcp_status = f"{icon} MCP Subsystem: {'; '.join(status_parts) if status_parts else 'Running but no servers connected.'}"
+        else:
+            configured_names = [cfg.get("name") for cfg in server_configs]
+            mcp_status = f"⚙️ MCP Subsystem: Configured but not yet initialized ({', '.join(configured_names)})."
+
+    # --- Gather Skills Registry Status ---
+    skills_status = "❌ Skills Registry: Disabled or not configured."
+    skills_dir = config._yaml_config.get("skills_dir", "skills")
+    if os.path.exists(skills_dir) and os.path.isdir(skills_dir):
+        app = context.application
+        skill_service = app.bot_data.get('skill_service') if app else None
+        
+        if skill_service:
+            loaded_skills = list(skill_service.skills.keys())
+            if loaded_skills:
+                skills_status = f"🧠 Skills Registry: Active with {len(loaded_skills)} skills ({', '.join(loaded_skills)})."
+            else:
+                skills_status = "🧠 Skills Registry: Active but no skills loaded."
+        else:
+            skills_status = f"⚙️ Skills Registry: Configured from directory '{skills_dir}' but not yet initialized."
+
+    # Construct and send dynamic message
+    message = (
+        "💡 **System & Capabilities Status**\n\n"
+        "**AI Providers:**\n"
+        f"{provider_section}\n\n"
+        "**Orchestration Capabilities:**\n"
+        f"{mcp_status}\n"
+        f"{skills_status}"
+    )
         
     await send_safe_message(context, update, message)
 
@@ -662,5 +718,5 @@ misc_handlers = [
     CallbackQueryHandler(thread_callback_handler, pattern="^(switch_thread:|delete_thread:).*"),
     CommandHandler("rename_thread", rename_thread_command),
     CommandHandler("cancel", cancel_command),
-    CommandHandler("provider_status", provider_status_command),
+    CommandHandler("status", provider_status_command),
 ]

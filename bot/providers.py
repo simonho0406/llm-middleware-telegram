@@ -1,7 +1,7 @@
 import logging
 import os
 import config
-from services import ollama_service, gemini_service, openrouter_service
+from services import ollama_service, gemini_service
 from services.openai_compatible_service import OpenAICompatibleService
 
 logger = logging.getLogger(__name__)
@@ -54,14 +54,27 @@ def get_provider_details() -> dict:
     else:
         logger.warning("Gemini provider disabled: No API keys found.")
         
-    # OpenRouter
+    # OpenRouter — uses OpenAICompatibleService (same wire protocol, tool-call capable)
     if config.OPENROUTER_API_KEY and config.OPENROUTER_API_KEY != "YOUR_OPENROUTER_API_KEY":
-        details['openrouter'] = {
-            'service': openrouter_service,
+        openrouter_conf = {
+            'name': 'openrouter',
+            'base_url': 'https://openrouter.ai/api/v1',
+            'api_key': config.OPENROUTER_API_KEY,
             'default_model': config.get_default_openrouter_model(),
-            'allowed_models': config.get_openrouter_allowed_models()
+            'allowed_models': config.get_openrouter_allowed_models(),
         }
-        _initialized_services['openrouter'] = openrouter_service
+        openrouter_instance = OpenAICompatibleService(openrouter_conf)
+        if openrouter_instance.client:
+            details['openrouter'] = {
+                'service': openrouter_instance,
+                'default_model': config.get_default_openrouter_model(),
+                'allowed_models': config.get_openrouter_allowed_models(),
+                'enable_streaming': True,
+            }
+            _initialized_services['openrouter'] = openrouter_instance
+            logger.info("OpenRouter provider initialized via OpenAICompatibleService.")
+        else:
+            logger.warning("OpenRouter provider disabled: client failed to initialize.")
     else:
         logger.warning("OpenRouter provider disabled: API key not set.")
 

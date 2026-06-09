@@ -28,7 +28,12 @@ async def test_search_instruction_logic():
              with patch('bot.response_generator.ensure_context_fits', new_callable=AsyncMock) as mock_fits:
                  mock_fits.return_value = ([], "info")
                  
+                 mock_mcp = AsyncMock()
+                 mock_mcp.get_all_tools = AsyncMock(return_value=[])
                  mock_context = MagicMock()
+                 mock_context.chat_data = {}
+                 mock_context.application = MagicMock()
+                 mock_context.application.bot_data = {'mcp_service': mock_mcp}
                  await response_generator._generate_llm_response(mock_context, chat_id, prompt)
                  
                  # VERIFY: prompt passed to service should NOT contain search instruction
@@ -58,7 +63,12 @@ async def test_search_instruction_logic():
              with patch('bot.response_generator.ensure_context_fits', new_callable=AsyncMock) as mock_fits:
                  mock_fits.return_value = ([], "info")
                  
+                 mock_mcp = AsyncMock()
+                 mock_mcp.get_all_tools = AsyncMock(return_value=[])
                  mock_context = MagicMock()
+                 mock_context.chat_data = {}
+                 mock_context.application = MagicMock()
+                 mock_context.application.bot_data = {'mcp_service': mock_mcp}
                  await response_generator._generate_llm_response(mock_context, chat_id, prompt)
                  
                  # VERIFY: prompt passed to service MUST contain search instruction
@@ -92,14 +102,20 @@ async def test_panel_labeling():
              with patch('bot.response_generator.ensure_context_fits', new_callable=AsyncMock) as mock_fits:
                  mock_fits.return_value = ([], "info")
                  
+                 mock_mcp = AsyncMock()
+                 mock_mcp.get_all_tools = AsyncMock(return_value=[])
                  mock_context = MagicMock()
+                 mock_context.chat_data = {}
+                 mock_context.application = MagicMock()
+                 mock_context.application.bot_data = {'mcp_service': mock_mcp}
                  await response_generator._generate_llm_response(mock_context, chat_id, "hi")
                  
                  # Inspect what was passed to ensure_context_fits (which receives processed_history)
                  call_args = mock_fits.call_args
                  _, kwargs = call_args
                  passed_history = kwargs['history']
-                 
-                 assert len(passed_history) == 1
-                 assert passed_history[0]['role'] == 'assistant'
-                 assert "**[Previous Expert Panel Discussion Result]**" in passed_history[0]['content']
+
+                 # A system message is prepended; find the assistant:panel entry by role
+                 panel_msg = next((m for m in passed_history if m['role'] == 'assistant'), None)
+                 assert panel_msg is not None, "No assistant message found in passed_history"
+                 assert "**[Previous Expert Panel Discussion Result]**" in panel_msg['content']

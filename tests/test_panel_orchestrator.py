@@ -38,7 +38,7 @@ Executing these should provide the necessary depth.
     
     # Mock the LLM call to return our messy response
     with patch('bot.handlers.discuss_panel_handler.get_robust_llm_response', new_callable=AsyncMock) as mock_llm_call:
-        mock_llm_call.return_value = {'response': messy_llm_response}
+        mock_llm_call.return_value = {'response': messy_llm_response, 'retries': 0, 'fallback_used': False, 'is_error': False}
         
         # Act
         extracted_queries = await _plan_deep_dive_searches(

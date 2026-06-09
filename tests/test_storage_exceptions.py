@@ -69,3 +69,12 @@ async def test_invalid_thread_key():
         
     with pytest.raises(ValueError, match="Invalid key 'invalid_key'"):
         await database_storage.set_thread_key(123, 'invalid_key', 'value')
+
+@pytest.mark.asyncio
+async def test_sqlite_wal_mode():
+    """Verify that SQLite WAL mode is enabled in the database."""
+    import config
+    async with aiosqlite.connect(config.DB_PATH) as db:
+        async with db.execute("PRAGMA journal_mode;") as cursor:
+            row = await cursor.fetchone()
+            assert row[0].lower() == "wal"

@@ -10,8 +10,22 @@ TAVILY_API_URL = "https://api.tavily.com/search"
 
 async def _tavily_search(query: str) -> dict:
     """
-    Performs a web search using the Tavily API and returns a formatted string of results.
+    Performs a web search using the Tavily API (routing through Tavily MCP if active, falling back to raw HTTP API).
     """
+    # 1. Attempt routing through Tavily MCP server if active
+    try:
+        from services.mcp_service import get_active_mcp_service
+        mcp_service = get_active_mcp_service()
+        if mcp_service and "tavily-search" in mcp_service.sessions:
+            logger.info(f"Routing Tavily search query '{query}' through active Tavily MCP server.")
+            result_str = await mcp_service.execute_tool("tavily-search", "tavily_search", {"query": query})
+            if result_str and not result_str.startswith("[Error:"):
+                return {'status': 'success', 'content': result_str}
+            logger.warning(f"Tavily MCP search returned error or empty response: '{result_str}'. Falling back to raw HTTP API.")
+    except Exception as e:
+        logger.warning(f"Failed to route search through Tavily MCP: {e}. Falling back to raw HTTP API.")
+
+    # 2. Fallback to raw HTTP API
     if not config.TAVILY_API_KEY:
         logger.warning("Tavily API key is not configured.")
         return {'status': 'error', 'message': "Tavily search is not configured. Please set TAVILY_API_KEY."}

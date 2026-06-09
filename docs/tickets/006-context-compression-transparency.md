@@ -1,5 +1,7 @@
 # Ticket 006: Context Compression Transparency & Defensiveness Prompts
 
+**Status:** ✅ Completed & Verified
+
 ## Problem
 Following Ticket 004, the system aggressively truncates context histories using `ensure_context_fits()`. However, the LLM is unaware of this, which can cause hallucinated references to missing history. Additionally, the Expert Panel sub-agents (like the Critic) can hallucinate that they verified data.
 

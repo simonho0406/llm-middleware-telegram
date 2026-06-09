@@ -26,8 +26,8 @@ async def setup_bot_commands_and_menu(application: Application, chat_id: int | N
         BotCommand("model", "Show the current AI model"),
         BotCommand("list_models", "List available models for the provider"),
         BotCommand("set_model", "Set a new model for the provider"),
+        BotCommand("status", "Check system capabilities and status"),
         # Thread Management
-        BotCommand("threads", "List and manage conversation threads"),
         BotCommand("threads", "List and manage conversation threads"),
         BotCommand("rename_thread", "Rename the current thread"),
         BotCommand("context", "Manage & prune conversation history"),
@@ -48,4 +48,5 @@ async def setup_bot_commands_and_menu(application: Application, chat_id: int | N
             logger.info(f"Successfully set bot command list for chat {chat_id}.")
 
     except Exception as e:
-        logger.exception(f"Failed to set bot commands for scope {scope}: {e}")
+        # Use warning (not exception) — stale chat IDs at startup are expected and non-fatal
+        logger.warning(f"Failed to set bot commands for scope {scope}: {e}")

@@ -91,6 +91,7 @@ async def test_search_reply_handling():
     context = MagicMock()
     context.args = [] # No args
     update.effective_chat.id = 123
+    update.effective_user.id = 456
     
     # Mock reply message
     update.message = MagicMock()

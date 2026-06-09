@@ -1,6 +1,8 @@
 {base_refiner_prompt}
 
-**Instructions: Polish and refine the response below for clarity, style, and readability. Use standard Markdown formatting:**
+**CRITICAL CONSTRAINT: Do NOT make any tool calls, function calls, or web searches. You are a text-polishing step only — all research has already been completed. Refine only the document text provided below.**
+
+**Instructions: Polish and refine the response below for clarity, style, and readability. Remove all `[UNVERIFIED]` annotation tags from the text — they are internal review markers and must not appear in the final user-facing output. Use standard Markdown formatting:**
 
 **Output Formatting Rules (Telegram Constraints):**
 • **NO TABLES:** Telegram cannot render proportional-font markdown tables properly. If the text contains tables, you MUST convert them into structured bulleted or numbered lists.

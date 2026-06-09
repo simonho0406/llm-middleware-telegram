@@ -105,7 +105,16 @@ async def send_safe_message(
     # Determine if it's an edit based on the explicit parameter or the presence of a callback query.
     # If force_new is True, explicitly disable edit mode.
     is_edit = (is_edit or (update.callback_query is not None)) and not force_new
-    
+
+    # Guard: if the callback message was deleted before we can edit it, fall back to send.
+    _cb_message_id = None
+    if is_edit and update.callback_query and update.callback_query.message:
+        _cb_message_id = update.callback_query.message.message_id
+    elif is_edit:
+        # callback_query exists but .message is None — message was deleted; can only send new.
+        logger.warning(f"{chat_id} is_edit=True but callback_query.message is None; falling back to send.")
+        is_edit = False
+
     reply_to_msg_id = update.effective_message.message_id if update.effective_message else None
 
     try:
@@ -117,18 +126,20 @@ async def send_safe_message(
         
         # 2. Split the AST Document into a list of smaller AST Documents.
         doc_chunks = split_document_ast_aware(doc)
-        
+        logger.info(f"{log_prefix}Sending {len(doc_chunks)} chunk(s) for {len(text)} char message.")
+
         # 3. Iterate and render each AST chunk to a string for sending.
         for i, chunk_doc in enumerate(doc_chunks):
             chunk_text = render_ast_to_telegram_v2(chunk_doc)
             if not chunk_text.strip():
+                logger.warning(f"{log_prefix}Chunk {i+1}/{len(doc_chunks)} rendered empty — skipping (possible AST split bug).")
                 continue
 
             # The rest of the sending logic (is_edit, etc.) remains the same.
             if is_edit and i == 0:
                 await context.bot.edit_message_text(
                     chat_id=chat_id,
-                    message_id=update.callback_query.message.message_id,
+                    message_id=_cb_message_id,
                     text=chunk_text,
                     parse_mode=constants.ParseMode.MARKDOWN_V2,
                     reply_markup=reply_markup if i == len(doc_chunks) - 1 else None
@@ -161,7 +172,7 @@ async def send_safe_message(
             if is_edit and i == 0:
                  await context.bot.edit_message_text(
                     chat_id=chat_id,
-                    message_id=update.callback_query.message.message_id,
+                    message_id=_cb_message_id,
                     text=chunk,
                     parse_mode=None,
                     reply_markup=reply_markup if i == len(chunks) - 1 else None

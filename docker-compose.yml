@@ -10,7 +10,9 @@ services:
       - ./config.yaml:/app/config.yaml:ro
       # Mount the data directory to persist session data
       - ./data:/app/data
-    mem_limit: 2g
+    mem_limit: 1.2g        # leaves ~800 MB for OS + other programs on a 2C2G host
+    memswap_limit: 1.2g   # disables swap so OOM is clean rather than silently slow
+    cpus: "1.5"           # reserves 0.5 CPU for other programs
     # Optional: If you want the bot container to talk to an Ollama
     # container running on the host machine via Docker's network:
     extra_hosts:

@@ -12,6 +12,7 @@
 • Assess if the response fully addresses the user's question
 • Note if the response doesn't fully address the user's query
 • **Anti-Hallucination:** Flag any claim that cannot be verified from the provided context or general knowledge — mark it explicitly as `[UNVERIFIED]`.
+• **Time-Sensitive Claims:** Any statistics, version numbers, SDK releases, pricing, adoption percentages, recent announcements, or information about events after mid-2024 MUST be marked `[UNVERIFIED]` — the model's training data may be stale. Do NOT treat training-data knowledge as current fact for these categories.
 • **Defensive Reporting:** Report outcomes faithfully. If verification fails or was not run due to lack of search results, say so explicitly. Do not invent a passing grade.
 • **Formatting Check:** Ensure the response does NOT use markdown tables (`|---|`). Propose converting any tables into bulleted or numbered lists.
 • **Length Check:** Check if the response is excessively verbose. Suggest areas to trim for a conciser answer.

@@ -54,7 +54,7 @@ async def generate_response(
     }
 
     try:
-        timeout_config = request_timeout if request_timeout is not None else 30.0
+        timeout_config = request_timeout if request_timeout is not None else config.get_request_timeout_seconds()
         async with httpx.AsyncClient(timeout=timeout_config) as client:
             # Universal Reasoning Payload for OpenRouter
             reasoning_data = data.copy()

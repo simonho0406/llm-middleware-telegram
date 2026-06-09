@@ -72,7 +72,8 @@ async def show_context_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     block = blocks[page]
     
     # Calculate Token Usage of this block
-    block_text = "".join([m['content'] for m in block])
+    # Tool-call turns (role=assistant with tool_calls) have content=None — guard with ''
+    block_text = "".join([(m.get('content') or '') for m in block])
     # Heuristic is fine for speed, but user requested accuracy.
     # Let's try to use tiktoken if available, else fallback.
     try:
@@ -94,17 +95,17 @@ async def show_context_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         encoding = tiktoken.get_encoding("cl100k_base")
         for b in blocks:
             for m in b:
-                total_tokens += len(encoding.encode(m['content']))
+                total_tokens += len(encoding.encode(m.get('content') or ''))
     except Exception:
         # Fallback to heuristic
-        total_tokens = sum(len(m['content'])//4 for b in blocks for m in b)
+        total_tokens = sum(len(m.get('content') or '')//4 for b in blocks for m in b)
         
     text = f"🧠 <b>Context Manager</b> (Interaction {page + 1}/{total_blocks})\n"
     text += f"Total Context: ~{total_tokens} tokens\n"
     text += "──────────────────\n"
     
     if user_msg:
-        safe_user_content = html.escape(user_msg['content'][:150])
+        safe_user_content = html.escape((user_msg.get('content') or '')[:150])
         text += f"👤 <b>User</b>: {safe_user_content}...\n\n"
     else:
         text += f"👤 <b>User</b>: [Missing/System Prompt]\n\n"
@@ -112,9 +113,9 @@ async def show_context_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     asst_count = len([m for m in block if m['role'] != 'user'])
     text += f"🤖 <b>Assistant</b>: ({asst_count} messages, ~{block_tokens} tokens)\n"
     
-    # Show snippet of last message
+    # Show snippet of last message (tool-call turns have content=None — fall back to empty string)
     if block[-1]['role'] != 'user':
-        safe_last_content = html.escape(block[-1]['content'][:100])
+        safe_last_content = html.escape((block[-1].get('content') or '')[:100])
         text += f"<i>{safe_last_content}...</i>\n"
         
     text += "──────────────────"
@@ -199,14 +200,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         for msg in raw_history:
             if msg['id'] == start_pk:
                 found_start = True
-                if msg['role'] != 'user':
+                if msg['role'] != 'user' and msg.get('content'):
                     assistant_contents.append(msg['content'])
                 continue
-            
+
             if found_start:
                 if msg['role'] == 'user':
                     break
-                assistant_contents.append(msg['content'])
+                if msg.get('content'):  # skip tool-call turns (content=None)
+                    assistant_contents.append(msg['content'])
                 
         if assistant_contents:
             joined_response = "\n\n".join(assistant_contents)

@@ -21,28 +21,30 @@ logger = logging.getLogger(__name__)
 async def run_startup_checks(application: Application) -> None:
     """Runs asynchronous checks for AI services after initialization."""
     logger.info("Performing startup checks for AI services...")
-    from services import ollama_service, gemini_service, openrouter_service
+    from services import ollama_service
+    from bot.providers import get_provider_details
 
-    results = await asyncio.gather(
-        ollama_service.check_status(),
-        openrouter_service.check_status(),
-        return_exceptions=True
-    )
-    
-    service_names = ["Ollama", "OpenRouter"]
-    for name, result in zip(service_names, results):
+    # Build check list dynamically from registered providers
+    checks = [("Ollama", ollama_service.check_status())]
+    provider_details = get_provider_details()
+    for name, detail in provider_details.items():
+        svc = detail.get('service')
+        if svc and hasattr(svc, 'check_status') and name not in ('ollama',):
+            checks.append((name.capitalize(), svc.check_status()))
+
+    results = await asyncio.gather(*[c[1] for c in checks], return_exceptions=True)
+
+    for (name, _), result in zip(checks, results):
         if isinstance(result, Exception):
             logger.warning(f"{name} connection check failed with exception: {result}")
         elif isinstance(result, tuple) and len(result) == 2:
             is_healthy, message = result
             if not is_healthy:
-                 logger.warning(f"{name} connection check failed. Features may be limited. Message: {message}")
+                logger.warning(f"{name} connection check failed. Features may be limited. Message: {message}")
             else:
-                 logger.info(f"{name} connection check successful. Message: {message}")
-        elif not result:
-            logger.warning(f"{name} connection check failed. Result: {result}")
+                logger.info(f"{name} connection check successful. Message: {message}")
         else:
-            logger.info(f"{name} connection check successful.")
+            logger.warning(f"{name} connection check returned unexpected result: {result}")
 
 # --- Main Execution ---
 
@@ -62,6 +64,11 @@ def main() -> None:
     from bot.handlers.flash_handler import flash_handler
     from bot.handlers.context_sidebar_handler import context_sidebar_handler, context_callback_handler
     from bot.middleware import auth_middleware
+
+    async def mcp_idle_watchdog(context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Repeating job: shut down idle MCP subprocesses to reclaim memory."""
+        from utils.service_registry import shutdown_mcp_service_if_idle
+        await shutdown_mcp_service_if_idle(context.application)
 
     async def post_init_with_commands(application: Application):
         logger.info("Initializing provider details...")
@@ -124,10 +131,23 @@ def main() -> None:
         except Exception as e:
             logger.exception(f"Failed to get bot info: {e}")
 
+        # MCP idle watchdog: runs every 5 min, frees ~150-200 MB after 30 min of inactivity
+        application.job_queue.run_repeating(mcp_idle_watchdog, interval=300, first=300, name="mcp_idle_watchdog")
+        logger.info("MCP idle watchdog scheduled (interval: 5 min, idle threshold: 30 min).")
+
     async def cleanup_services(application: Application):
         """Lifecycle hook to clean up resources on shutdown."""
         logger.info("Running shutdown lifecycle hook...")
         await shutdown_providers()
+        # Terminate MCP subprocesses (Node.js/uvx) so they don't orphan on the host
+        mcp_svc = application.bot_data.get('mcp_service')
+        if mcp_svc:
+            logger.info("Shutting down MCP subprocesses...")
+            try:
+                await mcp_svc.cleanup_all()
+            except Exception as e:
+                logger.warning(f"Non-fatal error during shutdown MCP cleanup: {e}")
+            application.bot_data['mcp_service'] = None
 
     async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error("Exception while handling an update:", exc_info=context.error)

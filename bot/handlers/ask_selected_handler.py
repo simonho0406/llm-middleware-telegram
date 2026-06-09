@@ -17,7 +17,7 @@ from telegram.helpers import escape_markdown # Import escape_markdown
 import re # Import regex for parsing grades
 
 import config
-from services import ollama_service, gemini_service, openrouter_service, openai_compatible_service
+from services import ollama_service, gemini_service, openai_compatible_service
 from storage import storage_manager
 from bot.messaging import send_safe_message, send_plain_message
 from bot import providers # Ensure this import exists

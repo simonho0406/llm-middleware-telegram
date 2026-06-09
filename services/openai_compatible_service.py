@@ -1,5 +1,6 @@
 import logging
 import httpx
+import json
 from openai import AsyncOpenAI, APIConnectionError, RateLimitError, APIStatusError, APIError
 import config
 import asyncio
@@ -47,6 +48,18 @@ class OpenAICompatibleService:
             await self.client.close()
             logger.info(f"Closed OpenAICompatibleService client for '{self.provider_name}'")
 
+    async def check_status(self) -> tuple[bool, str]:
+        """Checks provider health by verifying client init and attempting to list models."""
+        if not self.client:
+            return False, f"Not configured (client failed to initialize for '{self.provider_name}')"
+        try:
+            models = await self.list_models()
+            if models:
+                return True, f"Online ({len(models)} models available)"
+            return False, "Offline (no models returned)"
+        except Exception as e:
+            return False, f"Error connecting: {e}"
+
     async def list_models(self) -> list[str]:
         if not hasattr(self.client.models, 'list'):
             logger.info(f"Dynamic model listing not supported for '{self.provider_name}'. Using pre-configured models.")
@@ -82,7 +95,7 @@ class OpenAICompatibleService:
         logger.info(f"Falling back to configured 'allowed_models' for '{self.provider_name}'.")
         return self.allowed_models
 
-    async def generate_response(self, model: str, prompt: str, context_history: list = None, request_timeout: int = None):
+    async def generate_response(self, model: str, prompt: str, context_history: list = None, request_timeout: int = None, tools: list = None):
         if not self.client:
             yield f"[Error: Client for provider '{self.provider_name}' not initialized]"
             return
@@ -99,7 +112,30 @@ class OpenAICompatibleService:
                 if role == "assistant:panel":
                     role = "assistant"
                     
-                messages.append({"role": role, "content": content})
+                msg_dict = {"role": role}
+                if content is not None:
+                    msg_dict["content"] = content
+                else:
+                    msg_dict["content"] = None
+                
+                if "tool_calls" in msg:
+                    msg_dict["tool_calls"] = msg["tool_calls"]
+                if "tool_call_id" in msg:
+                    msg_dict["tool_call_id"] = msg["tool_call_id"]
+                if "name" in msg:
+                    msg_dict["name"] = msg["name"]
+                elif role == "tool" and msg.get("tool_call_id"):
+                    # Reconstruct name from history
+                    for h_msg in context_history:
+                        if h_msg.get("role") == "assistant" and "tool_calls" in h_msg:
+                            for tc in h_msg["tool_calls"]:
+                                if tc.get("id") == msg.get("tool_call_id"):
+                                    msg_dict["name"] = tc.get("function", {}).get("name")
+                                    break
+                    if not msg_dict.get("name"):
+                        msg_dict["name"] = "tool"
+                    
+                messages.append(msg_dict)
                 
         if prompt:
             messages.append({"role": "user", "content": prompt})
@@ -117,11 +153,15 @@ class OpenAICompatibleService:
                     "model": model,
                     "messages": messages,
                     "stream": use_streaming,
+                    "max_tokens": 16384,  # prevent providers from silently capping output (e.g. NVIDIA default 4096)
                 }
+                if tools:
+                    api_kwargs["tools"] = tools
+
                 # Use per-request timeout or fallback to global default
                 timeout_value = request_timeout if request_timeout is not None else config.get_request_timeout_seconds()
                 if use_streaming:
-                    api_kwargs["timeout"] = httpx.Timeout(timeout_value, connect=15.0, read=45.0)
+                    api_kwargs["timeout"] = httpx.Timeout(timeout_value, connect=15.0, read=timeout_value)
                 else:
                     api_kwargs["timeout"] = timeout_value
 
@@ -142,17 +182,62 @@ class OpenAICompatibleService:
                     
                     if use_streaming:
                         stream = await self.client.chat.completions.create(**current_api_kwargs)
+                        aggregated_tools = {}
                         async for chunk in stream:
                             if chunk and hasattr(chunk, 'choices') and chunk.choices:
-                                content = chunk.choices[0].delta.content
+                                delta = chunk.choices[0].delta
+                                
+                                # Check for tool calls in streaming chunk
+                                if hasattr(delta, 'tool_calls') and delta.tool_calls:
+                                    for tc in delta.tool_calls:
+                                        idx = tc.index
+                                        if idx not in aggregated_tools:
+                                            aggregated_tools[idx] = {
+                                                "id": getattr(tc, "id", None) or "",
+                                                "type": getattr(tc, "type", "function"),
+                                                "function": {
+                                                    "name": "",
+                                                    "arguments": ""
+                                                }
+                                            }
+                                        if getattr(tc, "id", None):
+                                            aggregated_tools[idx]["id"] = tc.id
+                                        if getattr(tc, "type", None):
+                                            aggregated_tools[idx]["type"] = tc.type
+                                        if getattr(tc, "function", None):
+                                            func = tc.function
+                                            if getattr(func, "name", None):
+                                                aggregated_tools[idx]["function"]["name"] += func.name
+                                            if getattr(func, "arguments", None):
+                                                aggregated_tools[idx]["function"]["arguments"] += func.arguments
+                                                
+                                content = getattr(delta, 'content', None)
                                 if content is not None:
                                     yield content
+                        
+                        if aggregated_tools:
+                            tool_calls_list = list(aggregated_tools.values())
+                            yield json.dumps({"tool_calls": tool_calls_list})
                     else:
                         response = await self.client.chat.completions.create(**current_api_kwargs)
                         if response and hasattr(response, 'choices') and response.choices:
-                            content = response.choices[0].message.content
-                            if content:
-                                yield content
+                            message = response.choices[0].message
+                            if hasattr(message, 'tool_calls') and message.tool_calls:
+                                tool_calls_list = []
+                                for tc in message.tool_calls:
+                                    tool_calls_list.append({
+                                        "id": tc.id,
+                                        "type": tc.type,
+                                        "function": {
+                                            "name": tc.function.name,
+                                            "arguments": tc.function.arguments
+                                        }
+                                    })
+                                yield json.dumps({"tool_calls": tool_calls_list})
+                            else:
+                                content = message.content
+                                if content:
+                                    yield content
                         else:
                             logger.exception(f"[{self.provider_name}] API returned empty/invalid response")
                             yield f"[Error: Provider returned invalid response format.]"
@@ -201,9 +286,23 @@ class OpenAICompatibleService:
                         api_kwargs["stream"] = False
                         response = await self.client.chat.completions.create(**api_kwargs)
                         if response and hasattr(response, 'choices') and response.choices:
-                            content = response.choices[0].message.content
-                            if content:
-                                yield content
+                            message = response.choices[0].message
+                            if hasattr(message, 'tool_calls') and message.tool_calls:
+                                tool_calls_list = []
+                                for tc in message.tool_calls:
+                                    tool_calls_list.append({
+                                        "id": tc.id,
+                                        "type": tc.type,
+                                        "function": {
+                                            "name": tc.function.name,
+                                            "arguments": tc.function.arguments
+                                        }
+                                    })
+                                yield json.dumps({"tool_calls": tool_calls_list})
+                            else:
+                                content = message.content
+                                if content:
+                                    yield content
                                 success = True
                                 break
                         else:
@@ -236,19 +335,13 @@ class OpenAICompatibleService:
     def get_default_model(self) -> str:
         return self.default_model
 
-    async def check_status(self) -> (bool, str):
-        """Checks if the provider is configured."""
-        is_configured = bool(self.api_key and self.api_key != "YOUR_API_KEY")
-        message = "API key is configured." if is_configured else "API key is not configured."
-        return is_configured, message
-
     async def count_tokens(self, content: list) -> int:
         try:
             encoding = tiktoken.get_encoding("cl100k_base")
-            return sum(len(encoding.encode(c["content"])) for c in content)
+            return sum(len(encoding.encode(c.get("content") or "")) for c in content)
         except ImportError:
             logger.warning("tiktoken not installed, falling back to word-based estimation")
-            return sum(len(c["content"].split()) for c in content)
+            return sum(len((c.get("content") or "").split()) for c in content)
 
     async def _generate_single_model_non_streaming(self, model: str, prompt: str, context_history: list = None) -> str:
         """Helper to generate a complete string response using the existing generator logic."""

@@ -37,4 +37,16 @@ USER_SETTINGS = {
         'type': dict,
         'default': None,
     },
+    'enable_mcp': {
+        'display_name': "Enable MCP Tools",
+        'description': "Enable Model Context Protocol (MCP) server tools for LLMs.",
+        'type': bool,
+        'default': True,
+    },
+    'enable_skills': {
+        'display_name': "Enable Skills",
+        'description': "Enable local system skills / script playbooks for LLMs.",
+        'type': bool,
+        'default': True,
+    },
 }

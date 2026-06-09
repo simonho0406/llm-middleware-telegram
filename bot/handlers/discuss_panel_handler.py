@@ -11,6 +11,7 @@ from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, Mess
 from telegram import BotCommandScopeChat
 
 from utils import text_processing
+from utils.hooks import hook_runner
 from utils.llm_utilities import get_robust_llm_response, get_expert_panel_fallback_config
 from telegram import constants
 import config
@@ -49,7 +50,7 @@ async def _plan_deep_dive_searches(
     plan_prompt = plan_prompt_template.format(
         user_prompt=user_prompt,
         original_query=original_query,
-        tavily_results=initial_results
+        search_results=initial_results
     )
 
     llm_result = await get_robust_llm_response(
@@ -64,7 +65,7 @@ async def _plan_deep_dive_searches(
     )
     
     response_text = llm_result['response']
-    if "[Error:" in response_text:
+    if llm_result['is_error']:
         logger.error(f"Deep-dive planning failed: {response_text}")
         return []
 
@@ -103,13 +104,69 @@ async def _plan_deep_dive_searches(
         logger.error(f"Failed to decode JSON from deep-dive planner: {json_str}")
         return []
 
+def _format_tools_for_plan_prompt(tools: list) -> str:
+    """Minimal tool listing grouped by MCP server for the Initial Orchestrator plan prompt.
+    Grouping by server helps the Planner distinguish workspace tools (notion-workspace)
+    from web search tools (tavily-search) and route workspace_queries vs requires_search correctly.
+    """
+    if not tools:
+        return "(none)"
+    groups: dict = {}
+    for t in tools:
+        fn = t.get('function', {})
+        name = fn.get('name', '?')
+        desc = fn.get('description', '')
+        server = name.split('__')[0] if '__' in name else 'other'
+        groups.setdefault(server, []).append(f"  - {name}: {desc}")
+    lines = []
+    for server, tool_lines in groups.items():
+        lines.append(f"[{server}]")
+        lines.extend(tool_lines)
+    return "\n".join(lines)
+
+
+def _format_tools_for_prompt(tools: list) -> str:
+    """Formats a list of OpenAI-style tool dicts into a readable string for LLM prompts.
+
+    Includes parameter names and types so the Orchestrator knows how to call each tool,
+    not just that it exists. Without schema info the model defaults to guessing 'query'
+    for all tools, which only works for search-style tools.
+    """
+    if not tools:
+        return "No tools available."
+    lines = []
+    for t in tools:
+        func = t.get('function', {})
+        name = func.get('name', '')
+        desc = func.get('description', '')
+        params = func.get('parameters', {})
+        properties = params.get('properties', {})
+        required = set(params.get('required', []))
+
+        if properties:
+            param_parts = []
+            for prop_name, prop_schema in properties.items():
+                prop_type = prop_schema.get('type', 'any')
+                req_marker = '*' if prop_name in required else '?'
+                param_parts.append(f"{prop_name}{req_marker}: {prop_type}")
+            args_str = ", ".join(param_parts)
+            lines.append(f"- {name}({args_str}): {desc}")
+        else:
+            lines.append(f"- {name}: {desc}")
+    return "\n".join(lines)
+
+
 async def _run_refinement_cycle(
     update: Update, context: ContextTypes.DEFAULT_TYPE, proposer_task, critic_task, user_prompt, full_history, placeholder_msg, panel_results,
-    orchestrator_service, orchestrator_model, orchestrator_timeout, orchestrator_config, panel_config: dict
+    orchestrator_service, orchestrator_model, orchestrator_timeout, orchestrator_config, panel_config: dict,
+    mcp_service=None, skill_service=None, available_tools_text: str = "No tools available.",
+    panel_execution_tool_names: frozenset = frozenset(),
+    quality_gate_tools_text: str = "No tools available."
 ):
     """
     Executes the Master & Apprentice iterative refinement cycle.
-    
+    The Orchestrator quality gate may request MCP tool calls to ground the next iteration.
+
     Returns:
         tuple: (proposer_response, quality_score, iteration_count)
     """
@@ -135,14 +192,26 @@ async def _run_refinement_cycle(
     critic_prompt_template = critic_task.get('prompt') or critic_task.get('content')
     quality_score = 0
     proposer_response = ""
-    
+
+    # Best-response tracking: the Refiner receives the highest-scoring draft,
+    # not the last one (which may be worse if the Proposer regressed due to timeouts/fallbacks).
+    best_score = -1
+    best_proposer_response = ""
+    prev_score = -1
+    consecutive_declines = 0
+    _quality_gate_emergency = False  # True when the gate parse failed; score is synthetic
+
     # Stateful Persona History
+    # quality_gate_history stores ONLY compact audit entries (score + instructions), never the
+    # full proposer/critic response text. That text is already in each round's current prompt,
+    # so re-embedding it in history causes context overflow and score anchoring.
     proposer_history = []
     critic_history = []
     quality_gate_history = []
 
     # Iterative refinement loop
     for iteration in range(1, max_iterations + 1):
+        _quality_gate_emergency = False  # reset each iteration; True only when gate parse fails this round
         try:
             await placeholder_msg.edit_text(f"Round {iteration}/{max_iterations}: Proposer is working...", parse_mode=None)
         except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
@@ -171,13 +240,13 @@ async def _run_refinement_cycle(
         panel_results['Proposer'] = {
             'provider': proposer_provider,
             'model': proposer_model,
-            'status': 'Success' if "[Error:" not in proposer_response else 'Failure',
+            'status': 'Success' if not proposer_llm_result['is_error'] else 'Failure',
             'response': proposer_response,
             'retries': proposer_retries,
             'fallback_used': proposer_fallback_used
         }
-        
-        if "[Error:" in proposer_response:
+
+        if proposer_llm_result['is_error']:
             logger.error(f"Proposer failed: {proposer_response}")
             logger.info("Attempting Orchestrator's backup fallback for failed proposer...")
 
@@ -204,7 +273,7 @@ async def _run_refinement_cycle(
                     fallback_retries = fallback_llm_result['retries']
                     fallback_fallback_used = fallback_llm_result['fallback_used'] # This will always be False here
 
-                    if "[Error:" not in fallback_response:
+                    if not fallback_llm_result['is_error']:
                         logger.info("Orchestrator's backup successfully provided fallback response")
                         # Update panel results to reflect backup fallback
                         panel_results['Proposer'] = {
@@ -265,14 +334,14 @@ async def _run_refinement_cycle(
         panel_results['Critic'] = {
             'provider': critic_provider,
             'model': critic_model,
-            'status': 'Success' if "[Error:" not in critic_response else 'Failure',
+            'status': 'Success' if not critic_llm_result['is_error'] else 'Failure',
             'response': critic_response,
             'retries': critic_retries,
             'fallback_used': critic_fallback_used
         }
-        
+
         # Handle Critic failure by proceeding to Quality Gate with modified prompt
-        critic_failed = "[Error:" in critic_response
+        critic_failed = critic_llm_result['is_error']
         if critic_failed:
             logger.error(f"Critic failed: {critic_response}")
             # Replace critic response with failure explanation for the Master
@@ -288,7 +357,8 @@ async def _run_refinement_cycle(
             user_prompt=user_prompt,
             proposer_response=proposer_response,
             critic_response=critic_response,
-            quality_threshold=quality_threshold
+            quality_threshold=quality_threshold,
+            available_tools=quality_gate_tools_text
         )
         
         quality_llm_result = await get_robust_llm_response(
@@ -305,20 +375,22 @@ async def _run_refinement_cycle(
         quality_retries = quality_llm_result['retries']
         quality_fallback_used = quality_llm_result['fallback_used']
 
-        quality_gate_history.append({"role": "user", "content": quality_gate_prompt})
+        # Compact audit entry — score + instructions only, no full response text
+        quality_gate_history.append({"role": "user", "content": f"[Round {iteration} assessment request]"})
         quality_gate_history.append({"role": "assistant", "content": quality_response})
 
         # Store quality gate metrics in panel_results
         panel_results['Quality_Gate'] = {
             'provider': orchestrator_config.get('provider'),
             'model': orchestrator_config.get('model'),
-            'status': 'Success' if "[Error:" not in quality_response else 'Failure',
+            'status': 'Success' if not quality_llm_result['is_error'] else 'Failure',
             'response': quality_response,
             'retries': quality_retries,
             'fallback_used': quality_fallback_used
         }
 
         # Parse quality assessment using robust JSON extraction
+        requested_tool_calls = []
         try:
             # Find the first '{' and the last '}' to extract the JSON block.
             # This is more robust against conversational text from the LLM.
@@ -328,25 +400,153 @@ async def _run_refinement_cycle(
             if start_index != -1 and end_index != -1 and end_index > start_index:
                 json_str = quality_response[start_index:end_index+1]
                 quality_assessment = json.loads(json_str)
-                quality_score = quality_assessment.get('quality_score', 0)
-                refinement_instructions = quality_assessment.get('refinement_instructions', '')
-                
-                logger.info(f"Master quality assessment - Score: {quality_score}, Threshold: {quality_threshold}")
+
+                # Rubric schema: compute quality_score from sub-criteria (deterministic aggregation).
+                # Fall back to legacy holistic quality_score field for backward compatibility.
+                if 'scores' in quality_assessment and isinstance(quality_assessment['scores'], dict):
+                    scores = quality_assessment['scores']
+                    numeric_scores = {}
+                    for k, v in scores.items():
+                        if isinstance(v, (int, float)):
+                            numeric_scores[k] = max(0, int(v))
+                        else:
+                            logger.warning(
+                                f"Quality Gate returned non-numeric score for criterion '{k}': {v!r}. "
+                                f"Treating as 0. Model may not be following the rubric schema."
+                            )
+                            numeric_scores[k] = 0
+                    quality_score = sum(numeric_scores.values())
+                    logger.info(
+                        f"Master quality scores — "
+                        f"grounding:{numeric_scores.get('factual_grounding', 0)} "
+                        f"completeness:{numeric_scores.get('completeness', 0)} "
+                        f"accuracy:{numeric_scores.get('accuracy', 0)} "
+                        f"clarity:{numeric_scores.get('clarity', 0)} "
+                        f"→ total:{quality_score}/{quality_threshold}"
+                    )
+                else:
+                    quality_score = quality_assessment.get('quality_score', 0)
+                    logger.info(f"Master quality assessment - Score: {quality_score}, Threshold: {quality_threshold}")
+
+                # Use `or ''` rather than a default in .get() so that explicit JSON null
+                # is also normalised to empty string (dict.get default only covers missing keys).
+                refinement_instructions = quality_assessment.get('refinement_instructions') or ''
+                requested_tool_calls = quality_assessment.get('tool_calls', [])
+                if not isinstance(requested_tool_calls, list):
+                    requested_tool_calls = []
+                logger.info(f"Tool calls requested: {len(requested_tool_calls)}")
             else:
                 raise ValueError("No valid JSON object found in the quality gate response.")
-                
+
         except (json.JSONDecodeError, ValueError) as e:
             logger.error(f"Quality gate parsing failed: {e}")
             logger.debug(f"Problematic quality response (first 500 chars): {quality_response[:500]}")
             logger.warning("Quality gate failed, using emergency fallback to break loop.")
             quality_score = quality_threshold  # Set to threshold to break loop
             refinement_instructions = ""
-        
+            _quality_gate_emergency = True
+
+        # Track the best response seen across all iterations.
+        # The Proposer can regress when its model times out and the fallback takes over,
+        # causing later iterations to score LOWER than earlier ones. We give the Refiner
+        # the best draft, not the last one.
+        # Skip update when quality_score is a synthetic emergency value — it is not a real measurement.
+        if not _quality_gate_emergency and quality_score > best_score:
+            best_score = quality_score
+            best_proposer_response = proposer_response
+
+        # Early-termination: if the score declines two iterations in a row the loop is
+        # converging in the wrong direction. Stop now and use the best response we saw.
+        _prev_for_log = prev_score
+        if prev_score >= 0 and quality_score < prev_score:
+            consecutive_declines += 1
+        else:
+            consecutive_declines = 0
+        prev_score = quality_score
+
+        if consecutive_declines >= 2:
+            logger.warning(
+                f"Quality declining for 2 consecutive iterations "
+                f"(now {quality_score}, was {_prev_for_log}). "
+                f"Stopping early; using best response (score {best_score})."
+            )
+            break
+
         # Check if quality meets threshold
         if quality_score >= quality_threshold:
             logger.info(f"Quality threshold met (Score: {quality_score} >= {quality_threshold}). Finalizing response.")
             break
         elif iteration < max_iterations:
+            # Execute any tool calls the Orchestrator requested to ground the next Proposer iteration
+            tool_results_text = ""
+            if requested_tool_calls and (mcp_service or skill_service):
+                tool_results_parts = []
+                for tc in requested_tool_calls:
+                    tool_name = tc.get('name', '')
+                    args = tc.get('arguments', {})
+                    if isinstance(args, str):
+                        try:
+                            args = json.loads(args)
+                        except json.JSONDecodeError as e:
+                            logger.warning(f"Panel tool '{tool_name}': failed to parse arguments JSON ({e}). Using empty args.")
+                            args = {}
+                    try:
+                        # skill_ prefix checked BEFORE __ to prevent a skill named `server__foo`
+                        # from being misrouted to MCP execution.
+                        if tool_name.startswith("skill_") and skill_service:
+                            skill_name_str = tool_name[len("skill_"):]
+                            result = skill_service.get_skill_playbook(skill_name_str)
+                            logger.info(f"Panel skill '{tool_name}' executed for iteration {iteration + 1}.")
+                        elif "__" in tool_name and mcp_service:
+                            server, tool = tool_name.split("__", 1)
+                            # Gate 1: authority allowlist — only panel_execution: true servers.
+                            # Empty frozenset means no servers are authorized → deny all (fail-closed).
+                            if not panel_execution_tool_names:
+                                logger.warning(
+                                    f"Panel: Gate 1 has no authorized tools (empty authority set). "
+                                    f"Denying '{tool_name}'. Set panel_execution: true in config.yaml."
+                                )
+                                result = f"[Denied: Panel tool authority set is empty. Check config.yaml panel_execution flags.]"
+                            elif tool_name not in panel_execution_tool_names:
+                                logger.warning(f"Panel: Orchestrator requested unauthorized tool '{tool_name}' — blocked by authority policy.")
+                                result = f"[Denied: '{tool_name}' is not authorised in the panel context.]"
+                            else:
+                                # Gate 2: hook validation — same path as normal chat tool execution
+                                try:
+                                    hook_runner.run_pre_tool_use(tool_name, {"arguments": args})
+                                except PermissionError as hook_err:
+                                    logger.warning(f"Panel: Tool '{tool_name}' denied by security hook: {hook_err}")
+                                    result = f"[Denied by security hook: {hook_err}]"
+                                else:
+                                    from utils.service_registry import touch_mcp_last_used
+                                    touch_mcp_last_used(getattr(context, 'application', None))
+                                    result = await mcp_service.execute_tool(server, tool, args)
+                                    logger.info(f"Panel tool '{tool_name}' executed for iteration {iteration + 1}.")
+                        else:
+                            result = f"[Error: Unknown tool or service unavailable for '{tool_name}']"
+                        # Truncate large results to prevent context overflow in the next Proposer call.
+                        # Web search / DB results can be 100k+ characters; cap at ~8 000 chars (~2 000 tokens).
+                        _MAX_RESULT_CHARS = 8_000
+                        if isinstance(result, str) and len(result) > _MAX_RESULT_CHARS:
+                            logger.warning(f"Panel tool '{tool_name}' result truncated from {len(result)} to {_MAX_RESULT_CHARS} chars.")
+                            result = result[:_MAX_RESULT_CHARS] + "\n[Result truncated to prevent context overflow]"
+                        tool_results_parts.append(f"Tool: {tool_name}\nResult: {result}")
+                    except Exception as tool_exc:
+                        logger.exception(f"Panel tool call failed for '{tool_name}': {tool_exc}")
+                        tool_results_parts.append(f"Tool: {tool_name}\nResult: [Error: {tool_exc}]")
+
+                if tool_results_parts:
+                    tool_results_text = "\n\n".join(tool_results_parts)
+                    logger.info(f"Panel orchestrator provided {len(tool_results_parts)} tool result(s) to Proposer for iteration {iteration + 1}.")
+                    # Feed compact results into quality_gate_history so the next Quality Gate
+                    # invocation knows which queries succeeded or failed (e.g. "no such table").
+                    # Without this, the gate repeats identical failing queries every round.
+                    _qg_summary = tool_results_text[:1500] + ("\n[truncated]" if len(tool_results_text) > 1500 else "")
+                    quality_gate_history.append({
+                        "role": "user",
+                        "content": f"[Tool execution results from Round {iteration}]:\n{_qg_summary}"
+                    })
+
             try:
                 await placeholder_msg.edit_text(f"Quality score: {quality_score}/{quality_threshold}. Refining... (Round {iteration+1})", parse_mode=None)
             except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
@@ -356,12 +556,18 @@ async def _run_refinement_cycle(
                 user_prompt=user_prompt,
                 proposer_response=proposer_response,
                 quality_score=quality_score,
-                refinement_instructions=refinement_instructions
+                refinement_instructions=refinement_instructions,
+                tool_results=tool_results_text
             )
         else:
             logger.warning(f"Max iterations reached. Final quality score: {quality_score}")
             break
-    
+
+    # Return the best-scoring response, not necessarily the last one.
+    if best_proposer_response:
+        if best_score != quality_score:
+            logger.info(f"Using best response from earlier iteration (score {best_score} vs final {quality_score}).")
+        return best_proposer_response, best_score, iteration
     return proposer_response, quality_score, iteration
 
 
@@ -499,7 +705,7 @@ async def _run_panel_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE
         await placeholder_msg.edit_text("Assembling panel... Decomposing task...", parse_mode=None)
     except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
         logger.warning(f"Failed to update placeholder message (Decomposing task): {e}")
-    
+
     try:
         orchestrator_service = providers.get_service_for_provider(orchestrator_provider)
         if orchestrator_service is None:
@@ -515,22 +721,57 @@ async def _run_panel_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE
             logger.warning(f"Failed to update placeholder message (Config error): {e}")
         return {}, f"[System Error: {e}]", ""
 
+    # --- Initialize MCP / Skill services for Orchestrator tool calling ---
+    from utils.service_registry import get_or_init_mcp_service, get_or_init_skill_service
+    app = getattr(context, 'application', None)
+    enable_mcp = await storage_manager.get_user_setting(chat_id, 'enable_mcp', USER_SETTINGS['enable_mcp']['default'])
+    enable_skills = await storage_manager.get_user_setting(chat_id, 'enable_skills', USER_SETTINGS['enable_skills']['default'])
+    mcp_service = await get_or_init_mcp_service(app, enable_mcp)
+    skill_service = await get_or_init_skill_service(app, enable_skills)
+
+    # Build two tool sets:
+    #   all_mcp_tools       — every connected MCP tool (for normal chat, diagnostics)
+    #   panel_execution_*   — only servers with panel_execution: true in config.yaml
+    # The panel Quality Gate only sees and can invoke panel_execution_tools.
+    # This enforces the principle of least privilege: sqlite-tools (bot DB) is never
+    # available to the autonomous panel flow even though it is available in normal chat.
+    _server_cfg_map = {c['name']: c for c in config._yaml_config.get("mcp_servers", [])}
+
+    all_mcp_tools = []
+    if enable_mcp and mcp_service:
+        all_mcp_tools = await mcp_service.get_all_tools()
+
+    panel_execution_tools = []
+    for _tool in all_mcp_tools:
+        _server_name = _tool['function']['name'].split('__')[0]
+        if _server_cfg_map.get(_server_name, {}).get('panel_execution', False):
+            panel_execution_tools.append(_tool)
+
+    if enable_skills and skill_service:
+        panel_execution_tools.extend(skill_service.get_skills_as_tools())
+
+    panel_execution_tool_names = frozenset(t['function']['name'] for t in panel_execution_tools)
+    available_tools_text = _format_tools_for_prompt(panel_execution_tools)
+
+    _excluded_servers = [n for n, c in _server_cfg_map.items() if not c.get('panel_execution', False)]
+    if _excluded_servers:
+        logger.info(f"Panel tool authority: excluded servers (not panel_execution) = {_excluded_servers}")
+
     plan_template = config.PROMPTS.get_prompt('panel_orchestrator_plan')
-    
-    # Trim the injected history to prevent context overflow for the orchestrator
-    # Estimate base prompt size without history
-    base_prompt_est = plan_template.format(user_prompt=user_prompt, full_history_json="")
-    trimmed_history, _ = await ensure_context_fits(
-        prompt=base_prompt_est,
-        history=full_history,
-        model=orchestrator_model,
-        provider=orchestrator_provider,
-        safety_margin=0.85 # Leave 15% buffer for JSON formatting overhead
-    )
-    
+
+    # Cap history for the plan prompt at the last 30 non-system messages.
+    # ensure_context_fits cannot be used here because the plan template itself (with full tool
+    # schemas injected) already exceeds the Orchestrator model's context limit before any history
+    # is added — the function silently drops all history and the Planner runs blind.
+    # Recent context (last 30 turns) is all the Planner needs to understand what was just asked.
+    _PLAN_HISTORY_CAP = 30
+    _non_system = [m for m in full_history if m.get("role") != "system"]
+    _plan_history = _non_system[-_PLAN_HISTORY_CAP:]
+
     meta_prompt = plan_template.format(
         user_prompt=user_prompt,
-        full_history_json=json.dumps(trimmed_history, indent=2)
+        full_history_json=json.dumps(_plan_history, indent=2),
+        available_tools=_format_tools_for_plan_prompt(panel_execution_tools)
     )
 
     # Use consolidated LLM response function for initial Orchestrator call with integrated JSON parsing retry
@@ -559,16 +800,16 @@ async def _run_panel_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE
     panel_results['Initial_Orchestrator'] = {
         'provider': orchestrator_provider,
         'model': orchestrator_model,
-        'status': 'Success' if "[Error:" not in orchestrator_response else 'Failure',
+        'status': 'Success' if not orchestrator_llm_result['is_error'] else 'Failure',
         'response': orchestrator_response,
         'retries': orchestrator_retries,
         'fallback_used': orchestrator_fallback_used
     }
-    
+
     logger.debug(f"Initial Orchestrator response: {orchestrator_response[:200]}...")  # Log first 200 chars
-    
+
     # Handle potential error responses from get_robust_llm_response
-    if "[Error:" in orchestrator_response:
+    if orchestrator_llm_result['is_error']:
         try:
             await placeholder_msg.edit_text(
                 f"⚠️ The orchestrator failed to create a valid plan. "
@@ -652,8 +893,59 @@ async def _run_panel_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE
             logger.warning(f"Failed to update placeholder message (Incomplete orchestrator plan): {e}")
         return {}, f"[System Error: Incomplete orchestrator plan. Use /reroll to retry.]", ""
     
-    logger.info(f"Successfully parsed orchestrator's plan. Search required: {requires_search}, Tasks: {len(tasks_list)}")
-    
+    workspace_queries = orchestrator_plan.get("workspace_queries", [])
+    logger.info(f"Successfully parsed orchestrator's plan. Search required: {requires_search}, Workspace queries: {len(workspace_queries)}, Tasks: {len(tasks_list)}")
+
+    # Execute workspace pre-queries (e.g. notion-workspace) BEFORE the Proposer drafts.
+    # Workspace tools surface the user's own stored content; they must run at this stage so the
+    # Proposer can base its draft on actual workspace data rather than generic knowledge.
+    if workspace_queries and mcp_service and panel_execution_tool_names:
+        workspace_context_parts = []
+        for wq in workspace_queries:
+            _wq_tool = wq.get("tool", "")
+            _wq_args = wq.get("arguments", {})
+            if "__" not in _wq_tool:
+                logger.warning(f"Workspace pre-query has invalid tool name '{_wq_tool}' — skipped.")
+                continue
+            _wq_server, _wq_name = _wq_tool.split("__", 1)
+            if _wq_tool not in panel_execution_tool_names:
+                logger.warning(
+                    f"Workspace pre-query '{_wq_tool}' not in panel authority set — skipped. "
+                    f"Available panel tools: {sorted(panel_execution_tool_names)}"
+                )
+                continue
+            try:
+                hook_runner.run_pre_tool_use(_wq_tool, {"arguments": _wq_args})
+                _wq_result = await mcp_service.execute_tool(_wq_server, _wq_name, _wq_args)
+                if isinstance(_wq_result, str) and len(_wq_result) > 8_000:
+                    _wq_result = _wq_result[:8_000] + "\n[Truncated]"
+                workspace_context_parts.append(f"[{_wq_tool}]\n{_wq_result}")
+                logger.info(f"Workspace pre-query '{_wq_tool}' executed successfully.")
+            except PermissionError as _hook_err:
+                logger.warning(f"Workspace pre-query '{_wq_tool}' denied by hook: {_hook_err}")
+            except Exception as _wq_exc:
+                logger.warning(f"Workspace pre-query '{_wq_tool}' failed: {_wq_exc}")
+
+        if workspace_context_parts:
+            _workspace_context = "\n\n".join(workspace_context_parts)
+            # Cap the aggregate workspace context to 4 000 tokens (~16 KB) so multiple
+            # large Notion results don't overflow the Proposer's context budget.
+            _max_workspace_tokens = 4000
+            _workspace_context = truncate_text_to_tokens(_workspace_context, _max_workspace_tokens)
+            _proposer_task = next((t for t in tasks_list if t.get("role") == "Proposer"), None)
+            if _proposer_task:
+                _original_prompt = _proposer_task.get("prompt", "")
+                _proposer_task["prompt"] = (
+                    "The following workspace data was retrieved from your connected tools to help you "
+                    "address the user's query. Base your draft on this actual content — do not invent or "
+                    "generalize where specific data is available.\n\n"
+                    f"--- WORKSPACE CONTEXT ---\n{_workspace_context}\n\n"
+                    f"--- ORIGINAL TASK ---\n{_original_prompt}"
+                )
+                logger.info(f"Augmented Proposer's prompt with {len(workspace_context_parts)} workspace pre-query result(s).")
+            else:
+                logger.warning("Workspace pre-queries ran but no Proposer task found to augment.")
+
     # Store the tasks in the SQLite Scratchpad for Agentic context injection
     if hasattr(storage_manager, 'clear_panel_tasks') and storage_manager.clear_panel_tasks:
         try:
@@ -823,10 +1115,32 @@ async def _run_panel_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not proposer_task or not critic_task:
         raise RuntimeError("Orchestrator's plan must include Proposer and Critic roles.")
 
+    # Scope Quality Gate tools to only what the Planner identified as relevant.
+    # Showing all 33 tools leads the model to cross-namespace hallucinate (e.g. calling
+    # Notion tools during a SQLite query). Use the Planner's own intent as the filter.
+    _qg_servers: set[str] = set()
+    if requires_search:
+        _qg_servers.add('tavily-search')
+    for _wq in workspace_queries:
+        _wq_tool_name = _wq.get('tool', '')
+        if '__' in _wq_tool_name:
+            _qg_servers.add(_wq_tool_name.split('__')[0])
+    if not _qg_servers:
+        _qg_servers.add('tavily-search')  # default: external verification only
+    quality_gate_tools = [
+        t for t in panel_execution_tools
+        if t['function']['name'].split('__')[0] in _qg_servers
+    ]
+    quality_gate_tools_text = _format_tools_for_prompt(quality_gate_tools)
+    logger.info(f"Quality Gate tool scope: {sorted(_qg_servers)} ({len(quality_gate_tools)} tools)")
+
     # Execute the Master & Apprentice refinement cycle using the helper function
     proposer_response, quality_score, iteration = await _run_refinement_cycle(
         update, context, proposer_task, critic_task, user_prompt, full_history, placeholder_msg, panel_results,
-        orchestrator_service, orchestrator_model, orchestrator_timeout, orchestrator_config, panel_config
+        orchestrator_service, orchestrator_model, orchestrator_timeout, orchestrator_config, panel_config,
+        mcp_service=mcp_service, skill_service=skill_service, available_tools_text=available_tools_text,
+        panel_execution_tool_names=panel_execution_tool_names,
+        quality_gate_tools_text=quality_gate_tools_text
     )
     if quality_score < quality_threshold and iteration == max_iterations:
         try:
@@ -889,7 +1203,7 @@ async def _run_panel_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE
             provider_name=refiner_provider,
             model=refiner_model,
             prompt=full_refiner_prompt,
-            history=full_history,
+            history=[],  # proposer_response already embedded in prompt; full history causes context overflow
             role_name='Refiner',
             request_timeout=refiner_role_config.get('request_timeout_seconds'),
             fallback_provider=fallback_provider,
@@ -898,9 +1212,21 @@ async def _run_panel_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE
         refiner_response = refiner_llm_result['response']
         refiner_retries = refiner_llm_result['retries']
         refiner_fallback_used = refiner_llm_result['fallback_used']
-        
-        # Challenge C: Check if Refiner failed and gracefully fall back to proposer_response
-        if refiner_response.startswith("[Error:") or not refiner_response.strip():
+
+        # Safety net: strip any tool-call JSON the model generated without authorization.
+        # qwen3.5-397b (and similar heavily tool-use-fine-tuned models) may emit delta.tool_calls
+        # even when `tools` is absent from the API request, causing the text to be truncated
+        # at the point where the function call starts and a JSON suffix to be appended.
+        tc_json_start = refiner_response.rfind('{"tool_calls"')
+        if tc_json_start > 0:
+            logger.warning(
+                f"Refiner emitted unsolicited tool-call JSON (pos {tc_json_start}); "
+                f"stripping JSON suffix. Text length before: {len(refiner_response)}"
+            )
+            refiner_response = refiner_response[:tc_json_start].rstrip()
+
+        # Check if Refiner failed and gracefully fall back to proposer_response
+        if refiner_llm_result['is_error'] or not refiner_response.strip():
             logger.warning(f"Refiner failed or returned empty: {refiner_response}. Using proposer response as final answer.")
             final_answer = f"⚠️ **Warning:** The final refinement step was skipped due to an error. The following is the unpolished response.\n\n---\n\n{proposer_response}"
             refiner_status = 'Failure'
@@ -1457,14 +1783,15 @@ async def resume_panel_discussion_entry(update: Update, context: ContextTypes.DE
             found_start = True
             if msg['role'] == 'user':
                 user_prompt = msg['content']
-            else:
+            elif msg.get('content'):  # skip tool-call turns (content=None)
                 assistant_contents.append(msg['content'])
             continue
 
         if found_start:
             if msg['role'] == 'user':
                 break
-            assistant_contents.append(msg['content'])
+            if msg.get('content'):  # skip tool-call turns (content=None)
+                assistant_contents.append(msg['content'])
 
     if not user_prompt and not assistant_contents:
         await query.edit_message_text("Could not find the interaction in history.", parse_mode=None)

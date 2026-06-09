@@ -1,12 +1,91 @@
 import logging
 import asyncio
+import base64
 import config
+import json
+import random
 from typing import List, Dict, Optional, AsyncGenerator, Any
 from google import genai
 from google.genai import types
 from google.genai import errors as google_exceptions
 
 logger = logging.getLogger(__name__)
+
+def map_json_schema_to_gemini(schema_dict: dict) -> types.Schema:
+    if not schema_dict:
+        return None
+        
+    schema_type = schema_dict.get("type", "object").upper()
+    properties = {}
+    for k, v in schema_dict.get("properties", {}).items():
+        properties[k] = map_json_schema_to_gemini(v)
+        
+    items = None
+    if "items" in schema_dict:
+        items = map_json_schema_to_gemini(schema_dict["items"])
+        
+    return types.Schema(
+        type=schema_type,
+        description=schema_dict.get("description"),
+        properties=properties or None,
+        required=schema_dict.get("required"),
+        items=items
+    )
+
+def translate_openai_tools_to_gemini(openai_tools: list) -> list:
+    if not openai_tools:
+        return None
+    function_declarations = []
+    for tool in openai_tools:
+        if tool.get("type") == "function":
+            func = tool.get("function", {})
+            name = func.get("name")
+            description = func.get("description")
+            parameters = func.get("parameters")
+            
+            schema_obj = None
+            if parameters:
+                try:
+                    schema_obj = map_json_schema_to_gemini(parameters)
+                except Exception as e:
+                    logger.warning(f"Failed to parse parameters to types.Schema: {e}.")
+                    schema_obj = parameters
+
+            fd = types.FunctionDeclaration(
+                name=name,
+                description=description,
+                parameters=schema_obj
+            )
+            function_declarations.append(fd)
+            
+    if function_declarations:
+        return [types.Tool(function_declarations=function_declarations)]
+    return None
+
+def _strip_unsigned_tool_call_turns(full_prompt: list) -> list:
+    """
+    Remove legacy tool-call turns that lack a thought_signature so Gemini
+    doesn't reject the request with 400 INVALID_ARGUMENT. Also removes the
+    immediately-following function_response turn to keep the history consistent.
+    """
+    unsigned_indices = set()
+    for idx, c in enumerate(full_prompt):
+        parts = getattr(c, 'parts', None) or []
+        has_fc = any(getattr(p, 'function_call', None) for p in parts)
+        has_sig = any(
+            getattr(p, 'thought_signature', None)
+            for p in parts if getattr(p, 'function_call', None)
+        )
+        if getattr(c, 'role', None) == 'model' and has_fc and not has_sig:
+            unsigned_indices.add(idx)
+            # Also strip the immediately-following user function_response turn
+            if idx + 1 < len(full_prompt):
+                next_parts = getattr(full_prompt[idx + 1], 'parts', None) or []
+                if (getattr(full_prompt[idx + 1], 'role', None) == 'user'
+                        and any(getattr(p, 'function_response', None) for p in next_parts)):
+                    unsigned_indices.add(idx + 1)
+    return [c for idx, c in enumerate(full_prompt) if idx not in unsigned_indices]
+
 
 class GeminiService:
     def __init__(self, api_keys: Optional[List[str]] = None):
@@ -15,77 +94,200 @@ class GeminiService:
         if not self.api_keys:
             logger.warning("GeminiService initialized with no API keys.")
 
-    async def generate_response(self, model: str, prompt: str, context_history: Optional[List[Dict]] = None, request_timeout: int = None) -> AsyncGenerator[str, None]:
+    async def generate_response(self, model: str, prompt: str, context_history: Optional[List[Dict]] = None, request_timeout: int = None, tools: list = None) -> AsyncGenerator[str, None]:
         """Generates a streaming response using instance-scoped clients."""
         if not self.api_keys:
             yield "[Error: Gemini API keys not configured]"
             return
 
-        # Format history for v2 SDK: {'role': 'user', 'parts': [{'text': '...'}]}
+        # Format history for v2 SDK
         gemini_history = []
         if context_history:
             for msg in context_history:
-                role = 'user' if msg.get('role') == 'user' else 'model'
-                content = msg.get('content', '')
-                gemini_history.append({'role': role, 'parts': [{'text': content}]})
+                role = msg.get("role")
+                content = msg.get("content")
+                
+                if role == "user":
+                    gemini_history.append(types.Content(
+                        role="user",
+                        parts=[types.Part(text=content or "")]
+                    ))
+                elif role == "assistant":
+                    parts = []
+                    if content:
+                        parts.append(types.Part(text=content))
+                    
+                    if "tool_calls" in msg:
+                        for tc in msg["tool_calls"]:
+                            args = tc.get("function", {}).get("arguments", {})
+                            if isinstance(args, str):
+                                try:
+                                    args = json.loads(args)
+                                except Exception:
+                                    args = {"arguments": args}
+                            # Restore thought_signature (stored as base64) so Gemini's
+                            # thinking models can validate multi-turn continuity.
+                            sig_b64 = tc.get("gemini_thought_signature")
+                            thought_sig_bytes = base64.b64decode(sig_b64) if sig_b64 else None
+                            parts.append(types.Part(
+                                function_call=types.FunctionCall(
+                                    name=tc.get("function", {}).get("name"),
+                                    args=args
+                                ),
+                                thought_signature=thought_sig_bytes
+                            ))
+                    gemini_history.append(types.Content(
+                        role="model",
+                        parts=parts
+                    ))
+                elif role == "tool":
+                    name = msg.get("name")
+                    if not name and msg.get("tool_call_id"):
+                        for h_msg in context_history:
+                            if h_msg.get("role") == "assistant" and "tool_calls" in h_msg:
+                                for tc in h_msg["tool_calls"]:
+                                    if tc.get("id") == msg.get("tool_call_id"):
+                                        name = tc.get("function", {}).get("name")
+                                        break
+                    if not name:
+                        name = "tool"
+                    try:
+                        resp_dict = json.loads(content)
+                        if not isinstance(resp_dict, dict):
+                            resp_dict = {"result": content}
+                    except Exception:
+                        resp_dict = {"result": content}
+                        
+                    part = types.Part(
+                        function_response=types.FunctionResponse(
+                            name=name,
+                            response=resp_dict
+                        )
+                    )
+                    gemini_history.append(types.Content(
+                        role="user",
+                        parts=[part]
+                    ))
+                else:
+                    gemini_role = 'user' if role == 'user' else 'model'
+                    gemini_history.append(types.Content(
+                        role=gemini_role,
+                        parts=[types.Part(text=content or "")]
+                    ))
         
-        full_prompt = gemini_history
+        full_prompt = list(gemini_history)
         if prompt:
-            full_prompt.append({'role': 'user', 'parts': [{'text': prompt}]})
+            full_prompt.append(types.Content(
+                role="user",
+                parts=[types.Part(text=prompt)]
+            ))
             
+        translated_tools = translate_openai_tools_to_gemini(tools)
         generation_config = types.GenerateContentConfig(
-            max_output_tokens=config.get_gemini_max_output_tokens()
+            max_output_tokens=config.get_gemini_max_output_tokens(),
+            tools=translated_tools
         )
 
-        for i, key in enumerate(self.api_keys):
-            try:
-                logger.info(f"Attempting Gemini request with Key Index: {i}")
-                # Create a local client instance to avoid global state races
-                client = genai.Client(api_key=key)
-                
-                # We do not explicitly pass a timeout config because the v2 SDK aio methods
-                # expect http_options={'timeout': ...} on client initialization.
-                # If needed, it can be added to the client instantiation.
+        thought_sig_stripped = False
 
-                response_stream = await client.aio.models.generate_content_stream(
-                    model=model,
-                    contents=full_prompt,
-                    config=generation_config
-                )
+        # Allow one retry pass: normal first, then with legacy unsigned tool-call turns removed.
+        for _pass in range(2):
+            for i, key in enumerate(self.api_keys):
+                try:
+                    logger.info(f"Attempting Gemini request with Key Index: {i}")
+                    client = genai.Client(api_key=key)
 
-                async for chunk in response_stream:
-                    if hasattr(chunk, 'text') and chunk.text:
-                        yield chunk.text
-                    elif chunk.candidates and chunk.candidates[0].finish_reason:
-                        reason = chunk.candidates[0].finish_reason
-                        if reason != 'STOP':
-                            logger.warning(f"Gemini content blocked/stopped (Key Index: {i}, Reason: {reason})")
-                            yield f"[Error: Content blocked or improperly stopped by Gemini - {reason}]"
-                            return
-                
-                logger.info(f"Gemini stream finished successfully with Key Index: {i}")
-                return # Success, exit function
+                    response_stream = await client.aio.models.generate_content_stream(
+                        model=model,
+                        contents=full_prompt,
+                        config=generation_config
+                    )
 
-            except google_exceptions.APIError as e:
-                # The v2 SDK uses APIError. We can inspect the status.
-                if "429" in str(e) or "quota" in str(e).lower() or "exhausted" in str(e).lower():
-                    logger.warning(f"Gemini key at index {i} is rate-limited, trying next key. Reason: {e}")
-                    continue
-                else:
-                    logger.exception(f"A non-recoverable Gemini error occurred with Key Index {i} (Model: {model}): {e}")
+                    tool_calls = []
+                    async for chunk in response_stream:
+                        if chunk.candidates and chunk.candidates[0].content and chunk.candidates[0].content.parts:
+                            for part in chunk.candidates[0].content.parts:
+                                if part.function_call:
+                                    name = part.function_call.name
+                                    args = part.function_call.args
+                                    args_str = json.dumps(args) if isinstance(args, (dict, list)) else str(args or "{}")
+                                    tc_id = f"call_{random.randint(100000, 999999)}"
+                                    tc_entry = {
+                                        "id": tc_id,
+                                        "type": "function",
+                                        "function": {
+                                            "name": name,
+                                            "arguments": args_str
+                                        }
+                                    }
+                                    # Preserve thought_signature (lives on Part, not FunctionCall)
+                                    # so it can be restored when replaying this turn in future requests.
+                                    if part.thought_signature:
+                                        tc_entry["gemini_thought_signature"] = base64.b64encode(
+                                            part.thought_signature
+                                        ).decode("ascii")
+                                    tool_calls.append(tc_entry)
+
+                        if hasattr(chunk, 'text') and chunk.text:
+                            yield chunk.text
+                        elif chunk.candidates and chunk.candidates[0].finish_reason:
+                            reason = chunk.candidates[0].finish_reason
+                            reason_str = str(reason)
+                            if reason_str in ('STOP', 'FINISH_REASON_UNSPECIFIED', '1'):
+                                pass  # Normal completion
+                            elif 'MAX_TOKENS' in reason_str or reason_str in ('2',):
+                                # Soft truncation: partial content was already streamed; just warn.
+                                logger.warning(f"Gemini response truncated at token limit (Key Index: {i}). Partial content returned.")
+                            else:
+                                # Safety block, recitation, or other hard stop — flag as error.
+                                logger.warning(f"Gemini content blocked (Key Index: {i}, Reason: {reason_str})")
+                                yield f"[Error: Content blocked by Gemini - {reason_str}]"
+                                return
+
+                    if tool_calls:
+                        yield json.dumps({"tool_calls": tool_calls})
+
+                    logger.info(f"Gemini stream finished successfully with Key Index: {i}")
+                    return  # success
+
+                except google_exceptions.APIError as e:
+                    if "429" in str(e) or "quota" in str(e).lower() or "exhausted" in str(e).lower():
+                        logger.warning(f"Gemini key at index {i} is rate-limited, trying next key. Reason: {e}")
+                        continue
+                    elif "thought_signature" in str(e) and not thought_sig_stripped:
+                        # Legacy tool-call turns in history lack thought_signature.
+                        # Strip them (and their paired function_response turns) and retry once.
+                        thought_sig_stripped = True
+                        full_prompt = _strip_unsigned_tool_call_turns(full_prompt)
+                        logger.warning(
+                            f"Gemini rejected request due to missing thought_signature on legacy "
+                            f"tool-call turns (Key Index: {i}). Stripped unsigned turns, retrying..."
+                        )
+                        break  # break key loop → go to next _pass
+                    else:
+                        logger.exception(f"A non-recoverable Gemini error occurred with Key Index {i} (Model: {model}): {e}")
+                        yield f"[Error: A critical error occurred with the Gemini API: {e}]"
+                        return
+                except Exception as e:
+                    if "429" in str(e) or "exhausted" in str(e).lower():
+                        logger.warning(f"Gemini key at index {i} is rate-limited, trying next key. Reason: {e}")
+                        continue
+                    logger.exception(f"An unexpected Gemini error occurred with Key Index {i} (Model: {model}): {e}")
                     yield f"[Error: A critical error occurred with the Gemini API: {e}]"
                     return
-            except Exception as e:
-                # Fallback for unexpected exceptions
-                if "429" in str(e) or "exhausted" in str(e).lower():
-                    logger.warning(f"Gemini key at index {i} is rate-limited, trying next key. Reason: {e}")
-                    continue
-                logger.exception(f"An unexpected Gemini error occurred with Key Index {i} (Model: {model}): {e}")
-                yield f"[Error: A critical error occurred with the Gemini API: {e}]"
+            else:
+                # for-loop completed normally (all keys exhausted, no break)
+                logger.error("All Gemini API keys are rate-limited or failing.")
+                yield "[Error: All Gemini API keys are currently rate-limited or failing.]"
                 return
 
-        logger.error("All Gemini API keys are rate-limited or failing.")
-        yield "[Error: All Gemini API keys are currently rate-limited or failing.]"
+            # Reached here only when key loop broke due to thought_sig strip → retry next pass
+            if not thought_sig_stripped:
+                break
+
+        if thought_sig_stripped:
+            logger.error("Gemini failed even after stripping legacy tool-call turns.")
+            yield "[Error: Gemini rejected the conversation history. Start a fresh conversation with /new.]"
 
     async def list_models(self) -> List[Dict[str, Any]]:
         """Lists available Gemini models using the first working key."""

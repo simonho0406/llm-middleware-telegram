@@ -42,6 +42,7 @@ async def init_database():
     """Initializes the database and creates tables, managing its own connection."""
     os.makedirs(os.path.dirname(config.DB_PATH), exist_ok=True)
     async with aiosqlite.connect(config.DB_PATH) as db:
+        await db.execute("PRAGMA journal_mode=WAL;")
         await db.execute("PRAGMA foreign_keys = ON;")
         await db.execute("CREATE TABLE IF NOT EXISTS chats (chat_id INTEGER PRIMARY KEY, current_thread_id TEXT NOT NULL)")
         await db.execute("""
@@ -53,7 +54,8 @@ async def init_database():
         await db.execute("""
             CREATE TABLE IF NOT EXISTS messages (
                 message_pk INTEGER PRIMARY KEY AUTOINCREMENT, thread_fk INTEGER NOT NULL, role TEXT NOT NULL,
-                content TEXT NOT NULL, timestamp INTEGER NOT NULL,
+                content TEXT, timestamp INTEGER NOT NULL,
+                tool_calls TEXT, tool_call_id TEXT,
                 FOREIGN KEY (thread_fk) REFERENCES threads(thread_pk) ON DELETE CASCADE
             )""")
         await db.execute("""
@@ -74,8 +76,83 @@ async def init_database():
         # Check and migrate existing user_settings table if it has wrong data type
         await _migrate_user_settings_table(db)
         
+        # Check and migrate existing messages table for tool calling columns
+        await _migrate_messages_table(db)
+        
         await db.commit()
         logger.info("Database initialized successfully.")
+
+async def _migrate_messages_table(db: aiosqlite.Connection):
+    """
+    Ensures the messages table has the correct schema:
+      - content column is nullable (tool-calling assistant turns have content=None per OpenAI spec)
+      - tool_calls and tool_call_id columns exist
+    SQLite does not support ALTER COLUMN, so a table-rebuild is used when needed.
+    """
+    try:
+        async with db.cursor() as cursor:
+            await cursor.execute("PRAGMA table_info(messages)")
+            cols_info = await cursor.fetchall()
+
+        existing_col_names = {col[1] for col in cols_info}
+        content_col = next((c for c in cols_info if c[1] == 'content'), None)
+        # PRAGMA table_info: col[3] is the notnull flag (1 = NOT NULL constraint active)
+        content_is_not_null = bool(content_col and content_col[3] == 1)
+
+        if content_is_not_null:
+            # Must rebuild the table to drop the NOT NULL constraint on content.
+            logger.info("Migrating messages table: removing NOT NULL constraint from 'content' column (table rebuild)...")
+
+            # Only copy columns that actually exist in the source table
+            src_cols_list = ["message_pk", "thread_fk", "role", "content", "timestamp"]
+            if 'tool_calls' in existing_col_names:
+                src_cols_list.append("tool_calls")
+            if 'tool_call_id' in existing_col_names:
+                src_cols_list.append("tool_call_id")
+            src_cols = ", ".join(src_cols_list)
+
+            # Drop any leftover table from a previous failed migration attempt so
+            # CREATE TABLE messages_new doesn't immediately raise "table already exists".
+            await db.execute("DROP TABLE IF EXISTS messages_new")
+
+            # Disable FK enforcement for the duration of the copy.  Orphaned rows
+            # (thread_fk pointing to a deleted thread) would otherwise block the INSERT.
+            # PRAGMA foreign_keys must be changed outside an active transaction; all
+            # preceding DDL statements auto-committed any pending tx, so this is safe.
+            await db.execute("PRAGMA foreign_keys = OFF")
+            try:
+                await db.execute("""
+                    CREATE TABLE messages_new (
+                        message_pk INTEGER PRIMARY KEY AUTOINCREMENT,
+                        thread_fk INTEGER NOT NULL,
+                        role TEXT NOT NULL,
+                        content TEXT,
+                        timestamp INTEGER NOT NULL,
+                        tool_calls TEXT,
+                        tool_call_id TEXT,
+                        FOREIGN KEY (thread_fk) REFERENCES threads(thread_pk) ON DELETE CASCADE
+                    )
+                """)
+                await db.execute(f"INSERT INTO messages_new ({src_cols}) SELECT {src_cols} FROM messages")
+                await db.execute("DROP TABLE messages")
+                await db.execute("ALTER TABLE messages_new RENAME TO messages")
+                logger.info("Messages table rebuilt: 'content' is now nullable, tool calling columns present.")
+            finally:
+                await db.execute("PRAGMA foreign_keys = ON")
+            # The rebuild already includes tool_calls/tool_call_id — nothing more to do.
+            return
+
+        # Table already has nullable content; just ensure the tool-call columns exist.
+        if 'tool_calls' not in existing_col_names:
+            logger.info("Migrating messages table: adding 'tool_calls' column.")
+            await db.execute("ALTER TABLE messages ADD COLUMN tool_calls TEXT")
+
+        if 'tool_call_id' not in existing_col_names:
+            logger.info("Migrating messages table: adding 'tool_call_id' column.")
+            await db.execute("ALTER TABLE messages ADD COLUMN tool_call_id TEXT")
+
+    except Exception as e:
+        logger.exception(f"Failed to migrate messages table: {e}")
 
 async def _migrate_user_settings_table(db: aiosqlite.Connection):
     """Migrates user_settings table from TEXT to INTEGER values if needed."""
@@ -216,7 +293,8 @@ async def set_thread_key(chat_id: int, key: str, value: Any, thread_id: Optional
         await db.execute(f"UPDATE threads SET {key} = ? WHERE thread_pk = ?", (value, thread_pk))
         await db.commit()
 
-async def get_thread_history(chat_id: int, thread_id: Optional[str] = None, limit: int = 500) -> List[Dict[str, str]]:
+async def get_thread_history(chat_id: int, thread_id: Optional[str] = None, limit: int = 500) -> List[Dict[str, Any]]:
+    import json
     async with aiosqlite.connect(config.DB_PATH) as db:
         thread_pk = await _get_thread_pk(db, chat_id, thread_id)
         if not thread_pk: return []
@@ -224,25 +302,51 @@ async def get_thread_history(chat_id: int, thread_id: Optional[str] = None, limi
             # Fetch last N messages relative to timestamp
             # We use a subquery to get the latest N, then order them ASC for the LLM
             await cursor.execute(
-                f"SELECT role, content FROM (SELECT role, content, message_pk FROM messages WHERE thread_fk = ? ORDER BY message_pk DESC LIMIT ?) ORDER BY message_pk ASC", 
+                f"SELECT role, content, tool_calls, tool_call_id FROM (SELECT role, content, tool_calls, tool_call_id, message_pk FROM messages WHERE thread_fk = ? ORDER BY message_pk DESC LIMIT ?) ORDER BY message_pk ASC", 
                 (thread_pk, limit)
             )
             rows = await cursor.fetchall()
-            return [{"role": row[0], "content": row[1]} for row in rows]
+            
+            history = []
+            for row in rows:
+                role, content, tool_calls_str, tool_call_id = row
+                msg = {"role": role, "content": content}
+                if tool_calls_str:
+                    try:
+                        msg["tool_calls"] = json.loads(tool_calls_str)
+                    except Exception:
+                        msg["tool_calls"] = None
+                if tool_call_id is not None:
+                    msg["tool_call_id"] = tool_call_id
+                history.append(msg)
+            return history
 
 async def get_thread_history_with_pk(chat_id: int, thread_id: Optional[str] = None, limit: int = 500) -> List[Dict[str, Any]]:
     """Fetches history including message_pk for granular management."""
+    import json
     async with aiosqlite.connect(config.DB_PATH) as db:
         thread_pk = await _get_thread_pk(db, chat_id, thread_id)
         if not thread_pk: return []
         async with db.cursor() as cursor:
             # Similar to get_thread_history but includes message_pk and timestamp
             await cursor.execute(
-                f"SELECT message_pk, role, content, timestamp FROM (SELECT message_pk, role, content, timestamp FROM messages WHERE thread_fk = ? ORDER BY message_pk DESC LIMIT ?) ORDER BY message_pk ASC", 
+                f"SELECT message_pk, role, content, timestamp, tool_calls, tool_call_id FROM (SELECT message_pk, role, content, timestamp, tool_calls, tool_call_id FROM messages WHERE thread_fk = ? ORDER BY message_pk DESC LIMIT ?) ORDER BY message_pk ASC", 
                 (thread_pk, limit)
             )
             rows = await cursor.fetchall()
-            return [{"id": row[0], "role": row[1], "content": row[2], "timestamp": row[3]} for row in rows]
+            history = []
+            for row in rows:
+                msg_pk, role, content, ts, tool_calls_str, tool_call_id = row
+                msg = {"id": msg_pk, "role": role, "content": content, "timestamp": ts}
+                if tool_calls_str:
+                    try:
+                        msg["tool_calls"] = json.loads(tool_calls_str)
+                    except Exception:
+                        msg["tool_calls"] = None
+                if tool_call_id is not None:
+                    msg["tool_call_id"] = tool_call_id
+                history.append(msg)
+            return history
 
 async def delete_messages(chat_id: int, message_ids: List[int]) -> bool:
     """Deletes specific messages by their PKs."""
@@ -283,13 +387,14 @@ async def update_message_content(message_pk: int, new_content: str) -> bool:
         logger.info(f"Updated content for message PK {message_pk}")
         return cursor.rowcount > 0
 
-async def replace_thread_history_dangerous(chat_id: int, history: List[Dict[str, str]], thread_id: Optional[str] = None) -> None:
+async def replace_thread_history_dangerous(chat_id: int, history: List[Dict[str, Any]], thread_id: Optional[str] = None) -> None:
     """
     DEPRECATED: Completely replaces thread history. 
     Use save_message (append) for normal chat flow.
     Only use this for hard resets (e.g., /new or tests).
     """
     import warnings
+    import json
     warnings.warn("replace_thread_history_dangerous is deprecated. Use targeted atomic methods.", DeprecationWarning, stacklevel=2)
     async with aiosqlite.connect(config.DB_PATH) as db:
         thread_pk = await _get_thread_pk(db, chat_id, thread_id)
@@ -299,36 +404,57 @@ async def replace_thread_history_dangerous(chat_id: int, history: List[Dict[str,
             await db.execute("DELETE FROM messages WHERE thread_fk = ?", (thread_pk,))
             if history:
                 ts = int(time.time())
-                messages_to_insert = [(thread_pk, msg['role'], msg['content'], ts + i) for i, msg in enumerate(history)]
-                await db.executemany("INSERT INTO messages (thread_fk, role, content, timestamp) VALUES (?, ?, ?, ?)", messages_to_insert)
+                messages_to_insert = []
+                for i, msg in enumerate(history):
+                    tool_calls_str = json.dumps(msg.get('tool_calls')) if msg.get('tool_calls') is not None else None
+                    tool_call_id = msg.get('tool_call_id')
+                    messages_to_insert.append((thread_pk, msg['role'], msg.get('content'), ts + i, tool_calls_str, tool_call_id))
+                await db.executemany("INSERT INTO messages (thread_fk, role, content, timestamp, tool_calls, tool_call_id) VALUES (?, ?, ?, ?, ?, ?)", messages_to_insert)
             await db.commit()
         except Exception as e:
             await db.rollback()
             raise e
 
 async def remove_last_assistant_message(chat_id: int, thread_id: Optional[str] = None) -> bool:
-    """Removes the last assistant message (highest message_pk) for the thread."""
+    """Removes the last assistant message and any tool-result rows it owns."""
+    import json as _json
     async with aiosqlite.connect(config.DB_PATH) as db:
         thread_pk = await _get_thread_pk(db, chat_id, thread_id)
         if not thread_pk: return False
-        
+
         async with db.cursor() as cursor:
-            # Find the PK of the last assistant message
             await cursor.execute(
-                "SELECT message_pk FROM messages WHERE thread_fk = ? AND role = 'assistant' ORDER BY message_pk DESC LIMIT 1",
+                "SELECT message_pk, tool_calls FROM messages WHERE thread_fk = ? AND role = 'assistant' ORDER BY message_pk DESC LIMIT 1",
                 (thread_pk,)
             )
             row = await cursor.fetchone()
-            if row:
-                message_pk = row[0]
-                await db.execute("DELETE FROM messages WHERE message_pk = ?", (message_pk,))
-                await db.commit()
-                logger.info(f"Removed last assistant message (pk {message_pk}) for reroll in chat {chat_id}")
-                return True
-            return False
+            if not row:
+                return False
 
-async def save_message(chat_id: int, role: str, content: str, thread_id: Optional[str] = None) -> Optional[int]:
+            message_pk, tool_calls_json = row[0], row[1]
+
+            # Delete any tool-result rows whose tool_call_id belongs to this assistant turn.
+            # Without this, /reroll leaves orphaned role=tool rows that corrupt future history.
+            if tool_calls_json:
+                try:
+                    tc_ids = [tc["id"] for tc in _json.loads(tool_calls_json) if tc.get("id")]
+                    if tc_ids:
+                        placeholders = ",".join("?" * len(tc_ids))
+                        await db.execute(
+                            f"DELETE FROM messages WHERE thread_fk = ? AND role = 'tool' AND tool_call_id IN ({placeholders})",
+                            (thread_pk, *tc_ids)
+                        )
+                except Exception:
+                    pass  # malformed JSON is non-fatal; proceed to delete the assistant row
+
+            await db.execute("DELETE FROM messages WHERE message_pk = ?", (message_pk,))
+            await db.commit()
+            logger.info(f"Removed last assistant message (pk {message_pk}) for reroll in chat {chat_id}")
+            return True
+
+async def save_message(chat_id: int, role: str, content: Optional[str], thread_id: Optional[str] = None, tool_calls: Optional[List[Dict[str, Any]]] = None, tool_call_id: Optional[str] = None) -> Optional[int]:
     """Saves (Appends) a single message to the history and returns its message_pk."""
+    import json
     async with aiosqlite.connect(config.DB_PATH) as db:
         thread_pk = await _get_thread_pk(db, chat_id, thread_id)
         if not thread_pk:
@@ -336,10 +462,12 @@ async def save_message(chat_id: int, role: str, content: str, thread_id: Optiona
             return None
 
         timestamp = int(time.time())
+        tool_calls_str = json.dumps(tool_calls) if tool_calls is not None else None
+        
         async with db.cursor() as cursor:
             await cursor.execute(
-                "INSERT INTO messages (thread_fk, role, content, timestamp) VALUES (?, ?, ?, ?)",
-                (thread_pk, role, content, timestamp)
+                "INSERT INTO messages (thread_fk, role, content, timestamp, tool_calls, tool_call_id) VALUES (?, ?, ?, ?, ?, ?)",
+                (thread_pk, role, content, timestamp, tool_calls_str, tool_call_id)
             )
             message_pk = cursor.lastrowid
         

@@ -75,3 +75,4 @@ obj/
 ### Claude Code ###
 .claude/
 data/logs.txt
+.antigravitycli/

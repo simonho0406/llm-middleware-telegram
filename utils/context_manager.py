@@ -173,27 +173,39 @@ async def ensure_context_fits(
     # Calculate effective limit with safety margin
     # We apply the margin to the total input limit to effectively reserve more space
     effective_limit_tokens = int(limits.effective_input_limit * safety_margin)
-    available_tokens = effective_limit_tokens - prompt_tokens
     
-    # If prompt alone is too big, just return empty history (and let generation likely fail or truncate prompt elsewhere)
+    # Separate and protect system messages from truncation
+    system_messages = [msg for msg in history if msg.get("role") == "system"]
+    non_system_history = [msg for msg in history if msg.get("role") != "system"]
+    
+    system_tokens = 0
+    for _msg in system_messages:
+        _content = _msg.get("content", "")
+        if isinstance(_content, str) and _content:
+            system_tokens += count_tokens(_content)
+        elif not isinstance(_content, str) and _content is not None:
+            logger.warning(f"System message has non-string content (type: {type(_content).__name__}); skipping token count.")
+    available_tokens = effective_limit_tokens - prompt_tokens - system_tokens
+    
+    # If prompt and system context alone exceed limits
     if available_tokens <= 0:
-        logger.warning(f"Prompt alone ({prompt_tokens} tokens) exceeds context limit for {model} (Limit: {limits.effective_input_limit})")
-        return [], f"Prompt too long for {model} context window."
+        logger.warning(f"Prompt + system context ({prompt_tokens + system_tokens} tokens) exceeds context limit for {model} (Limit: {limits.effective_input_limit})")
+        return system_messages, f"Prompt and system instructions too long for {model} context window."
 
     # Process history in reverse (newest to oldest) to fill available space
-    truncated_history = []
+    truncated_non_system = []
     current_tokens = 0
-    messages_kept = 0
+    messages_kept = len(system_messages)
     
     # Iterate backwards
-    for msg in reversed(history):
+    for msg in reversed(non_system_history):
         content = msg.get("content", "")
         # Optimize: Avoid counting if content is empty
         msg_tokens = count_tokens(content) if content else 0
         
         if current_tokens + msg_tokens <= available_tokens:
             # We insert at 0 to reconstruct correct order
-            truncated_history.insert(0, msg)
+            truncated_non_system.insert(0, msg)
             current_tokens += msg_tokens
             messages_kept += 1
         else:
@@ -202,16 +214,58 @@ async def ensure_context_fits(
             
     # Check if we removed anything
     original_count = len(history)
-    if messages_kept < original_count:
-        tokens_removed = sum(count_tokens(m.get("content", "")) for m in history) - current_tokens # Estimate removed tokens
-        # Optimization: calculating exact tokens_removed requires counting the excluded ones. 
-        # For logging, we can just say "truncated".
-        # But if we want exact number, we'd have to count the rest. 
-        # For performance, let's just log message count difference.
-        
-        logger.info(f"Context truncated for {model}: {original_count} -> {messages_kept} messages. Used {current_tokens}/{available_tokens} tokens.")
-        info_message = f"Context automatically adjusted for {model}: kept {messages_kept}/{original_count} messages"
-        return truncated_history, info_message
-    
-    logger.debug(f"Context fits: {current_tokens}/{available_tokens} tokens.")
-    return history, None
+    final_history = system_messages + truncated_non_system
+
+    # Repair any tool-call pairs that got split by truncation. The truncator removes
+    # messages individually, so it can drop an assistant tool-call turn while keeping
+    # the following tool-result turn (or vice versa). Both Gemini and OpenAI reject
+    # histories with orphaned tool-call / tool-result messages.
+    final_history = _repair_tool_call_pairs(final_history)
+
+    if len(final_history) < original_count:
+        logger.info(f"Context truncated for {model}: {original_count} -> {len(final_history)} messages. Used {current_tokens + system_tokens}/{effective_limit_tokens} tokens (system protected).")
+        info_message = f"Context automatically adjusted for {model}: kept {len(final_history)}/{original_count} messages"
+        return final_history, info_message
+
+    logger.debug(f"Context fits: {current_tokens + system_tokens}/{effective_limit_tokens} tokens.")
+    return final_history, None
+
+
+def _repair_tool_call_pairs(history: List[Dict]) -> List[Dict]:
+    """
+    Ensure every assistant tool-call turn has matching tool-result turns and vice versa.
+    Truncation can split a paired group; this pass removes whichever half was left behind
+    so LLM APIs never see an orphaned function_call or tool-result.
+    Runs at most 2 sweeps (sufficient for non-nested chains).
+    """
+    for _ in range(2):
+        # IDs advertised by assistant tool-call turns present in history
+        assistant_ids: set = set()
+        for msg in history:
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                for tc in msg["tool_calls"]:
+                    if tc.get("id"):
+                        assistant_ids.add(tc["id"])
+
+        # IDs actually answered by tool-result turns present in history
+        tool_ids: set = set()
+        for msg in history:
+            if msg.get("role") == "tool" and msg.get("tool_call_id"):
+                tool_ids.add(msg["tool_call_id"])
+
+        to_remove: set = set()
+        for idx, msg in enumerate(history):
+            role = msg.get("role")
+            if role == "tool":
+                if msg.get("tool_call_id") not in assistant_ids:
+                    to_remove.add(idx)  # orphaned tool result — its call was truncated
+            elif role == "assistant" and msg.get("tool_calls"):
+                call_ids = {tc["id"] for tc in msg["tool_calls"] if tc.get("id")}
+                if call_ids and not call_ids.issubset(tool_ids):
+                    to_remove.add(idx)  # incomplete tool-call — some results were truncated
+
+        if not to_remove:
+            break
+        history = [msg for idx, msg in enumerate(history) if idx not in to_remove]
+
+    return history

@@ -239,7 +239,7 @@ async def run_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             
             # Add critique prompt to temporary history if needed
             if i > 0:
-                prev_response = discussion_transcript[-1]['content']
+                prev_response = discussion_transcript[-1].get('content') or ''
                 critique_prompt = (
                     "Critique and improve the following response. Focus on accuracy, clarity, and depth. "
                     "Provide a revised version that addresses any shortcomings.\n\n"
@@ -271,7 +271,7 @@ async def run_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             model_name = selected_models[i]['name']
             separator = "\n\n---\n"
             model_header = f"*Turn {i+1}: `{model_name}`*\n"
-            content_body = entry['content']
+            content_body = entry.get('content') or ''
             final_transcript_parts.append(separator + model_header + content_body)
 
         final_transcript = "".join(final_transcript_parts)

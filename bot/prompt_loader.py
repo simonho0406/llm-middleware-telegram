@@ -5,9 +5,18 @@ import datetime
 logger = logging.getLogger(__name__)
 
 def get_environment_context() -> str:
-    now = datetime.datetime.now(datetime.timezone.utc)
+    try:
+        import config as _cfg
+        tz_conf = _cfg._yaml_config.get('timezone', {})
+        offset_hours = tz_conf.get('offset_hours', 0)
+        tz_label = tz_conf.get('label', 'UTC')
+    except Exception:
+        offset_hours = 0
+        tz_label = 'UTC'
+    tz = datetime.timezone(datetime.timedelta(hours=offset_hours))
+    now = datetime.datetime.now(tz)
     date_str = now.strftime('%Y-%m-%d')
-    time_str = now.strftime('%H:%M:%S UTC')
+    time_str = now.strftime(f'%H:%M:%S {tz_label}')
     return f"\n\n---\n\n# Current Environment\nDate: {date_str}\nTime: {time_str}\n"
 
 class PromptManager:

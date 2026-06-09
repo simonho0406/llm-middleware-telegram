@@ -140,7 +140,7 @@ async def test_panel_orchestrator_integration():
     
     # Mock dependencies
     with patch('bot.handlers.discuss_panel_handler.get_robust_llm_response', new_callable=AsyncMock) as mock_llm, \
-         patch('bot.handlers.discuss_panel_handler.config.get_expert_panel_config', return_value={'orchestrator': {'provider': 'test', 'model': 'test'}, 'roles': {'Proposer': {'provider': 'test', 'model': 'test'}, 'Critic': {'provider': 'test', 'model': 'test'}}}), \
+         patch('bot.handlers.discuss_panel_handler.config.get_expert_panel_config', return_value={'orchestrator': {'provider': 'test', 'model': 'test'}, 'roles': {'Proposer': {'provider': 'test', 'model': 'test'}, 'Critic': {'provider': 'test', 'model': 'test'}, 'Refiner': {'provider': 'test', 'model': 'test'}}}), \
          patch('bot.handlers.discuss_panel_handler.storage_manager', new_callable=AsyncMock) as mock_storage, \
          patch('bot.handlers.discuss_panel_handler.send_safe_message', new_callable=AsyncMock) as mock_send:
              
@@ -149,15 +149,18 @@ async def test_panel_orchestrator_integration():
         planner_json = {
             "requires_search": False,
             "search_query": "",
+            "workspace_queries": [],
             "tasks": [
-                {"role": "Proposer", "instruction": "Propose an answer"},
-                {"role": "Critic", "instruction": "Critique the answer"}
+                {"role": "Proposer", "prompt": "Propose an answer"},
+                {"role": "Critic", "prompt": "Critique the answer"},
+                {"role": "Refiner", "prompt": "Polish the final response."}
             ]
         }
         
         quality_json = {
-            "quality_score": 9, # Note: Key is quality_score, not score
-            "refinement_instructions": "None"
+            "quality_score": 90,  # Above threshold (85) so loop terminates after one round
+            "refinement_instructions": "",
+            "tool_calls": []
         }
         
         import json
@@ -165,15 +168,15 @@ async def test_panel_orchestrator_integration():
         
         # Define the sequence of expected responses
         responses = [
-            {'response': json.dumps(planner_json), 'retries': 0, 'fallback_used': False}, # Master Orchestrator (JSON Object)
-            {'response': "Proposer: String theory posits...", 'retries': 0, 'fallback_used': False}, # Proposer
-            {'response': "Critic: Good start, but mention M-theory.", 'retries': 0, 'fallback_used': False}, # Critic
-            {'response': json.dumps(quality_json), 'retries': 0, 'fallback_used': False}, # Quality Gate (JSON Object)
-            {'response': "**Final Answer:** String theory is...", 'retries': 0, 'fallback_used': False} # Synthesis
+            {'response': json.dumps(planner_json), 'retries': 0, 'fallback_used': False, 'is_error': False}, # Master Orchestrator (JSON Object)
+            {'response': "Proposer: String theory posits...", 'retries': 0, 'fallback_used': False, 'is_error': False}, # Proposer
+            {'response': "Critic: Good start, but mention M-theory.", 'retries': 0, 'fallback_used': False, 'is_error': False}, # Critic
+            {'response': json.dumps(quality_json), 'retries': 0, 'fallback_used': False, 'is_error': False}, # Quality Gate (JSON Object)
+            {'response': "**Final Answer:** String theory is...", 'retries': 0, 'fallback_used': False, 'is_error': False} # Synthesis
         ]
         
         # Add an infinite iterator of fallback responses to prevent StopAsyncIteration
-        fallback_response = {'response': "Fallback response", 'retries': 0, 'fallback_used': False}
+        fallback_response = {'response': "Fallback response", 'retries': 0, 'fallback_used': False, 'is_error': False}
         mock_llm.side_effect = chain(responses, repeat(fallback_response))
         
         mock_placeholder = AsyncMock()
@@ -181,9 +184,11 @@ async def test_panel_orchestrator_integration():
         # Run the workflow
         # Signature: (update, context, user_prompt, full_history, placeholder_msg, chat_id)
         # Returns: panel_results, final_answer, debug_info
+        mock_ctx = MagicMock()
+        mock_ctx.application.bot_data = {}  # prevent MagicMock from faking mcp_service
         panel_results, final_answer, debug_info = await _run_panel_workflow(
             update=MagicMock(),
-            context=MagicMock(),
+            context=mock_ctx,
             user_prompt=user_prompt,
             full_history=[],
             placeholder_msg=mock_placeholder,

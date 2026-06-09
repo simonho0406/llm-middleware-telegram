@@ -11,6 +11,17 @@ def mock_context():
     context = MagicMock()
     context.user_data = {}
     context.chat_data = {}
+    # Provide a proper async mcp_service so the new tool-fetching path works.
+    mock_mcp = AsyncMock()
+    mock_mcp.get_all_tools = AsyncMock(return_value=[])
+    # Provide a stub skill_service so the lazy-init path (which reads config) is bypassed.
+    mock_skills = MagicMock()
+    mock_skills.get_skills_as_tools = MagicMock(return_value=[])
+    context.application = MagicMock()
+    context.application.bot_data = {
+        'mcp_service': mock_mcp,
+        'skill_service': mock_skills,
+    }
     return context
 
 
@@ -66,11 +77,15 @@ async def test_auto_retry_enabled_retries_once(mock_context, mock_service_error)
          patch('bot.response_generator.config') as mock_config:
 
         mock_storage.get_thread_history = AsyncMock(return_value=[])
-        # First call returns True (auto_retry setting), subsequent calls return defaults
+        # New code reads enable_mcp and enable_skills before autosearch_chat / auto_retry_on_error.
         mock_storage.get_user_setting = AsyncMock(side_effect=[
             False,  # autosearch_chat (1st call)
+            True,   # enable_mcp  (1st call)
+            True,   # enable_skills (1st call)
             True,   # auto_retry_on_error (1st call - triggers retry)
             False,  # autosearch_chat (retry call)
+            True,   # enable_mcp  (retry call)
+            True,   # enable_skills (retry call)
         ])
         mock_storage.save_message = AsyncMock(return_value=1)
 
@@ -100,8 +115,11 @@ async def test_auto_retry_disabled_no_retry(mock_context, mock_service_always_er
          patch('bot.response_generator.config') as mock_config:
 
         mock_storage.get_thread_history = AsyncMock(return_value=[])
+        # New code reads enable_mcp and enable_skills before autosearch_chat / auto_retry_on_error.
         mock_storage.get_user_setting = AsyncMock(side_effect=[
             False,  # autosearch_chat
+            True,   # enable_mcp
+            True,   # enable_skills
             False,  # auto_retry_on_error (disabled!)
         ])
         mock_storage.save_message = AsyncMock(return_value=1)
@@ -130,10 +148,15 @@ async def test_auto_retry_both_fail_returns_error(mock_context, mock_service_alw
          patch('bot.response_generator.config') as mock_config:
 
         mock_storage.get_thread_history = AsyncMock(return_value=[])
+        # New code reads enable_mcp and enable_skills before autosearch_chat / auto_retry_on_error.
         mock_storage.get_user_setting = AsyncMock(side_effect=[
             False,  # autosearch_chat (1st call)
+            True,   # enable_mcp  (1st call)
+            True,   # enable_skills (1st call)
             True,   # auto_retry_on_error (1st call - triggers retry)
             False,  # autosearch_chat (retry call)
+            True,   # enable_mcp  (retry call)
+            True,   # enable_skills (retry call)
             # No more auto_retry_on_error call because is_retry=True skips it
         ])
         mock_storage.save_message = AsyncMock(return_value=1)
@@ -163,8 +186,11 @@ async def test_no_retry_on_success(mock_context, mock_service_success):
          patch('bot.response_generator.config') as mock_config:
 
         mock_storage.get_thread_history = AsyncMock(return_value=[])
+        # New code reads enable_mcp and enable_skills before autosearch_chat.
         mock_storage.get_user_setting = AsyncMock(side_effect=[
             False,  # autosearch_chat
+            True,   # enable_mcp
+            True,   # enable_skills
             # No auto_retry_on_error call because llm_error_reported_by_model is False
         ])
         mock_storage.save_message = AsyncMock(return_value=1)

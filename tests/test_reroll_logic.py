@@ -323,6 +323,7 @@ async def test_panel_cancel_cleanup(mock_update_context):
     # Better approach:
     mock_panel_task = AsyncMock()
     mock_panel_task.done = MagicMock(return_value=False) 
+    mock_panel_task.cancel = MagicMock()
     
     mock_context.user_data['panel_task'] = mock_panel_task
     

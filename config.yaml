@@ -3,6 +3,11 @@
 # Clean rebuild with verified free models (2025-09-20)
 # =====================================
 
+# --- Locale / Timezone ---
+timezone:
+  offset_hours: 8   # UTC+8 = Taiwan / China Standard Time
+  label: "CST"      # Label shown to the model alongside the time
+
 # --- Storage Backend ---
 storage_backend: "database" # Options: "database", "file"
 
@@ -90,14 +95,14 @@ expert_panel:
   
   # Master & Apprentice Architecture Quality Settings
   quality_threshold: 85
-  max_refinement_iterations: 3
+  max_refinement_iterations: 4
 
   # Orchestrator (Project Manager) - Keep original working configuration
   orchestrator:
     provider: "nvidia"
-    model: "openai/gpt-oss-120b"
+    model: "nvidia/nemotron-3-super-120b-a12b"
     fallback_provider: "nvidia"
-    fallback_model: "nvidia/nemotron-3-super-120b-a12b"
+    fallback_model: "google/gemma-4-31b-it"
     request_timeout_seconds: 600
 
   # Expert Panel Roles - Restore original working models
@@ -151,3 +156,28 @@ rate_limits:
 utility_agent:
   provider: "gemini"
   model: "gemini-1.5-flash-latest"
+
+# --- Model Context Protocol (MCP) Servers ---
+# Declares standard stdio-based MCP servers dynamically mounted at startup.
+mcp_servers:
+  - name: "sqlite-tools"
+    command: "uvx"
+    args: ["mcp-server-sqlite", "--db-path", "file:data/bot_sessions.db?mode=ro&uri=true"]
+    transport: "stdio"
+    panel_execution: true    # Read-only history queries permitted; write_query/create_table blocked by hooks
+    pass_env: []             # sqlite-tools needs no API keys
+
+  - name: "tavily-search"
+    command: "npx"
+    args: ["-y", "tavily-mcp"]
+    transport: "stdio"
+    panel_execution: true    # Web search allowed in panel Quality Gate
+    pass_env: ["TAVILY_API_KEY"]
+
+  - name: "notion-workspace"
+    command: "npx"
+    args: ["-y", "@notionhq/notion-mcp-server"]
+    transport: "stdio"
+    panel_execution: true    # Knowledge lookup allowed in panel Quality Gate
+    pass_env: ["NOTION_TOKEN", "OPENAI_API_KEY"]  # notion-mcp uses OPENAI_API_KEY for embeddings
+
