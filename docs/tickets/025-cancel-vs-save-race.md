@@ -1,6 +1,15 @@
 # 025 — Cancel-mid-save can lose assistant message
 
-## Severity: Medium
+## Severity: High (upgraded from Medium)
+
+A validation review noted that this is a silent corruption bug — the user
+sees the AI's reply but next /reroll shows the previous prompt because
+history has no record of this turn. No telemetry surfaces the loss.
+
+Also note the fix-direction must use `current_task().cancelling() > 0`
+(Python 3.11+) or `asyncio.shield(save)`. The `current_task().cancelled()`
+check that's currently in the code is dead — it always returns False from
+inside the task's own coroutine.
 
 ## Problem
 

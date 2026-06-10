@@ -1,6 +1,16 @@
 # 026 — Edited command messages re-enter active conversation handler
 
-## Severity: Medium
+## Severity: High (upgraded from Medium)
+
+Validation review pointed out that `process_update(new_update)` is called
+from inside an already-running handler task, which is itself counted in
+PTB's `concurrent_updates` semaphore. Re-entering dispatch synchronously
+can deadlock the semaphore under pressure, or at minimum count a single
+user action twice toward the limit. This is potentially more dangerous
+than the zombie-panel-task framing.
+
+Fix-direction note: in PTB v20+, the queue is `application.update_queue`,
+and the put method is `put_nowait`.
 
 ## Problem
 

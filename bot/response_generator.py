@@ -73,11 +73,19 @@ def _build_tool_catalog_section(mcp_tools: list, skill_tools: list) -> str:
 async def _generate_and_send_response(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int, prompt: str, current_thread_id: str, is_reroll: bool = False, force_truncate: bool = False, placeholder_message = None, skip_save: bool = False, task_key: str = 'llm_task') -> None:
     """Wraps the response generation in a cancellable task."""
     
-    # SYSTEMIC FIX: Defensively cancel any existing task on this key to prevent zombie leak
+    # SYSTEMIC FIX: Defensively cancel any existing task on this key to prevent zombie leak.
+    # Also clean up the orphan's pending user-message PK so its row doesn't sit in DB forever.
     old_task = context.chat_data.get(task_key)
     if old_task and not old_task.done():
         logger.warning(f"(Chat {chat_id}) Systemic Concurrency Catch: Cancelling zombie '{task_key}' before spinning up new task.")
+        _orphan_pk = getattr(old_task, '_pending_user_message_pk', None)
         old_task.cancel()
+        if _orphan_pk is not None:
+            try:
+                await storage_manager.delete_messages(chat_id, [_orphan_pk])
+                logger.info(f"(Chat {chat_id}) Reaped orphan user-message pk={_orphan_pk} from cancelled zombie task.")
+            except Exception as _cleanup_err:
+                logger.warning(f"(Chat {chat_id}) Failed to delete orphan user-message pk={_orphan_pk}: {_cleanup_err}")
 
     task = asyncio.create_task(
         _generate_and_send_response_task(update, context, chat_id, user_id, prompt, current_thread_id, is_reroll, force_truncate, placeholder_message, skip_save)
@@ -249,24 +257,20 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
     raw_full_llm_response = ""
     llm_error_reported_by_model = False
 
-    # Tracked background tasks for this generation. Previously this used a
-    # single shared chat-wide set ('_bg_tasks'). With PTB's concurrent_updates=
-    # True, two parallel handler tasks for the same chat would commingle their
-    # draft-finalizer tasks; cancellation of one would cancel the other's
-    # still-active drafts, leaving a stuck "█" cursor on the user's screen.
-    # Per-call scoping: hold the set in a local variable so each generation
-    # owns its own; expose it as the current call's bg_tasks for the outer
-    # wrapper's cancellation cleanup (keyed by the current asyncio task).
-    bg_tasks: set = set()
+    # Tracked background tasks for this generation. Per-task (not per-chat) so
+    # concurrent_updates=True doesn't let two handlers' drafts cancel each other.
+    # Recursion (auto-retry calls _generate_llm_response from within itself)
+    # must REUSE the parent's set, not overwrite it — otherwise the parent's
+    # pending finalizers become unreachable from the outer cancel cleanup.
     _current_task = asyncio.current_task()
-    if _current_task is not None:
-        # Attach the set as an attribute on the task itself so the outer
-        # wrapper's CancelledError handler can find it via the same task ref.
-        # asyncio.Task allows arbitrary attribute attachment.
-        try:
-            _current_task._llm_bg_tasks = bg_tasks  # type: ignore[attr-defined]
-        except AttributeError:
-            pass  # task may be a special object; tolerate
+    bg_tasks = getattr(_current_task, '_llm_bg_tasks', None) if _current_task is not None else None
+    if bg_tasks is None:
+        bg_tasks = set()
+        if _current_task is not None:
+            try:
+                _current_task._llm_bg_tasks = bg_tasks  # type: ignore[attr-defined]
+            except AttributeError:
+                pass
 
     def _track_task(coro):
         """Create a tracked fire-and-forget task."""
@@ -298,12 +302,26 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
         last_draft_time = time.time()
         draft_throttle_seconds = 0.5
         
+        # active_draft_id is scoped to THIS asyncio task (not chat_data) so
+        # concurrent handlers in the same chat don't trample each other's
+        # streaming drafts. The previous chat-wide slot was the same race
+        # class as bg_tasks/pending_pk (fixes #5/#6).
         if enable_streaming:
-            old_draft_id = context.chat_data.get('active_draft_id')
+            old_draft_id = getattr(_current_task, '_active_draft_id', None) if _current_task is not None else None
             if old_draft_id is not None:
                 _track_task(finalize_draft(context, chat_id, old_draft_id))
-            context.chat_data['active_draft_id'] = draft_id
-            
+            if _current_task is not None:
+                try:
+                    _current_task._active_draft_id = draft_id  # type: ignore[attr-defined]
+                except AttributeError:
+                    pass
+
+        def _is_still_my_draft() -> bool:
+            return (
+                _current_task is not None
+                and getattr(_current_task, '_active_draft_id', None) == draft_id
+            )
+
         try:
             logger.info(f"{log_prefix}Starting LLM generation (Turn {turn})...")
             async for chunk in service.generate_response(
@@ -313,15 +331,19 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
                 tools=tools if tools else None
             ):
                 raw_full_llm_response += chunk
-                
+
                 if enable_streaming and (time.time() - last_draft_time) > draft_throttle_seconds:
-                    if context.chat_data.get('active_draft_id') == draft_id:
+                    if _is_still_my_draft():
                         _track_task(send_draft_message(context, chat_id, draft_id, raw_full_llm_response + " █"))
                     last_draft_time = time.time()
-                    
-            if enable_streaming and context.chat_data.get('active_draft_id') == draft_id:
+
+            if enable_streaming and _is_still_my_draft():
                 _track_task(finalize_draft(context, chat_id, draft_id))
-                context.chat_data.pop('active_draft_id', None)
+                if _current_task is not None:
+                    try:
+                        _current_task._active_draft_id = None  # type: ignore[attr-defined]
+                    except AttributeError:
+                        pass
 
             # Check the fully-assembled response for the error sentinel — only the
             # bracket-delimited form [Error: ...] is the provider sentinel; checking

@@ -108,15 +108,25 @@ class GeminiService:
         return client
 
     async def close(self) -> None:
-        """Drop cached genai.Client instances on bot shutdown / polling restart.
+        """Release cached genai.Client httpx/gRPC pools on bot shutdown / polling restart.
 
-        google-genai's Client does not expose an async close; the best we can
-        do is drop our refs so GC can reclaim them. CRITICAL: must clear the
-        dict so the next polling-loop iteration creates fresh clients bound
-        to the new event loop (mirrors providers.py provider-cache reset).
+        google-genai's Client exposes `client.aio.aclose()` as a coroutine that
+        awaits the underlying httpx/gRPC transport teardown. Without it, the
+        sockets stay bound to the (about-to-be-closed) event loop and the next
+        polling-loop iteration raises "Event loop is closed" on every Gemini
+        call. Iterate defensively so one broken client doesn't block the rest;
+        tolerate older SDK versions where `.aio.aclose` may not exist.
         """
+        for key, client in list(self._clients.items()):
+            try:
+                aio = getattr(client, 'aio', None)
+                aclose = getattr(aio, 'aclose', None) if aio is not None else None
+                if aclose is not None:
+                    await aclose()
+            except Exception as e:
+                logger.warning(f"Non-fatal error closing Gemini client for key idx: {e}")
         self._clients.clear()
-        logger.info("GeminiService client cache cleared.")
+        logger.info("GeminiService client cache closed and cleared.")
 
     async def generate_response(self, model: str, prompt: str, context_history: Optional[List[Dict]] = None, request_timeout: int = None, tools: list = None) -> AsyncGenerator[str, None]:
         """Generates a streaming response using instance-scoped clients."""

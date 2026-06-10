@@ -8,18 +8,30 @@ logger = logging.getLogger(__name__)
 
 TAVILY_API_URL = "https://api.tavily.com/search"
 
-async def _tavily_search(query: str) -> dict:
-    """
-    Performs a web search using the Tavily HTTP API.
+async def _tavily_search(query: str, mcp_service=None) -> dict:
+    """Web search via Tavily MCP (if provided) with HTTP fallback.
 
-    Note: previously this function also attempted to route through the active
-    Tavily MCP server via a module-level global. That created a hidden cross-
-    task dependency on MCP sessions whose anyio cancel scopes are owned by the
-    supervisor task — calling `execute_tool` from a /search handler task could
-    interleave with the supervisor and corrupt the session. The MCP path now
-    lives only in the panel orchestrator (which routes through the supervisor
-    via touch_mcp_last_used). Manual /search uses the HTTP API directly.
+    The MCP route is preferred when available because it shares auth/caching
+    with the panel pipeline. The previous design read MCP from a module-level
+    global set by the supervisor — that's been removed. Callers now pass the
+    `mcp_service` reference explicitly (looked up via app.bot_data) so foreign
+    tasks never reach into the supervisor's session by accident.
+
+    Note: a `session.call_tool` from a non-supervisor task is safe — anyio's
+    cancel-scope invariant applies to stdio_client lifetime, not individual
+    RPCs. The earlier removal of MCP routing here was based on faulty reasoning
+    and has been reverted.
     """
+    if mcp_service is not None and "tavily-search" in getattr(mcp_service, "sessions", {}):
+        try:
+            logger.info(f"Routing Tavily search '{query}' through MCP server.")
+            result_str = await mcp_service.execute_tool("tavily-search", "tavily_search", {"query": query})
+            if result_str and not result_str.startswith("[Error:"):
+                return {'status': 'success', 'content': result_str}
+            logger.warning(f"Tavily MCP returned error/empty: '{result_str[:120] if isinstance(result_str, str) else result_str}'. Falling back to HTTP.")
+        except Exception as e:
+            logger.warning(f"Tavily MCP call raised {type(e).__name__}: {e}. Falling back to HTTP.")
+
     if not config.TAVILY_API_KEY:
         logger.warning("Tavily API key is not configured.")
         return {'status': 'error', 'message': "Tavily search is not configured. Please set TAVILY_API_KEY."}
@@ -116,7 +128,7 @@ async def execute_parallel_google_searches(queries: list[str]) -> dict:
             
     return successful_results
 
-async def perform_search(query: str, manual: bool = False) -> dict:
+async def perform_search(query: str, manual: bool = False, mcp_service=None) -> dict:
     """
     Dispatcher function to perform a web search based on manual/automated intent.
     Manual searches use Tavily for high-quality summaries. Automated searches use Google CSE.
@@ -129,14 +141,14 @@ async def perform_search(query: str, manual: bool = False) -> dict:
     logger.info(f"Performing {'MANUAL' if manual else 'AUTOMATED'} web search for '{query}' using provider: {provider}")
 
     if provider == "tavily":
-        return await _tavily_search(query)
+        return await _tavily_search(query, mcp_service=mcp_service)
     elif provider == "google":
         return await _google_search(query)
     else:
         logger.error(f"Unsupported web search provider: {provider}")
         return {'status': 'error', 'message': f"Unsupported web search provider '{provider}'."}
 
-async def perform_multi_search(queries: list[str], manual: bool = False) -> dict:
+async def perform_multi_search(queries: list[str], manual: bool = False, mcp_service=None) -> dict:
     """
     Dispatcher function to perform multiple web searches concurrently.
     Returns a combined string of all results.
@@ -161,7 +173,7 @@ async def perform_multi_search(queries: list[str], manual: bool = False) -> dict
         return {'status': 'success', 'content': "\n\n".join(combined_content)}
         
     elif provider == "tavily":
-        tasks = [_tavily_search(q) for q in unique_queries]
+        tasks = [_tavily_search(q, mcp_service=mcp_service) for q in unique_queries]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
         combined_content = []

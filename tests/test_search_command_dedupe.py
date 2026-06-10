@@ -136,7 +136,10 @@ async def test_search_reply_handling():
                     await misc_commands.search_command(update, context)
                     
                     # Verify search performed with reply text
-                    mock_search.perform_search.assert_called_with("reply query", manual=True)
+                    # mcp_service is looked up from app.bot_data and may be a MagicMock here;
+                    # ANY accepts whatever the mock returns.
+                    from unittest.mock import ANY
+                    mock_search.perform_search.assert_called_with("reply query", manual=True, mcp_service=ANY)
                     
                     # Verify user query saved (since history empty)
                     mock_storage.save_message.assert_any_call(123, 'user', 'reply query')

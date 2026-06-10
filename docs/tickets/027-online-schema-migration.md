@@ -32,6 +32,12 @@ Possible outcomes:
 - The migration's INSERT...SELECT and the chat-handler INSERT
   interleave under WAL — partial visibility.
 
+## Peer issue (also affected)
+
+`_migrate_user_settings_table` (database_storage.py:157) has the same shape
+— DROP + recreate + re-insert without `BEGIN EXCLUSIVE`, runs on every
+boot. Same data-loss window for the `user_settings` table. Fix together.
+
 ## Fix direction
 
 Detect whether the migration is needed first

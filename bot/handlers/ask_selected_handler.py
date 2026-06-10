@@ -450,7 +450,13 @@ async def _execute_council_flow(update: Update, context: ContextTypes.DEFAULT_TY
     model_map = {}
     results = {} 
 
-    # Register task for cancellation
+    # Register task for cancellation. Defensively cancel any previous task on
+    # this slot first (concurrent_updates=True can let two /ask_selected
+    # invocations race for the same chat).
+    _old_task = context.chat_data.get('llm_task')
+    if _old_task and not _old_task.done():
+        logger.warning(f"(Chat {update.effective_chat.id}) Cancelling zombie llm_task before ask_selected override.")
+        _old_task.cancel()
     context.chat_data['llm_task'] = asyncio.current_task()
 
     # Fetch context history (limit to 500 lines)

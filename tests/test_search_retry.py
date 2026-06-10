@@ -92,6 +92,7 @@ async def test_search_retry_flow():
                 await misc_commands.retry_search_callback(mock_update, mock_context)
                 
                 # Verify search was called again
-                mock_search.assert_called_with('test query', manual=True)
+                from unittest.mock import ANY
+                mock_search.assert_called_with('test query', manual=True, mcp_service=ANY)
             else:
                 pytest.fail("retry_search_callback not implemented yet")

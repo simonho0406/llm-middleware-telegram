@@ -122,7 +122,14 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
         await send_safe_message(context, update, f"❌ Search tool denied by local policy.\n\nReason: _{str(e)}_")
         return
 
-    # Register task for cancellation
+    # Register task for cancellation. Defensively cancel any previous task on
+    # this slot first — concurrent_updates=True can race two /search invocations
+    # in the same chat, and without this the first one runs to completion under
+    # the second's identity, ignoring /cancel.
+    _old_task = context.chat_data.get('llm_task')
+    if _old_task and not _old_task.done():
+        logger.warning(f"{log_prefix}Cancelling zombie llm_task before search override.")
+        _old_task.cancel()
     context.chat_data['llm_task'] = asyncio.current_task()
 
     try:
@@ -138,10 +145,16 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
             logger.exception(f"Failed to send network error message to user: {e_inner}")
         return
 
+    # Pass the supervisor-managed MCP service so Tavily can route through MCP
+    # when available. Read from bot_data directly (no global, no spawn) — only
+    # use it if already initialized.
+    _app = getattr(context, 'application', None)
+    _mcp_for_search = _app.bot_data.get('mcp_service') if _app is not None else None
+
     if is_multi_search:
-        search_response = await web_search_service.perform_multi_search(search_queries, manual=not automated)
+        search_response = await web_search_service.perform_multi_search(search_queries, manual=not automated, mcp_service=_mcp_for_search)
     else:
-        search_response = await web_search_service.perform_search(query, manual=not automated)
+        search_response = await web_search_service.perform_search(query, manual=not automated, mcp_service=_mcp_for_search)
 
     if search_response['status'] == 'error':
         if automated and fallback_content:
