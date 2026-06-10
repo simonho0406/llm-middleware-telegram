@@ -87,11 +87,14 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
         await task
     except asyncio.CancelledError:
         logger.info(f"(Chat {chat_id}) LLM task '{task_key}' was cancelled cleanly.")
-        # Cleanup any orphaned background tasks (draft finalization, etc.)
-        bg_tasks = context.chat_data.get('_bg_tasks', set())
-        for t in list(bg_tasks):
-            if not t.done():
-                t.cancel()
+        # Cancel ONLY this task's own tracked background tasks (draft finalizers,
+        # etc.). The set is attached to the task via _llm_bg_tasks so concurrent
+        # handlers in the same chat don't cancel each other's drafts.
+        bg_tasks = getattr(task, '_llm_bg_tasks', None)
+        if bg_tasks:
+            for t in list(bg_tasks):
+                if not t.done():
+                    t.cancel()
 
 async def _process_history_for_llm(context_history: list, prompt: str, is_reroll: bool, log_prefix: str) -> list:
     if context_history and context_history[-1].get('role') == 'user' and context_history[-1].get('content') == prompt:
@@ -246,8 +249,24 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
     raw_full_llm_response = ""
     llm_error_reported_by_model = False
 
-    # Tracked background tasks set for safe cleanup on cancellation
-    bg_tasks = context.chat_data.setdefault('_bg_tasks', set())
+    # Tracked background tasks for this generation. Previously this used a
+    # single shared chat-wide set ('_bg_tasks'). With PTB's concurrent_updates=
+    # True, two parallel handler tasks for the same chat would commingle their
+    # draft-finalizer tasks; cancellation of one would cancel the other's
+    # still-active drafts, leaving a stuck "█" cursor on the user's screen.
+    # Per-call scoping: hold the set in a local variable so each generation
+    # owns its own; expose it as the current call's bg_tasks for the outer
+    # wrapper's cancellation cleanup (keyed by the current asyncio task).
+    bg_tasks: set = set()
+    _current_task = asyncio.current_task()
+    if _current_task is not None:
+        # Attach the set as an attribute on the task itself so the outer
+        # wrapper's CancelledError handler can find it via the same task ref.
+        # asyncio.Task allows arbitrary attribute attachment.
+        try:
+            _current_task._llm_bg_tasks = bg_tasks  # type: ignore[attr-defined]
+        except AttributeError:
+            pass  # task may be a special object; tolerate
 
     def _track_task(coro):
         """Create a tracked fire-and-forget task."""
@@ -479,18 +498,28 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
 async def _generate_and_send_response_task(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int, prompt: str, current_thread_id: str, is_reroll: bool = False, force_truncate: bool = False, placeholder_message = None, skip_save: bool = False) -> None:
     log_prefix = f"(Chat {chat_id}) "
 
+    # Pending-PK is attached to *this* task object (not chat_data) so concurrent
+    # handlers in the same chat don't race for a single shared slot. /cancel
+    # reads the PK from the task it just cancelled, guaranteeing it deletes the
+    # row that belongs to that specific generation.
+    pending_pk = None
+    _current_task = asyncio.current_task()
+
     # --- Archival Step 1: Secure the Input ---
     if not skip_save:
         try:
             if is_reroll:
                 # For reroll, we remove the faulty previous answer so the prompt is now the last message
                 await storage_manager.remove_last_assistant_message(chat_id)
-                # We don't save a new prompt, so there's no PK to track for cancellation cleanup
-                context.chat_data['pending_user_message_pk'] = None
+                # No new user prompt → no PK to track
             else:
                 # For normal messages, we APPEND the user prompt immediately
-                pk = await storage_manager.save_message(chat_id, 'user', prompt)
-                context.chat_data['pending_user_message_pk'] = pk
+                pending_pk = await storage_manager.save_message(chat_id, 'user', prompt)
+                if _current_task is not None:
+                    try:
+                        _current_task._pending_user_message_pk = pending_pk  # type: ignore[attr-defined]
+                    except AttributeError:
+                        pass
         except Exception as e:
             logger.exception(f"{log_prefix}Failed to save/update initial state: {e}")
             await send_safe_message(context, update, "⚠️ An error occurred while saving your message. Please try again.")
@@ -549,12 +578,13 @@ async def _generate_and_send_response_task(update: Update, context: ContextTypes
         try:
             await storage_manager.save_message(chat_id, 'assistant', final_content)
             logger.info(f"{log_prefix}Assistant response saved to archive.")
-            # Clear pending PK since the interaction block is now complete and stable
-            context.chat_data.pop('pending_user_message_pk', None)
+            # Clear pending PK — interaction block is now complete and stable
+            if _current_task is not None:
+                try:
+                    _current_task._pending_user_message_pk = None  # type: ignore[attr-defined]
+                except AttributeError:
+                    pass
         except Exception as e_hist:
             logger.exception(f"{log_prefix}Failed to save assistant response: {e_hist}")
     elif skip_save:
         logger.info(f"{log_prefix}Skipping output archival (skip_save=True)")
-    
-    # Final safety cleanup for any leaked keys (e.g. if error prevented saving)
-    context.chat_data.pop('pending_user_message_pk', None)

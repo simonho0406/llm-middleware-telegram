@@ -91,8 +91,32 @@ class GeminiService:
     def __init__(self, api_keys: Optional[List[str]] = None):
         """Initializes the Gemini service with a list of API keys for rate-limit rotation."""
         self.api_keys = api_keys if api_keys is not None else config.GEMINI_API_KEYS
+        # Cache one genai.Client per API key. Each client wraps an httpx/grpc
+        # connection pool — constructing a new one per request leaks sockets
+        # (the SDK has no synchronous finalizer). Persistent clients also keep
+        # the pool warm, removing connect-startup latency on each call.
+        self._clients: Dict[str, "genai.Client"] = {}
         if not self.api_keys:
             logger.warning("GeminiService initialized with no API keys.")
+
+    def _get_client(self, api_key: str) -> "genai.Client":
+        """Lazily create-and-cache a genai.Client for the given API key."""
+        client = self._clients.get(api_key)
+        if client is None:
+            client = genai.Client(api_key=api_key)
+            self._clients[api_key] = client
+        return client
+
+    async def close(self) -> None:
+        """Drop cached genai.Client instances on bot shutdown / polling restart.
+
+        google-genai's Client does not expose an async close; the best we can
+        do is drop our refs so GC can reclaim them. CRITICAL: must clear the
+        dict so the next polling-loop iteration creates fresh clients bound
+        to the new event loop (mirrors providers.py provider-cache reset).
+        """
+        self._clients.clear()
+        logger.info("GeminiService client cache cleared.")
 
     async def generate_response(self, model: str, prompt: str, context_history: Optional[List[Dict]] = None, request_timeout: int = None, tools: list = None) -> AsyncGenerator[str, None]:
         """Generates a streaming response using instance-scoped clients."""
@@ -195,7 +219,7 @@ class GeminiService:
             for i, key in enumerate(self.api_keys):
                 try:
                     logger.info(f"Attempting Gemini request with Key Index: {i}")
-                    client = genai.Client(api_key=key)
+                    client = self._get_client(key)
 
                     response_stream = await client.aio.models.generate_content_stream(
                         model=model,
@@ -297,7 +321,7 @@ class GeminiService:
 
         for i, key in enumerate(self.api_keys):
             try:
-                client = genai.Client(api_key=key)
+                client = self._get_client(key)
                 # v2 SDK: client.models.list()
                 models_iter = await asyncio.to_thread(client.models.list)
                 
@@ -341,7 +365,7 @@ class GeminiService:
         working_key = None
         for i, key in enumerate(self.api_keys):
             try:
-                client = genai.Client(api_key=key)
+                client = self._get_client(key)
                 await asyncio.to_thread(client.models.list)
                 logger.info(f"Found working Gemini key at index {i} for concurrent requests.")
                 working_key = key
@@ -353,8 +377,8 @@ class GeminiService:
             logger.exception("No working Gemini key found for concurrent requests.")
             return {model: "[Error: No available API keys]" for model in ask_models}
 
-        # Create localized client for this batch
-        batch_client = genai.Client(api_key=working_key)
+        # Reuse the pooled client for this batch (cached per key, not per call)
+        batch_client = self._get_client(working_key)
         
         full_prompt = []
         if context_history:

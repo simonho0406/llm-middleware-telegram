@@ -15,23 +15,14 @@ except ImportError:
     StdioServerParameters = None
     stdio_client = None
 
-_active_mcp_service = None
-
-def get_active_mcp_service():
-    """Retrieve the globally active McpClientService instance."""
-    global _active_mcp_service
-    return _active_mcp_service
-
 class McpClientService:
     def __init__(self, server_configs: List[Dict[str, Any]]):
         self.server_configs = server_configs
         self.sessions: Dict[str, "ClientSession"] = {}
         self.exit_stack = contextlib.AsyncExitStack()
-        
+
     async def connect_all(self):
         """Iterates configs, starts stdio clients, initializes sessions, runs startup handshake."""
-        global _active_mcp_service
-        _active_mcp_service = self
         if not stdio_client:
             logger.error("mcp SDK is not installed. Cannot start MCP Client Subsystem.")
             return
@@ -122,10 +113,13 @@ class McpClientService:
             return f"[Error: Exception during tool execution: {str(e)}]"
 
     async def cleanup_all(self):
-        """Cleanly closes sessions and terminates child subprocesses."""
-        global _active_mcp_service
-        if _active_mcp_service is self:
-            _active_mcp_service = None
+        """Cleanly closes sessions and terminates child subprocesses.
+
+        Must be called from the SAME asyncio task that called connect_all() —
+        anyio cancel scopes inside stdio_client require same-task entry/exit.
+        See utils/service_registry.py for the supervisor pattern that enforces
+        this in production.
+        """
         try:
             await self.exit_stack.aclose()
             self.sessions.clear()

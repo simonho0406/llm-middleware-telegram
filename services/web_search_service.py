@@ -10,22 +10,16 @@ TAVILY_API_URL = "https://api.tavily.com/search"
 
 async def _tavily_search(query: str) -> dict:
     """
-    Performs a web search using the Tavily API (routing through Tavily MCP if active, falling back to raw HTTP API).
-    """
-    # 1. Attempt routing through Tavily MCP server if active
-    try:
-        from services.mcp_service import get_active_mcp_service
-        mcp_service = get_active_mcp_service()
-        if mcp_service and "tavily-search" in mcp_service.sessions:
-            logger.info(f"Routing Tavily search query '{query}' through active Tavily MCP server.")
-            result_str = await mcp_service.execute_tool("tavily-search", "tavily_search", {"query": query})
-            if result_str and not result_str.startswith("[Error:"):
-                return {'status': 'success', 'content': result_str}
-            logger.warning(f"Tavily MCP search returned error or empty response: '{result_str}'. Falling back to raw HTTP API.")
-    except Exception as e:
-        logger.warning(f"Failed to route search through Tavily MCP: {e}. Falling back to raw HTTP API.")
+    Performs a web search using the Tavily HTTP API.
 
-    # 2. Fallback to raw HTTP API
+    Note: previously this function also attempted to route through the active
+    Tavily MCP server via a module-level global. That created a hidden cross-
+    task dependency on MCP sessions whose anyio cancel scopes are owned by the
+    supervisor task — calling `execute_tool` from a /search handler task could
+    interleave with the supervisor and corrupt the session. The MCP path now
+    lives only in the panel orchestrator (which routes through the supervisor
+    via touch_mcp_last_used). Manual /search uses the HTTP API directly.
+    """
     if not config.TAVILY_API_KEY:
         logger.warning("Tavily API key is not configured.")
         return {'status': 'error', 'message': "Tavily search is not configured. Please set TAVILY_API_KEY."}

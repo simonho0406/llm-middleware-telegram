@@ -138,19 +138,28 @@ def get_config_for_provider(provider_name: str) -> dict | None:
      return get_provider_details().get(provider_name)
  
 async def shutdown_providers():
-     """Gracefully closes all initialized provider services."""
-     global _initialized_services
-     if not _initialized_services:
-         return
- 
-     logger.info("Shutting down LLM provider services...")
-     for name, service in _initialized_services.items():
-         if hasattr(service, 'close'):
-             try:
-                 await service.close()
-                 logger.debug(f"Closed service: {name}")
-             except Exception as e:
-                 logger.exception(f"Error closing service '{name}': {e}")
-     
-     _initialized_services.clear()
-     logger.info("All LLM providers shutdown.")
+     """Gracefully closes all initialized provider services.
+
+     CRITICAL: also resets `_provider_details_cache`. The cache holds service
+     instances whose internal httpx.AsyncClient connection pools are bound to
+     the *current* asyncio event loop. main.py's polling loop creates a new
+     event loop on each restart after a NetworkError — if we kept the cache,
+     the next iteration would return services bound to a closed loop, and
+     every chat request would raise "RuntimeError: Event loop is closed".
+     """
+     global _initialized_services, _provider_details_cache
+
+     if _initialized_services:
+         logger.info("Shutting down LLM provider services...")
+         for name, service in _initialized_services.items():
+             if hasattr(service, 'close'):
+                 try:
+                     await service.close()
+                     logger.debug(f"Closed service: {name}")
+                 except Exception as e:
+                     logger.exception(f"Error closing service '{name}': {e}")
+         _initialized_services.clear()
+         logger.info("All LLM providers shutdown.")
+
+     # Always reset cache, even if _initialized_services was empty
+     _provider_details_cache = None

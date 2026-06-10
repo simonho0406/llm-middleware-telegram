@@ -41,9 +41,12 @@ async def test_normal_chat_cancel_success(mock_update_context):
     """
     mock_update, mock_context = mock_update_context
     
-    # Setup Active Task
+    # Setup Active Task. _pending_user_message_pk is attached by
+    # _generate_and_send_response_task; for a task with no pending PK it stays
+    # None. Set explicitly because MagicMock auto-generates attribute reads.
     mock_task = MagicMock()
     mock_task.done.return_value = False
+    mock_task._pending_user_message_pk = None
     mock_context.chat_data['llm_task'] = mock_task
     
     # Execute

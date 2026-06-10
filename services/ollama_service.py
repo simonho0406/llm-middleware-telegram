@@ -20,13 +20,27 @@ def get_ollama_client() -> ollama.AsyncClient:
     return _client_instance
 
 async def close():
-    """Closes the shared Ollama client."""
+    """Closes the shared Ollama client and releases its httpx connection pool.
+
+    CRITICAL: ollama.AsyncClient wraps an httpx.AsyncClient that captures the
+    asyncio event loop at construction time. If we don't aclose() it, the
+    next polling-loop iteration (after a NetworkError restart) will reuse
+    sockets bound to a closed loop, raising "Event loop is closed" on every
+    Ollama call. The leaked sockets also accumulate as FDs over uptime.
+    """
     global _client_instance
-    if _client_instance:
-       # Best effort cleanup for cached client
-       pass
-    _client_instance = None
-    logger.info("Ollama client closed.")
+    if _client_instance is not None:
+        # ollama.AsyncClient stores its httpx client as `_client` (private but stable
+        # across recent ollama-python versions). Fall back to inspecting attributes
+        # so we don't crash if the upstream renames it.
+        httpx_client = getattr(_client_instance, '_client', None)
+        if httpx_client is not None:
+            try:
+                await httpx_client.aclose()
+            except Exception as e:
+                logger.warning(f"Non-fatal error closing Ollama httpx client: {e}")
+        _client_instance = None
+        logger.info("Ollama client closed and connection pool released.")
 
 async def check_ollama_health(client: ollama.AsyncClient) -> bool:
     """
