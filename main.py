@@ -65,11 +65,6 @@ def main() -> None:
     from bot.handlers.context_sidebar_handler import context_sidebar_handler, context_callback_handler
     from bot.middleware import auth_middleware
 
-    async def mcp_idle_watchdog(context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Repeating job: shut down idle MCP subprocesses to reclaim memory."""
-        from utils.service_registry import shutdown_mcp_service_if_idle
-        await shutdown_mcp_service_if_idle(context.application)
-
     async def post_init_with_commands(application: Application):
         logger.info("Initializing provider details...")
         get_provider_details()
@@ -131,23 +126,18 @@ def main() -> None:
         except Exception as e:
             logger.exception(f"Failed to get bot info: {e}")
 
-        # MCP idle watchdog: runs every 5 min, frees ~150-200 MB after 30 min of inactivity
-        application.job_queue.run_repeating(mcp_idle_watchdog, interval=300, first=300, name="mcp_idle_watchdog")
-        logger.info("MCP idle watchdog scheduled (interval: 5 min, idle threshold: 30 min).")
+        # MCP lifecycle is owned by a supervisor task spawned on first use
+        # (see utils/service_registry.py). The supervisor handles its own idle
+        # shutdown — no external watchdog job needed.
 
     async def cleanup_services(application: Application):
         """Lifecycle hook to clean up resources on shutdown."""
         logger.info("Running shutdown lifecycle hook...")
         await shutdown_providers()
-        # Terminate MCP subprocesses (Node.js/uvx) so they don't orphan on the host
-        mcp_svc = application.bot_data.get('mcp_service')
-        if mcp_svc:
-            logger.info("Shutting down MCP subprocesses...")
-            try:
-                await mcp_svc.cleanup_all()
-            except Exception as e:
-                logger.warning(f"Non-fatal error during shutdown MCP cleanup: {e}")
-            application.bot_data['mcp_service'] = None
+        # Signal MCP supervisor to terminate; it owns cleanup_all() in its own task
+        # (anyio cancel scopes must be exited from the task that entered them).
+        from utils.service_registry import shutdown_mcp_supervisor
+        await shutdown_mcp_supervisor(application)
 
     async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error("Exception while handling an update:", exc_info=context.error)

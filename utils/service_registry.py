@@ -1,19 +1,31 @@
 """
 Idempotent, race-free accessors for shared MCP and Skill services.
 
-Both bot/response_generator.py and bot/handlers/discuss_panel_handler.py need
-MCP/Skill services. The naïve pattern — check bot_data, initialize if None —
-has a race condition: two concurrent coroutines can both observe None, both call
-connect_all(), and spawn duplicate subprocesses. Only the last write to bot_data
-survives; the first instance is leaked.
+## MCP supervisor pattern
 
-These helpers use double-checked locking with asyncio.Lock stored in bot_data.
-The event loop is single-threaded, so the lock prevents interleaving at the
-single await boundary (connect_all / load_skills). They are safe to call
-concurrently from any number of coroutines.
+The MCP SDK's `stdio_client()` wraps stdio subprocesses in `anyio` cancel scopes
+that enforce a strict invariant: the same asyncio task that *entered* a scope
+must be the one to *exit* it. If `connect_all()` runs in Task A and any other
+task (e.g. an APScheduler job, the post_shutdown_hook) calls `cleanup_all()`,
+anyio raises `RuntimeError: Attempted to exit cancel scope in a different task`.
+That leaves subprocesses as zombies and corrupts the asyncio event loop state.
 
-When app is None (QA scripts, test harnesses) the service is created fresh and
-returned unregistered — callers are responsible for cleanup in that case.
+To respect that invariant, the entire MCP service lifecycle (connect_all,
+keep-alive, idle shutdown, final cleanup) is owned by a single long-lived
+**supervisor task** spawned on first use. Callers communicate with it via
+asyncio events:
+
+  * `mcp_request_event` — set by callers wanting the service
+  * `mcp_ready_event`   — set by supervisor when the service is connected
+  * `mcp_shutdown_event`— set by bot shutdown to terminate the supervisor
+
+The supervisor handles its own idle timeout internally (no external watchdog
+needed). When idle for `idle_seconds`, it runs `cleanup_all()` in its own task
+context (safe) and goes back to waiting for the next request. On the next
+request, it reconnects transparently.
+
+When `app is None` (QA/test contexts), services are created fresh and returned
+unregistered — callers are responsible for cleanup in that case.
 """
 import asyncio
 import logging
@@ -23,20 +35,129 @@ import config
 
 logger = logging.getLogger(__name__)
 
-# How long (seconds) the MCP service must be idle before the watchdog shuts it down.
-# Configurable via config.yaml key `mcp_idle_timeout_seconds`; defaults to 30 min.
+# Idle threshold before the supervisor shuts the MCP subprocesses down to free
+# memory. The supervisor reconnects transparently on the next request.
 _DEFAULT_MCP_IDLE_SECONDS = 30 * 60
+
+# How often the supervisor wakes to check for idle/shutdown.
+_SUPERVISOR_TICK_SECONDS = 60
+
+
+async def _mcp_supervisor(app, idle_seconds: int) -> None:
+    """Long-lived task owning the entire MCP service lifecycle.
+
+    Loop structure:
+      1. Wait for a request event OR shutdown event
+      2. If shutdown: exit. If request: connect_all(), set ready_event
+      3. Tick every `_SUPERVISOR_TICK_SECONDS` checking idle / shutdown
+      4. On idle: cleanup_all() in THIS task (safe), then back to step 1
+      5. On shutdown: cleanup_all() and return
+    """
+    from services.mcp_service import McpClientService
+
+    request_event: asyncio.Event = app.bot_data['mcp_request_event']
+    ready_event: asyncio.Event = app.bot_data['mcp_ready_event']
+    shutdown_event: asyncio.Event = app.bot_data['mcp_shutdown_event']
+
+    try:
+        while True:
+            # ── Phase 1: wait for a request or shutdown ────────────────────
+            if app.bot_data.get('mcp_service') is None:
+                req_task = asyncio.create_task(request_event.wait())
+                shut_task = asyncio.create_task(shutdown_event.wait())
+                done, pending = await asyncio.wait(
+                    {req_task, shut_task}, return_when=asyncio.FIRST_COMPLETED
+                )
+                for t in pending:
+                    t.cancel()
+
+                if shutdown_event.is_set():
+                    logger.info("MCP supervisor: shutdown signal received (no service to clean up).")
+                    return
+
+                request_event.clear()
+
+                # ── Phase 2: connect ───────────────────────────────────────
+                logger.info("MCP supervisor: connecting to all configured servers...")
+                server_configs = config._yaml_config.get("mcp_servers", [])
+                svc = McpClientService(server_configs)
+                try:
+                    await svc.connect_all()
+                except Exception as e:
+                    logger.error(f"MCP supervisor: connect_all failed: {e}")
+                    # Signal callers so they don't block forever; mcp_service stays None
+                    ready_event.set()
+                    await asyncio.sleep(5)  # avoid tight reconnect loop
+                    ready_event.clear()
+                    continue
+
+                app.bot_data['mcp_service'] = svc
+                app.bot_data['mcp_last_used'] = time.monotonic()
+                ready_event.set()
+                logger.info("MCP supervisor: service ready.")
+
+            # ── Phase 3: idle-check loop ───────────────────────────────────
+            should_cleanup = False
+            should_return = False
+            while True:
+                try:
+                    await asyncio.wait_for(shutdown_event.wait(), timeout=_SUPERVISOR_TICK_SECONDS)
+                except asyncio.TimeoutError:
+                    pass
+
+                if shutdown_event.is_set():
+                    should_cleanup = True
+                    should_return = True
+                    break
+
+                last_used = app.bot_data.get('mcp_last_used', 0)
+                idle_for = time.monotonic() - last_used
+                if idle_for >= idle_seconds:
+                    logger.info(
+                        f"MCP supervisor: service idle for {idle_for/60:.0f} min — "
+                        f"shutting down subprocesses to free ~150-200 MB. "
+                        f"Will reconnect on next request."
+                    )
+                    should_cleanup = True
+                    break
+
+            # ── Phase 4: cleanup in supervisor's own task ──────────────────
+            if should_cleanup:
+                svc = app.bot_data.get('mcp_service')
+                app.bot_data['mcp_service'] = None
+                ready_event.clear()
+                if svc is not None:
+                    try:
+                        await svc.cleanup_all()
+                    except Exception as e:
+                        logger.warning(f"MCP supervisor: non-fatal cleanup error: {e}")
+
+            if should_return:
+                logger.info("MCP supervisor: exiting on shutdown signal.")
+                return
+            # Otherwise loop back to wait for next request
+
+    except asyncio.CancelledError:
+        logger.info("MCP supervisor: cancelled; running final cleanup.")
+        svc = app.bot_data.get('mcp_service')
+        app.bot_data['mcp_service'] = None
+        if svc is not None:
+            try:
+                await svc.cleanup_all()
+            except Exception as e:
+                logger.warning(f"MCP supervisor: cleanup error during cancellation: {e}")
+        raise
 
 
 async def get_or_init_mcp_service(app, enable_mcp: bool):
-    """Return the shared McpClientService, initializing it exactly once.
+    """Return the shared McpClientService, starting the supervisor if needed.
 
     Args:
         app:        The PTB Application instance, or None in QA/test contexts.
         enable_mcp: Whether MCP is enabled for this chat/session.
 
     Returns:
-        A connected McpClientService, or None if enable_mcp is False.
+        A connected McpClientService, or None if disabled or connect failed.
     """
     if not enable_mcp:
         return None
@@ -46,45 +167,53 @@ async def get_or_init_mcp_service(app, enable_mcp: bool):
     server_configs = config._yaml_config.get("mcp_servers", [])
 
     if app is None:
-        # QA / test context — create a fresh unregistered instance
+        # QA/test context — create a fresh unregistered instance
         svc = McpClientService(server_configs)
         await svc.connect_all()
         return svc
 
-    # Fast path: already initialized (no lock needed — read-only check)
-    if app.bot_data.get('mcp_service') is not None:
-        app.bot_data['mcp_last_used'] = time.monotonic()
+    # Pre-injected service (e.g. unit-test fixtures that put a mock in bot_data
+    # before any call): don't take ownership, just return what's there.
+    # The supervisor only manages services it created itself.
+    if (
+        app.bot_data.get('mcp_service') is not None
+        and 'mcp_supervisor_task' not in app.bot_data
+    ):
         return app.bot_data['mcp_service']
 
-    # Slow path: acquire lock, double-check, then initialize
+    # Initialize supervisor on first call (under the init lock)
     if 'mcp_init_lock' not in app.bot_data:
         app.bot_data['mcp_init_lock'] = asyncio.Lock()
-
     async with app.bot_data['mcp_init_lock']:
-        # Double-check after acquiring the lock
-        if app.bot_data.get('mcp_service') is not None:
-            app.bot_data['mcp_last_used'] = time.monotonic()
-            return app.bot_data['mcp_service']
+        if 'mcp_supervisor_task' not in app.bot_data:
+            app.bot_data['mcp_request_event'] = asyncio.Event()
+            app.bot_data['mcp_ready_event'] = asyncio.Event()
+            app.bot_data['mcp_shutdown_event'] = asyncio.Event()
+            app.bot_data['mcp_last_used'] = 0.0
+            app.bot_data['mcp_supervisor_task'] = asyncio.create_task(
+                _mcp_supervisor(app, idle_seconds=_DEFAULT_MCP_IDLE_SECONDS),
+                name="mcp_supervisor",
+            )
+            logger.info("MCP supervisor task spawned.")
 
-        logger.info("Initializing MCP service (connect_all)...")
-        svc = McpClientService(server_configs)
-        await svc.connect_all()
-        app.bot_data['mcp_service'] = svc
-        app.bot_data['mcp_last_used'] = time.monotonic()
-        logger.info("MCP service initialized and registered in bot_data.")
-        return svc
+    # Touch BEFORE requesting so the supervisor sees a fresh last_used
+    app.bot_data['mcp_last_used'] = time.monotonic()
+
+    # Fast path: service already ready
+    if (
+        app.bot_data.get('mcp_service') is not None
+        and app.bot_data['mcp_ready_event'].is_set()
+    ):
+        return app.bot_data['mcp_service']
+
+    # Slow path: signal supervisor and wait for ready
+    app.bot_data['mcp_request_event'].set()
+    await app.bot_data['mcp_ready_event'].wait()
+    return app.bot_data.get('mcp_service')
 
 
 async def get_or_init_skill_service(app, enable_skills: bool):
-    """Return the shared SkillRegistryService, initializing it exactly once.
-
-    Args:
-        app:           The PTB Application instance, or None in QA/test contexts.
-        enable_skills: Whether skill registry is enabled for this chat/session.
-
-    Returns:
-        A loaded SkillRegistryService, or None if enable_skills is False.
-    """
+    """Return the shared SkillRegistryService, initializing it exactly once."""
     if not enable_skills:
         return None
 
@@ -116,59 +245,41 @@ async def get_or_init_skill_service(app, enable_skills: bool):
 
 
 def touch_mcp_last_used(app) -> None:
-    """Refresh the MCP last-used timestamp just before a tool call executes.
-
-    Prevents the idle watchdog from deciding the service is idle while a long-running
-    request still holds a live reference and is actively executing tools.
-    """
+    """Refresh the MCP last-used timestamp just before a tool call executes."""
     if app is not None and app.bot_data.get('mcp_service') is not None:
         app.bot_data['mcp_last_used'] = time.monotonic()
 
 
-async def shutdown_mcp_service_if_idle(app, idle_seconds: int = _DEFAULT_MCP_IDLE_SECONDS) -> bool:
-    """Shut down MCP subprocesses if no request has used them within idle_seconds.
+async def shutdown_mcp_supervisor(app, timeout: float = 15.0) -> None:
+    """Signal the MCP supervisor to terminate cleanly, then await its exit.
 
-    Called by the APScheduler watchdog every 5 minutes. On shutdown, the service
-    reference is cleared so the next get_or_init_mcp_service() call reconnects
-    transparently. Returns True if shutdown occurred, False otherwise.
-
-    Race safety: bot_data['mcp_service'] is set to None BEFORE cleanup_all() is
-    awaited, so any concurrent fast-path caller that races past the None check will
-    find None and fall through to the slow path (which blocks on mcp_init_lock
-    until cleanup finishes, then re-initializes cleanly).
+    Called from cleanup_services on bot shutdown. Safe to call multiple times.
     """
     if app is None:
-        return False
+        return
 
-    if app.bot_data.get('mcp_service') is None:
-        return False  # Already shut down or never initialized
+    shutdown_event = app.bot_data.get('mcp_shutdown_event')
+    sup_task = app.bot_data.get('mcp_supervisor_task')
 
-    last_used = app.bot_data.get('mcp_last_used', 0)
-    if time.monotonic() - last_used < idle_seconds:
-        return False  # Still within the active window
+    if shutdown_event is None or sup_task is None:
+        return  # Supervisor never started
 
-    if 'mcp_init_lock' not in app.bot_data:
-        app.bot_data['mcp_init_lock'] = asyncio.Lock()
+    if shutdown_event.is_set() and sup_task.done():
+        return  # Already shut down
 
-    async with app.bot_data['mcp_init_lock']:
-        # Re-check inside the lock — a concurrent request may have updated last_used
-        mcp_service = app.bot_data.get('mcp_service')
-        if mcp_service is None:
-            return False
-
-        last_used = app.bot_data.get('mcp_last_used', 0)
-        if time.monotonic() - last_used < idle_seconds:
-            return False
-
-        elapsed_min = (time.monotonic() - last_used) / 60
-        logger.info(
-            f"MCP service idle for {elapsed_min:.0f} min — shutting down subprocesses "
-            f"to free memory (~150-200 MB). Will reconnect on next MCP request."
+    shutdown_event.set()
+    try:
+        await asyncio.wait_for(asyncio.shield(sup_task), timeout=timeout)
+        logger.info("MCP supervisor exited cleanly.")
+    except asyncio.TimeoutError:
+        logger.warning(
+            f"MCP supervisor did not exit within {timeout}s; cancelling. "
+            f"Subprocesses may remain until OS reaps them."
         )
-        # Null out the reference first so concurrent fast-path callers see None
-        app.bot_data['mcp_service'] = None
+        sup_task.cancel()
         try:
-            await mcp_service.cleanup_all()
-        except Exception as e:
-            logger.warning(f"Non-fatal error during idle MCP subprocess cleanup: {e}")
-        return True
+            await asyncio.wait_for(sup_task, timeout=5.0)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            pass
+    except Exception as e:
+        logger.warning(f"Error awaiting MCP supervisor shutdown: {e}")
