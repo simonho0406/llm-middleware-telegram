@@ -24,6 +24,28 @@ from bot.messaging import send_safe_message, send_plain_message
 from bot.handlers.configure_panel_handler import load_panel_config
 from utils.context_manager import ensure_context_fits, get_model_context_limits, truncate_text_to_tokens
 from .misc_commands import cancel_command
+
+# Per-chat panel locks. Stored at module scope (not in user_data) so the Lock's
+# event-loop binding stays consistent with the live loop. If PTB persistence
+# were ever enabled, asyncio primitives in user_data would carry a dead loop
+# binding after a polling-loop restart. The dict is repopulated lazily.
+# Reset by reset_panel_locks() in cleanup_services on shutdown.
+_panel_locks: dict[int, asyncio.Lock] = {}
+
+
+def _get_panel_lock(chat_id: int) -> asyncio.Lock:
+    """Lazily create and cache a per-chat asyncio.Lock bound to the live loop."""
+    lock = _panel_locks.get(chat_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _panel_locks[chat_id] = lock
+    return lock
+
+
+def reset_panel_locks() -> None:
+    """Discard all cached panel locks. Call on polling-loop restart so the next
+    iteration creates fresh locks bound to the new event loop."""
+    _panel_locks.clear()
 from bot.errors import ProviderUnavailableError
 
 # Define conversation states
@@ -1283,7 +1305,9 @@ async def _run_panel_task_background(update: Update, context: ContextTypes.DEFAU
                 {"role": "user", "content": user_prompt},
                 {"role": "assistant", "content": final_answer}
             ],
-            "lock": asyncio.Lock()
+            # Lock lives in the module-level _panel_locks dict (see ticket 030);
+            # storing it here would carry a dead event-loop binding across a
+            # polling-loop restart if user_data persistence were enabled.
         }
 
         await assembling_msg.delete()
@@ -1360,7 +1384,7 @@ async def handle_follow_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.reply_text("Error: Discussion context was lost. Please start a new discussion with /discuss_panel.", parse_mode=None)
         return ConversationHandler.END
 
-    async with panel_state["lock"]:
+    async with _get_panel_lock(chat_id):
         placeholder = await update.message.reply_text("Panel is reconvening...", parse_mode=None)
 
         try:
@@ -1512,7 +1536,7 @@ async def search_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     search_content = search_results.get('content', '')
     panel_state = context.user_data.get('panel_state')
     if panel_state and panel_state.get('full_transcript'):
-        async with panel_state["lock"]:
+        async with _get_panel_lock(chat_id):
             panel_state['full_transcript'].append({'role': 'user', 'content': f"Search results for '{query}':\n{search_content}"})
             await placeholder_msg.edit_text("✅ Search results have been added to the discussion context." , parse_mode=None)
     else:
@@ -1646,7 +1670,7 @@ async def reroll_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text("⚠️ No discussion history found to reroll. Please start a new one.", parse_mode=None)
         return AWAITING_FOLLOW_UP
 
-    async with panel_state["lock"]:
+    async with _get_panel_lock(chat_id):
         last_user_prompt = next((msg['content'] for msg in reversed(panel_state['full_transcript']) if msg['role'] == 'user'), panel_state.get('original_prompt'))
 
         if not last_user_prompt:

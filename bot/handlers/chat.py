@@ -7,7 +7,6 @@ Handles text messages and user interactions for the bot.
 import logging
 import asyncio
 import re
-import copy
 from telegram import Update, constants, error
 from telegram.ext import MessageHandler, filters, ContextTypes
 import config
@@ -137,25 +136,24 @@ async def handle_edited_message(update: Update, context: ContextTypes.DEFAULT_TY
 
     # Check if the edited message is a command
     if edited_text.startswith('/'):
-        logger.info(f"{log_prefix}Edit detected as command: '{edited_text}'. Re-processing as new message.")
-        # Create a shallow copy of the update but treat the edited message as a new message
-        # We need to construct a new Update object to avoid modifying the original in place in a way that might confuse PTB
-        # However, PTB updates are immutable-ish.
-        # The cleanest way is to manually trigger the application's update processing with a modified update
-        
-        # Construct a new Update. We can't easily instantiate Update with all fields, 
-        # but we can try to rely on the fact that handlers look at update.message.
-        # A safer approach for PTB v20+ is to use the existing update but 'move' the edited_message to message.
-        
-        new_update = copy.copy(update)
-        new_update.message = update.edited_message
-        new_update.edited_message = None
-        
-        # We must ensure we don't trigger an infinite loop. 
-        # Since we set edited_message to None, the edited_message_handler shouldn't trigger.
-        # The CommandHandler or MessageHandler should trigger.
-        
-        await context.application.process_update(new_update)
+        # NOTE: previously we built a synthetic Update via copy.copy() and called
+        # application.process_update(new_update) — that re-entered the entire
+        # handler dispatch (auth middleware, conversation handlers) from inside
+        # an already-running handler task. PTB counts both the original AND the
+        # synthetic dispatch toward the concurrent_updates semaphore, which can
+        # deadlock under pressure. Re-entry also bypasses PTB's normal update-
+        # queue serialization, allowing two ConversationHandler entries to race
+        # for the same chat (e.g. /discuss_panel edited mid-discussion would
+        # spawn a second panel task, leaving a zombie with the same MCP refs).
+        # The safe behavior is to inform the user instead of re-dispatching.
+        logger.info(f"{log_prefix}Edit detected as command '{edited_text}'. Asking user to resend rather than re-dispatching.")
+        try:
+            await update.edited_message.reply_text(
+                "I can't re-run a command from an edit. Please send the command as a new message.",
+                parse_mode=None,
+            )
+        except Exception as e:
+            logger.warning(f"{log_prefix}Failed to notify user about edited command: {e}")
         return
 
     history = await storage_manager.get_thread_history_with_pk(chat_id)

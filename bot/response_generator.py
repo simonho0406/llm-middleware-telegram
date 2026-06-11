@@ -590,15 +590,20 @@ async def _generate_and_send_response_task(update: Update, context: ContextTypes
         message_sent_successfully = False
 
 
-    # Check if the task was cancelled before saving history
-    if asyncio.current_task().cancelled():
-        logger.info(f"{log_prefix}Task was cancelled, skipping history update.")
-        return
-
     # --- Archival Step 2: Secure the Output ---
+    # CRITICAL: the assistant message has already been sent to the user. If
+    # /cancel arrives between send_safe_message and save_message, the user
+    # sees content that never landed in history — /reroll then shows the
+    # *prior* turn, confusing the user. The previous guard was
+    # `asyncio.current_task().cancelled()`, which always returns False from
+    # within the task (it only flips True after the task has finished).
+    # Use asyncio.shield() so the save survives cancellation; we still
+    # propagate CancelledError so the wrapper sees the task as cancelled.
     if not skip_save and response_data.get('error') is None and message_sent_successfully:
         try:
-            await storage_manager.save_message(chat_id, 'assistant', final_content)
+            await asyncio.shield(
+                storage_manager.save_message(chat_id, 'assistant', final_content)
+            )
             logger.info(f"{log_prefix}Assistant response saved to archive.")
             # Clear pending PK — interaction block is now complete and stable
             if _current_task is not None:
@@ -606,6 +611,10 @@ async def _generate_and_send_response_task(update: Update, context: ContextTypes
                     _current_task._pending_user_message_pk = None  # type: ignore[attr-defined]
                 except AttributeError:
                     pass
+        except asyncio.CancelledError:
+            # The save itself was not cancelled (shield ensures completion);
+            # this CancelledError comes from the wrapper. Re-raise.
+            raise
         except Exception as e_hist:
             logger.exception(f"{log_prefix}Failed to save assistant response: {e_hist}")
     elif skip_save:

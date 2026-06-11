@@ -75,7 +75,11 @@ async def _mcp_supervisor(app, idle_seconds: int) -> None:
                     logger.info("MCP supervisor: shutdown signal received (no service to clean up).")
                     return
 
-                request_event.clear()
+                # Note: request_event is NOT cleared until connect succeeds. On
+                # failure, the next loop iteration will see it still set and retry.
+                # This eliminates the edge-loss window where a caller could set
+                # request_event during the failure-path sleep only to have it
+                # silently consumed (see ticket 028).
 
                 # ── Phase 2: connect ───────────────────────────────────────
                 logger.info("MCP supervisor: connecting to all configured servers...")
@@ -85,15 +89,18 @@ async def _mcp_supervisor(app, idle_seconds: int) -> None:
                     await svc.connect_all()
                 except Exception as e:
                     logger.error(f"MCP supervisor: connect_all failed: {e}")
-                    # Signal callers so they don't block forever; mcp_service stays None
+                    # Release current waiters with mcp_service=None so they don't hang
                     ready_event.set()
-                    await asyncio.sleep(5)  # avoid tight reconnect loop
+                    await asyncio.sleep(5)  # backoff so we don't tight-loop on persistent failure
                     ready_event.clear()
+                    # request_event remains set — next iteration retries
                     continue
 
+                # Success: commit state, then clear the request signal
                 app.bot_data['mcp_service'] = svc
                 app.bot_data['mcp_last_used'] = time.monotonic()
                 ready_event.set()
+                request_event.clear()
                 logger.info("MCP supervisor: service ready.")
 
             # ── Phase 3: idle-check loop ───────────────────────────────────

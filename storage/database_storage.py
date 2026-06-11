@@ -121,21 +121,32 @@ async def _migrate_messages_table(db: aiosqlite.Connection):
             # preceding DDL statements auto-committed any pending tx, so this is safe.
             await db.execute("PRAGMA foreign_keys = OFF")
             try:
-                await db.execute("""
-                    CREATE TABLE messages_new (
-                        message_pk INTEGER PRIMARY KEY AUTOINCREMENT,
-                        thread_fk INTEGER NOT NULL,
-                        role TEXT NOT NULL,
-                        content TEXT,
-                        timestamp INTEGER NOT NULL,
-                        tool_calls TEXT,
-                        tool_call_id TEXT,
-                        FOREIGN KEY (thread_fk) REFERENCES threads(thread_pk) ON DELETE CASCADE
-                    )
-                """)
-                await db.execute(f"INSERT INTO messages_new ({src_cols}) SELECT {src_cols} FROM messages")
-                await db.execute("DROP TABLE messages")
-                await db.execute("ALTER TABLE messages_new RENAME TO messages")
+                # BEGIN EXCLUSIVE serializes against any concurrent writer
+                # (e.g. an in-flight save_message during a polling-loop
+                # restart). Without it, the INSERT...SELECT and the
+                # DROP TABLE can interleave with a writer's INSERT, losing
+                # the writer's row when the original table is dropped.
+                await db.execute("BEGIN EXCLUSIVE")
+                try:
+                    await db.execute("""
+                        CREATE TABLE messages_new (
+                            message_pk INTEGER PRIMARY KEY AUTOINCREMENT,
+                            thread_fk INTEGER NOT NULL,
+                            role TEXT NOT NULL,
+                            content TEXT,
+                            timestamp INTEGER NOT NULL,
+                            tool_calls TEXT,
+                            tool_call_id TEXT,
+                            FOREIGN KEY (thread_fk) REFERENCES threads(thread_pk) ON DELETE CASCADE
+                        )
+                    """)
+                    await db.execute(f"INSERT INTO messages_new ({src_cols}) SELECT {src_cols} FROM messages")
+                    await db.execute("DROP TABLE messages")
+                    await db.execute("ALTER TABLE messages_new RENAME TO messages")
+                    await db.execute("COMMIT")
+                except Exception:
+                    await db.execute("ROLLBACK")
+                    raise
                 logger.info("Messages table rebuilt: 'content' is now nullable, tool calling columns present.")
             finally:
                 await db.execute("PRAGMA foreign_keys = ON")
@@ -171,38 +182,40 @@ async def _migrate_user_settings_table(db: aiosqlite.Connection):
             
             if value_column and value_column.upper() == 'TEXT':
                 logger.info("Migrating user_settings table from TEXT to INTEGER values...")
-                
-                # Read existing data
+
+                # Read existing data first (outside the exclusive tx so we can
+                # build the row list with Python-side conversion).
                 await cursor.execute("SELECT chat_id, key, value FROM user_settings")
                 existing_data = await cursor.fetchall()
-                
-                # Drop and recreate table with correct schema
-                await db.execute("DROP TABLE user_settings")
-                await db.execute("""
-                    CREATE TABLE user_settings (
-                        chat_id INTEGER NOT NULL,
-                        key TEXT NOT NULL,
-                        value INTEGER NOT NULL,  -- Booleans stored as 0 or 1
-                        PRIMARY KEY (chat_id, key),
-                        FOREIGN KEY (chat_id) REFERENCES chats(chat_id) ON DELETE CASCADE
-                    )""")
-                
-                # Convert and restore data
-                for chat_id, key, old_value in existing_data:
-                    # Convert text boolean values to integers
-                    if isinstance(old_value, str):
-                        if old_value.lower() in ('true', '1', 'yes', 'on'):
-                            new_value = 1
+
+                # Wrap the destructive rebuild in BEGIN EXCLUSIVE to serialize
+                # against any concurrent writer (peer to the messages table
+                # migration — see ticket 027).
+                await db.execute("BEGIN EXCLUSIVE")
+                try:
+                    await db.execute("DROP TABLE user_settings")
+                    await db.execute("""
+                        CREATE TABLE user_settings (
+                            chat_id INTEGER NOT NULL,
+                            key TEXT NOT NULL,
+                            value INTEGER NOT NULL,
+                            PRIMARY KEY (chat_id, key),
+                            FOREIGN KEY (chat_id) REFERENCES chats(chat_id) ON DELETE CASCADE
+                        )""")
+                    for chat_id, key, old_value in existing_data:
+                        if isinstance(old_value, str):
+                            new_value = 1 if old_value.lower() in ('true', '1', 'yes', 'on') else 0
                         else:
-                            new_value = 0
-                    else:
-                        new_value = int(bool(old_value))
-                    
-                    await db.execute(
-                        "INSERT INTO user_settings (chat_id, key, value) VALUES (?, ?, ?)",
-                        (chat_id, key, new_value)
-                    )
-                
+                            new_value = int(bool(old_value))
+                        await db.execute(
+                            "INSERT INTO user_settings (chat_id, key, value) VALUES (?, ?, ?)",
+                            (chat_id, key, new_value)
+                        )
+                    await db.execute("COMMIT")
+                except Exception:
+                    await db.execute("ROLLBACK")
+                    raise
+
                 logger.info(f"Successfully migrated {len(existing_data)} user settings records.")
                 
     except Exception as e:

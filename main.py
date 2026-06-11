@@ -138,6 +138,10 @@ def main() -> None:
         # (anyio cancel scopes must be exited from the task that entered them).
         from utils.service_registry import shutdown_mcp_supervisor
         await shutdown_mcp_supervisor(application)
+        # Drop per-chat panel locks so the next polling-loop iteration creates
+        # fresh asyncio.Lock instances bound to the new event loop (ticket 030).
+        from bot.handlers.discuss_panel_handler import reset_panel_locks
+        reset_panel_locks()
 
     async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error("Exception while handling an update:", exc_info=context.error)

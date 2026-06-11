@@ -33,27 +33,53 @@ def get_provider_details() -> dict:
         return _provider_details_cache
 
     details = {}
+    # Track which services we add to the module-level _initialized_services during
+    # THIS attempt. On failure mid-init we pop them out so a subsequent retry
+    # doesn't see "leftover" partial state and skip building fresh instances —
+    # the old instances would be orphaned, holding httpx pools (see ticket 029).
+    _added_this_attempt: list[str] = []
 
+    try:
+        _build_provider_details(details, _added_this_attempt)
+    except Exception:
+        for name in _added_this_attempt:
+            _initialized_services.pop(name, None)
+        raise
+
+    if not details:
+         logger.critical("No valid LLM providers were configured or initialized!")
+
+    _provider_details_cache = details
+    logger.info(f"Initialized provider details for: {list(details.keys())}")
+    return details
+
+
+def _build_provider_details(details: dict, _added_this_attempt: list[str]) -> None:
+    """Body of get_provider_details(), extracted so the try/except wrapper is small."""
     # --- Built-in Providers ---
     # Ollama
     details['ollama'] = {
         'service': ollama_service,
         'default_model': config.get_default_ollama_model(),
-        'allowed_models': [] # Will be fetched dynamically via API if needed
+        'allowed_models': []
     }
-    _initialized_services['ollama'] = ollama_service
+    if 'ollama' not in _initialized_services:
+        _initialized_services['ollama'] = ollama_service
+        _added_this_attempt.append('ollama')
     # Gemini
-    if config.GEMINI_API_KEYS: # Only add if keys are configured
+    if config.GEMINI_API_KEYS:
         gemini_instance = gemini_service.GeminiService()
         details['gemini'] = {
             'service': gemini_instance,
             'default_model': config.get_default_gemini_model(),
-            'allowed_models': config.get_gemini_ask_all_models() # Use ask_all list for selection
+            'allowed_models': config.get_gemini_ask_all_models()
         }
-        _initialized_services['gemini'] = gemini_instance
+        if 'gemini' not in _initialized_services:
+            _initialized_services['gemini'] = gemini_instance
+            _added_this_attempt.append('gemini')
     else:
         logger.warning("Gemini provider disabled: No API keys found.")
-        
+
     # OpenRouter — uses OpenAICompatibleService (same wire protocol, tool-call capable)
     if config.OPENROUTER_API_KEY and config.OPENROUTER_API_KEY != "YOUR_OPENROUTER_API_KEY":
         openrouter_conf = {
@@ -71,13 +97,14 @@ def get_provider_details() -> dict:
                 'allowed_models': config.get_openrouter_allowed_models(),
                 'enable_streaming': True,
             }
-            _initialized_services['openrouter'] = openrouter_instance
+            if 'openrouter' not in _initialized_services:
+                _initialized_services['openrouter'] = openrouter_instance
+                _added_this_attempt.append('openrouter')
             logger.info("OpenRouter provider initialized via OpenAICompatibleService.")
         else:
             logger.warning("OpenRouter provider disabled: client failed to initialize.")
     else:
         logger.warning("OpenRouter provider disabled: API key not set.")
-
 
     # --- Custom OpenAI-Compatible Providers ---
     for provider_conf in config.get_custom_providers_config():
@@ -85,10 +112,9 @@ def get_provider_details() -> dict:
         if name in details:
             logger.warning(f"Custom provider name '{name}' conflicts with a built-in provider. Skipping.")
             continue
-            
+
         if name not in _initialized_services:
             try:
-                # Add the fetched API key to the provider config before initialization
                 env_var_override = provider_conf.get('api_key')
                 default_env_var = f"{name.upper()}_API_KEY"
                 provider_conf['api_key'] = os.getenv(env_var_override) if env_var_override and os.getenv(env_var_override) else os.getenv(default_env_var)
@@ -97,29 +123,22 @@ def get_provider_details() -> dict:
                     continue
 
                 service_instance = OpenAICompatibleService(provider_conf)
-                if service_instance.client: # Check if client initialized successfully
+                if service_instance.client:
                     _initialized_services[name] = service_instance
+                    _added_this_attempt.append(name)
                 else:
                     logger.error(f"Failed to initialize client for custom provider '{name}'. Skipping.")
-                    continue # Skip adding this provider if client failed
+                    continue
             except Exception as e:
                 logger.exception(f"Failed to initialize service instance for custom provider '{name}': {e}. Skipping.")
-                continue # Skip adding this provider
+                continue
 
-        # Add details if service was initialized successfully
         if name in _initialized_services:
              details[name] = {
                 'service': _initialized_services[name],
                 'default_model': provider_conf['default_model'],
                 'allowed_models': provider_conf.get('allowed_models', [])
             }
-
-    if not details:
-         logger.critical("No valid LLM providers were configured or initialized!")
-
-    _provider_details_cache = details
-    logger.info(f"Initialized provider details for: {list(details.keys())}")
-    return details
 
 def get_available_provider_names() -> list[str]:
     """Returns a list of names for all successfully initialized providers."""
