@@ -519,7 +519,26 @@ async def list_threads(chat_id: int) -> List[Dict[str, Any]]:
             return [{"id": row[0], "name": row[1]} for row in rows]
 
 async def rename_thread(chat_id: int, new_name: str) -> bool:
-    return await set_thread_key(chat_id, "name", new_name)
+    """Rename the current thread. Returns True on success, False on failure.
+
+    The previous implementation just `return await set_thread_key(...)`, but
+    set_thread_key returns None on success — so the caller's `if success`
+    check always took the failure branch and showed "An error occurred"
+    even though the UPDATE went through. Mirror the file_storage pattern:
+    verify the thread exists, do the update, return a real bool.
+    """
+    try:
+        async with aiosqlite.connect(config.DB_PATH) as db:
+            thread_pk = await _get_thread_pk(db, chat_id, thread_id=None)
+            if not thread_pk:
+                logger.warning(f"rename_thread: no current thread for chat {chat_id}")
+                return False
+            await db.execute("UPDATE threads SET name = ? WHERE thread_pk = ?", (new_name, thread_pk))
+            await db.commit()
+            return True
+    except Exception as e:
+        logger.exception(f"Failed to rename thread for chat {chat_id}: {e}")
+        return False
 
 async def get_all_chat_ids() -> List[int]:
     """Returns a list of all chat IDs in the database."""
