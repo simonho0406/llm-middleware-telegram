@@ -174,9 +174,16 @@ async def handle_edited_message(update: Update, context: ContextTypes.DEFAULT_TY
         logger.info(f"{log_prefix}Ignoring edit, no previous user message found.")
         return
 
-    # Cancel any in-flight task for the previous prompt
+    # Cancel any in-flight task for the previous prompt. This is a deliberate
+    # supersede (the edit will regenerate), so flag it expected — the cancelled
+    # task's harness wrapper must not show a spurious "interrupted" notice.
     if 'llm_task' in context.chat_data and not context.chat_data['llm_task'].done():
-        context.chat_data['llm_task'].cancel()
+        _superseded = context.chat_data['llm_task']
+        try:
+            _superseded._expected_cancel = True  # type: ignore[attr-defined]
+        except AttributeError:
+            pass
+        _superseded.cancel()
         logger.info(f"{log_prefix}Cancelled in-flight LLM task due to message edit.")
 
     target_pk = last_user_message['id']

@@ -82,29 +82,40 @@ async def finalize_draft(
         logger.debug(f"(Chat {chat_id}) Exception finalizing draft {draft_id}: {e}")
 
 async def send_safe_message(
-    context: ContextTypes.DEFAULT_TYPE, 
-    update: Update, 
-    text: str, 
+    context: ContextTypes.DEFAULT_TYPE,
+    update: Update,
+    text: str,
     reply_markup=None,
     is_edit: bool = False,
-    force_new: bool = False
+    force_new: bool = False,
+    chat_id: int = None
 ):
     """
     A centralized and safe message sending function.
     It takes raw text, processes it through the AST pipeline, and handles
     Telegram's MarkdownV2 parsing, splitting, and fallbacks.
     It can handle both new messages and edits from callback queries.
+
+    Headless mode: pass ``update=None`` with an explicit ``chat_id`` to send a
+    message that isn't a reply to any specific update (used by startup recovery,
+    where no Update exists). Edit/reply-to features are simply disabled.
     """
     if not text:
         logger.warning("send_safe_message called with empty text.")
         return
 
-    chat_id = update.effective_chat.id
+    if update is None:
+        if chat_id is None:
+            logger.error("send_safe_message called with no update and no chat_id; nothing to send to.")
+            return False
+    else:
+        chat_id = update.effective_chat.id
     log_prefix = f"(Chat {chat_id}) "
-    
+
     # Determine if it's an edit based on the explicit parameter or the presence of a callback query.
-    # If force_new is True, explicitly disable edit mode.
-    is_edit = (is_edit or (update.callback_query is not None)) and not force_new
+    # If force_new is True, explicitly disable edit mode. Headless (no update) is always a fresh send.
+    has_callback = update is not None and update.callback_query is not None
+    is_edit = (is_edit or has_callback) and not force_new and update is not None
 
     # Guard: if the callback message was deleted before we can edit it, fall back to send.
     _cb_message_id = None
@@ -115,7 +126,7 @@ async def send_safe_message(
         logger.warning(f"{chat_id} is_edit=True but callback_query.message is None; falling back to send.")
         is_edit = False
 
-    reply_to_msg_id = update.effective_message.message_id if update.effective_message else None
+    reply_to_msg_id = update.effective_message.message_id if (update is not None and update.effective_message) else None
 
     try:
         # 0. Replace HTML tags globally.

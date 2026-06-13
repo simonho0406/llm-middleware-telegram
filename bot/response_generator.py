@@ -20,19 +20,23 @@ from services import ollama_service, gemini_service
 from services.openai_compatible_service import OpenAICompatibleService
 
 from storage import storage_manager
-from bot.messaging import send_safe_message, finalize_draft, send_draft_message
+from bot.messaging import send_safe_message, finalize_draft, send_draft_message, send_plain_message
 from utils.context_manager import ensure_context_fits
 from bot.settings import USER_SETTINGS
 
 logger = logging.getLogger(__name__)
 
 
-def _build_tool_catalog_section(mcp_tools: list, skill_tools: list) -> str:
+def _build_tool_catalog_section(mcp_tools: list, skill_tools: list, chat_id: int = None, thread_id: str = None) -> str:
     """
     Builds a markdown section listing active MCP servers and skills for injection
     into the system prompt.  Grouped by server so the model understands what
     each data source is for; individual tool schemas are already passed via the
     tools= API parameter.
+
+    When the sqlite history server is connected, also injects a concrete
+    "how to query your history" cheat-sheet (view name, columns, this chat's id,
+    an example query) — without it the model guesses table names and fails.
     """
     if not mcp_tools and not skill_tools:
         return ""
@@ -60,6 +64,42 @@ def _build_tool_catalog_section(mcp_tools: list, skill_tools: list) -> str:
             lines.append(f"- **{server}** — {count} tool(s). Example calls: {sample_str}")
         lines.append("")
 
+        # History cheat-sheet: only when the sqlite history server is connected.
+        _has_sqlite = any(
+            t["function"]["name"].startswith("sqlite-tools__") for t in mcp_tools
+        )
+        if _has_sqlite:
+            chat_scope = f"chat_id = {chat_id}" if chat_id is not None else "chat_id = <this chat's id>"
+            thread_lit = f"'{thread_id}'" if thread_id is not None else "'<this thread id>'"
+            here = f"chat_id={chat_id}, thread_id={thread_lit}" if chat_id is not None else f"thread_id={thread_lit}"
+            lines.append("### Querying conversation history\n")
+            lines.append(
+                "Your stored history is the read-only SQLite view **`conversation_history`** "
+                "with columns: `id`, `chat_id`, `thread_id`, `thread_name`, `role`, "
+                "`content`, `timestamp` (unix seconds). Query it via `sqlite-tools__read_query`."
+            )
+            lines.append(
+                f"- **You are here:** {here}. A chat has multiple threads (e.g. `default` plus "
+                f"any the user created); history is per-thread."
+            )
+            lines.append(
+                f"- **Default scope = the current thread:** `WHERE {chat_scope} AND thread_id = {thread_lit}`. "
+                f"Use this unless the user asks about other/all threads."
+            )
+            lines.append(
+                f"- To look **across all of this user's threads**, drop the thread filter: `WHERE {chat_scope}` "
+                f"(the `thread_id` / `thread_name` columns distinguish them). Never query without at least the chat_id filter."
+            )
+            lines.append(
+                f"- Example (current thread): `SELECT role, content, timestamp FROM conversation_history "
+                f"WHERE {chat_scope} AND thread_id = {thread_lit} ORDER BY timestamp DESC LIMIT 50`"
+            )
+            lines.append(
+                "- Recent turns are already in your context — only query for older or aggregate data "
+                "(counts, date ranges, keyword lookups). The database is read-only."
+            )
+            lines.append("")
+
     if skill_tools:
         lines.append("## Skills\n")
         for tool in skill_tools:
@@ -70,15 +110,58 @@ def _build_tool_catalog_section(mcp_tools: list, skill_tools: list) -> str:
 
     return "\n".join(lines)
 
-async def _generate_and_send_response(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int, prompt: str, current_thread_id: str, is_reroll: bool = False, force_truncate: bool = False, placeholder_message = None, skip_save: bool = False, task_key: str = 'llm_task') -> None:
-    """Wraps the response generation in a cancellable task."""
-    
+async def _notify_user_failure(context: ContextTypes.DEFAULT_TYPE, update, chat_id: int, text: str) -> None:
+    """Best-effort failure notification that NEVER raises.
+
+    The harness's core promise: a user turn must end in an answer OR a visible
+    error — never silence. This is the "fail loud to the user" primitive. It
+    tries the rich AST sender first, then falls back to a plain send by chat_id.
+    Both attempts are swallowed so notification can't itself become a new failure.
+    """
+    try:
+        if update is not None:
+            ok = await send_safe_message(context, update, text, chat_id=chat_id)
+        else:
+            ok = await send_safe_message(context, None, text, chat_id=chat_id)
+        if ok:
+            return
+    except Exception as e:
+        logger.warning(f"(Chat {chat_id}) _notify_user_failure: rich send failed: {e}")
+    try:
+        await send_plain_message(context, chat_id, text)
+    except Exception as e:
+        logger.error(f"(Chat {chat_id}) _notify_user_failure: plain send also failed: {e}")
+
+
+async def _generate_and_send_response(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int, prompt: str, current_thread_id: str, is_reroll: bool = False, force_truncate: bool = False, placeholder_message = None, skip_save: bool = False, task_key: str = 'llm_task', save_input: bool = True) -> None:
+    """Wraps the response generation in a cancellable task.
+
+    This is the harness choke point for normal chat / reroll / edit turns: it
+    guarantees the turn ends in a delivered answer or a delivered, human-readable
+    error. An *expected* cancellation (user /cancel, edit-supersede, deliberate
+    zombie-cancel — flagged via task._expected_cancel) stays silent; any other
+    cancellation or exception is surfaced to the user via _notify_user_failure.
+
+    save_input=False keeps an already-persisted user prompt in place (the assistant
+    reply is still saved). Used by startup recovery, which resumes an existing
+    stranded user row without deleting/re-creating it (no data-loss window).
+    """
+
     # SYSTEMIC FIX: Defensively cancel any existing task on this key to prevent zombie leak.
     # Also clean up the orphan's pending user-message PK so its row doesn't sit in DB forever.
+    # Identity guard: never cancel (and reap the PK of) the task we are running in —
+    # a nested caller would otherwise abort itself and delete its own just-saved
+    # user message. Safe today (always called from a fresh handler task) but explicit.
     old_task = context.chat_data.get(task_key)
-    if old_task and not old_task.done():
+    if old_task and old_task is not asyncio.current_task() and not old_task.done():
         logger.warning(f"(Chat {chat_id}) Systemic Concurrency Catch: Cancelling zombie '{task_key}' before spinning up new task.")
         _orphan_pk = getattr(old_task, '_pending_user_message_pk', None)
+        # This is a deliberate supersede — mark expected so the old task's wrapper
+        # doesn't surface a spurious "interrupted" notice to the user.
+        try:
+            old_task._expected_cancel = True  # type: ignore[attr-defined]
+        except AttributeError:
+            pass
         old_task.cancel()
         if _orphan_pk is not None:
             try:
@@ -88,13 +171,12 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
                 logger.warning(f"(Chat {chat_id}) Failed to delete orphan user-message pk={_orphan_pk}: {_cleanup_err}")
 
     task = asyncio.create_task(
-        _generate_and_send_response_task(update, context, chat_id, user_id, prompt, current_thread_id, is_reroll, force_truncate, placeholder_message, skip_save)
+        _generate_and_send_response_task(update, context, chat_id, user_id, prompt, current_thread_id, is_reroll, force_truncate, placeholder_message, skip_save, save_input)
     )
     context.chat_data[task_key] = task
     try:
         await task
     except asyncio.CancelledError:
-        logger.info(f"(Chat {chat_id}) LLM task '{task_key}' was cancelled cleanly.")
         # Cancel ONLY this task's own tracked background tasks (draft finalizers,
         # etc.). The set is attached to the task via _llm_bg_tasks so concurrent
         # handlers in the same chat don't cancel each other's drafts.
@@ -103,6 +185,27 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
             for t in list(bg_tasks):
                 if not t.done():
                     t.cancel()
+
+        if getattr(task, '_expected_cancel', False):
+            logger.info(f"(Chat {chat_id}) LLM task '{task_key}' was cancelled cleanly (expected).")
+        else:
+            # Unexpected cancellation (bug, stray cancel) — do NOT fail silently.
+            logger.warning(f"(Chat {chat_id}) LLM task '{task_key}' cancelled UNEXPECTEDLY — surfacing to user.")
+            await _notify_user_failure(
+                context, update, chat_id,
+                "⚠️ That response was interrupted before it finished. Please try again."
+            )
+        # Don't re-raise: the caller (job/handler) treats completion as done; the
+        # cancellation has been fully handled here.
+    except Exception as e:
+        # Catch-all backstop: any exception escaping the generation task is logged
+        # with full traceback and surfaced to the user rather than vanishing into
+        # the job runner (which would log "executed successfully" with no reply).
+        logger.exception(f"(Chat {chat_id}) LLM task '{task_key}' raised an unhandled exception: {e}")
+        await _notify_user_failure(
+            context, update, chat_id,
+            "⚠️ Something went wrong while generating a reply. Please try again."
+        )
 
 async def _process_history_for_llm(context_history: list, prompt: str, is_reroll: bool, log_prefix: str) -> list:
     if context_history and context_history[-1].get('role') == 'user' and context_history[-1].get('content') == prompt:
@@ -243,9 +346,19 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
     if enable_skills and skill_service:
         _skill_tools = skill_service.get_skills_as_tools()
 
+    # Resolve the current thread so the history cheat-sheet can tell the model
+    # exactly *where it is* — history is per-thread, and a chat has many threads
+    # (including 'default'). Without this the model scopes only by chat_id and its
+    # history queries spill across every thread.
+    try:
+        current_thread_id = await storage_manager.get_current_thread_id(chat_id)
+    except Exception as e:
+        logger.warning(f"{log_prefix}Could not resolve current thread id for catalog: {e}")
+        current_thread_id = None
+
     # Inject live tool catalog into the system message so the model knows
     # what servers are connected and can make informed routing decisions.
-    catalog_section = _build_tool_catalog_section(_mcp_tools, _skill_tools)
+    catalog_section = _build_tool_catalog_section(_mcp_tools, _skill_tools, chat_id=chat_id, thread_id=current_thread_id)
     if catalog_section:
         # truncated_history[0] is the system message (preserved by ensure_context_fits)
         if truncated_history and truncated_history[0].get("role") == "system":
@@ -324,18 +437,53 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
 
         try:
             logger.info(f"{log_prefix}Starting LLM generation (Turn {turn})...")
-            async for chunk in service.generate_response(
+            # Inactivity watchdog: bound the gap *between* streamed chunks, not the
+            # total runtime. Each chunk re-arms the deadline, so a healthy long
+            # generation is never cut off — only a genuinely stalled stream (no
+            # output for idle_timeout seconds) is aborted. Streaming-only: a
+            # non-streaming single-shot provider yields once at the end and is
+            # left to its own client read-timeout (we can't tell slow from stuck).
+            idle_timeout = config.get_generation_idle_timeout_seconds()
+            _watchdog_active = enable_streaming and isinstance(idle_timeout, (int, float)) and idle_timeout > 0
+            _stalled = False
+            _agen = service.generate_response(
                 model=model_to_use,
                 prompt=augmented_prompt,
                 context_history=truncated_history,
                 tools=tools if tools else None
-            ):
+            )
+            while True:
+                try:
+                    if _watchdog_active:
+                        chunk = await asyncio.wait_for(_agen.__anext__(), timeout=idle_timeout)
+                    else:
+                        chunk = await _agen.__anext__()
+                except StopAsyncIteration:
+                    break
+                except asyncio.TimeoutError:
+                    logger.warning(f"{log_prefix}Turn {turn}: generation stalled — no output for {idle_timeout}s. Aborting turn.")
+                    try:
+                        await _agen.aclose()  # release the provider's streaming connection
+                    except Exception:
+                        pass
+                    _stalled = True
+                    break
+
                 raw_full_llm_response += chunk
 
                 if enable_streaming and (time.time() - last_draft_time) > draft_throttle_seconds:
                     if _is_still_my_draft():
                         _track_task(send_draft_message(context, chat_id, draft_id, raw_full_llm_response + " █"))
                     last_draft_time = time.time()
+
+            if _stalled:
+                # Surface as an error sentinel so it flows through the normal
+                # "[Error: ...]" delivery path (and triggers one auto-retry if enabled).
+                raw_full_llm_response = (
+                    f"[Error: The model stopped responding (no output for {idle_timeout}s). "
+                    f"Please try again, or switch models with /provider.]"
+                )
+                llm_error_reported_by_model = True
 
             if enable_streaming and _is_still_my_draft():
                 _track_task(finalize_draft(context, chat_id, draft_id))
@@ -517,7 +665,7 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
         'processed_history': processed_history
     }
 
-async def _generate_and_send_response_task(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int, prompt: str, current_thread_id: str, is_reroll: bool = False, force_truncate: bool = False, placeholder_message = None, skip_save: bool = False) -> None:
+async def _generate_and_send_response_task(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int, prompt: str, current_thread_id: str, is_reroll: bool = False, force_truncate: bool = False, placeholder_message = None, skip_save: bool = False, save_input: bool = True) -> None:
     log_prefix = f"(Chat {chat_id}) "
 
     # Pending-PK is attached to *this* task object (not chat_data) so concurrent
@@ -528,7 +676,9 @@ async def _generate_and_send_response_task(update: Update, context: ContextTypes
     _current_task = asyncio.current_task()
 
     # --- Archival Step 1: Secure the Input ---
-    if not skip_save:
+    # save_input=False means the user prompt is already persisted (recovery): skip
+    # re-saving it, but still generate and save the assistant reply (Step 2).
+    if not skip_save and save_input:
         try:
             if is_reroll:
                 # For reroll, we remove the faulty previous answer so the prompt is now the last message
@@ -544,32 +694,36 @@ async def _generate_and_send_response_task(update: Update, context: ContextTypes
                         pass
         except Exception as e:
             logger.exception(f"{log_prefix}Failed to save/update initial state: {e}")
-            await send_safe_message(context, update, "⚠️ An error occurred while saving your message. Please try again.")
+            await send_safe_message(context, update, "⚠️ An error occurred while saving your message. Please try again.", chat_id=chat_id)
             return
     else:
-        logger.info(f"{log_prefix}Skipping input archival (skip_save=True)")
+        logger.info(f"{log_prefix}Skipping input archival (skip_save={skip_save}, save_input={save_input})")
 
     # --- Generate ---
     response_data = await _generate_llm_response(context, chat_id, prompt, is_reroll, force_truncate)
 
     if response_data.get('error') == 'context_limit_exceeded':
         # This logic remains in the handler as it's specific to the chat workflow
-        await send_safe_message(context, update, "Context window is full. Please use /config to manage conversation history.")
+        await send_safe_message(context, update, "Context window is full. Please use /config to manage conversation history.", chat_id=chat_id)
         return
 
     if response_data.get('search_queries'):
         # Inline import prevents circular dependency since misc_commands imports _generate_and_send_response
         from .handlers import misc_commands
         logger.info(f"{log_prefix}Auto-search triggered. Delegating to search_command: {response_data['search_queries']}")
+        # Pass chat_id/user_id explicitly so the search path works headlessly
+        # (update is None during startup recovery take-over).
         await misc_commands.search_command(
-            update, 
-            context, 
-            placeholder_message, 
-            skip_save=skip_save, 
-            automated=True, 
+            update,
+            context,
+            placeholder_message,
+            skip_save=skip_save,
+            automated=True,
             fallback_content=response_data.get('content'),
             search_queries=response_data['search_queries'],
-            original_prompt=prompt
+            original_prompt=prompt,
+            chat_id=chat_id,
+            user_id=user_id
         )
         return
 
@@ -584,7 +738,7 @@ async def _generate_and_send_response_task(update: Update, context: ContextTypes
 
     # Centralized, safe sending
     try:
-        message_sent_successfully = await send_safe_message(context, update, final_content)
+        message_sent_successfully = await send_safe_message(context, update, final_content, chat_id=chat_id)
     except Exception as e:
         logger.exception(f"{log_prefix}Failed to send message: {e}")
         message_sent_successfully = False

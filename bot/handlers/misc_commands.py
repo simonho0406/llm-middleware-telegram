@@ -81,13 +81,17 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 • Configure in /config → Auto-Search settings"""
     await send_safe_message(context, update, help_text)
 
-async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, placeholder_message = None, skip_save: bool = False, automated: bool = False, fallback_content: str = None, search_queries: list[str] = None, original_prompt: str = None) -> None:
+async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, placeholder_message = None, skip_save: bool = False, automated: bool = False, fallback_content: str = None, search_queries: list[str] = None, original_prompt: str = None, chat_id: int = None, user_id: int = None) -> None:
     """
     Performs a web search, gets a response from the LLM, and saves the original
     query to history, not the augmented prompt.
+
+    Headless mode: pass update=None with explicit chat_id/user_id (used by startup
+    recovery, which has no Update). Only the automated multi-search path is
+    exercised headlessly; interactive reply/args handling needs a real update.
     """
-    chat_id = update.effective_chat.id
-    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id if update is not None else chat_id
+    user_id = update.effective_user.id if update is not None else user_id
     log_prefix = f"(Chat {chat_id}) "
 
     # Determine if we're doing a single manual search or a multi-search
@@ -98,13 +102,13 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
         query = original_prompt if original_prompt else ", ".join(search_queries)
     else:
         # Handle reply-to message if no args provided
-        if not context.args and update.message and update.message.reply_to_message:
+        if not context.args and update is not None and update.message and update.message.reply_to_message:
             query = update.message.reply_to_message.text
             if not query:
-                 await send_safe_message(context, update, "The replied message has no text to search.")
+                 await send_safe_message(context, update, "The replied message has no text to search.", chat_id=chat_id)
                  return
         elif not context.args:
-            await send_safe_message(context, update, "Please provide a query to search. Usage: /search <query> or reply to a message with /search")
+            await send_safe_message(context, update, "Please provide a query to search. Usage: /search <query> or reply to a message with /search", chat_id=chat_id)
             return
         else:
             query = " ".join(context.args)
@@ -119,18 +123,32 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
         logger.warning(f"{log_prefix}Search tool denied by hook: {e}")
         if placeholder_message:
              await placeholder_message.delete()
-        await send_safe_message(context, update, f"❌ Search tool denied by local policy.\n\nReason: _{str(e)}_")
+        await send_safe_message(context, update, f"❌ Search tool denied by local policy.\n\nReason: _{str(e)}_", chat_id=chat_id)
         return
 
     # Register task for cancellation. Defensively cancel any previous task on
     # this slot first — concurrent_updates=True can race two /search invocations
     # in the same chat, and without this the first one runs to completion under
     # the second's identity, ignoring /cancel.
+    #
+    # CRITICAL: never cancel the task we are *currently running in*. The normal-
+    # chat auto-search path (response_generator delegates to search_command with
+    # automated=True) runs INSIDE the existing 'llm_task', so chat_data['llm_task']
+    # IS asyncio.current_task() here. Without the identity guard, .cancel() would
+    # arm a CancelledError on ourselves and the search would silently abort with
+    # no reply ever sent.
+    _current = asyncio.current_task()
     _old_task = context.chat_data.get('llm_task')
-    if _old_task and not _old_task.done():
+    if _old_task and _old_task is not _current and not _old_task.done():
         logger.warning(f"{log_prefix}Cancelling zombie llm_task before search override.")
+        # Deliberate supersede — flag expected so the old task's harness wrapper
+        # stays silent instead of telling the user it was "interrupted".
+        try:
+            _old_task._expected_cancel = True  # type: ignore[attr-defined]
+        except AttributeError:
+            pass
         _old_task.cancel()
-    context.chat_data['llm_task'] = asyncio.current_task()
+    context.chat_data['llm_task'] = _current
 
     try:
         if placeholder_message is None:
@@ -140,7 +158,7 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
     except telegram.error.NetworkError as e:
         logger.error(f"Network error while sending initial message in search_command: {e}")
         try:
-            await send_safe_message(context, update, "A network error occurred, please try again.")
+            await send_safe_message(context, update, "A network error occurred, please try again.", chat_id=chat_id)
         except Exception as e_inner:
             logger.exception(f"Failed to send network error message to user: {e_inner}")
         return
@@ -159,7 +177,7 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
     if search_response['status'] == 'error':
         if automated and fallback_content:
             logger.info(f"{log_prefix}Auto-search API failed, falling back to standard LLM content.")
-            await send_safe_message(context, update, f"_{search_response['message']}. Falling back to standard model knowledge:_\n\n{fallback_content}")
+            await send_safe_message(context, update, f"_{search_response['message']}. Falling back to standard model knowledge:_\n\n{fallback_content}", chat_id=chat_id)
             if placeholder_message:
                 try:
                     await placeholder_message.delete()
@@ -248,10 +266,27 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
             final_response += chunk
     except Exception as e:
         logger.error(f"{log_prefix}Error during search's LLM call: {e}", exc_info=True)
-        await placeholder_message.edit_text("Sorry, an error occurred while processing the search results.", parse_mode=None)
+        if placeholder_message:
+            await placeholder_message.edit_text("Sorry, an error occurred while processing the search results.", parse_mode=None)
+        else:
+            await send_safe_message(context, update, "Sorry, an error occurred while processing the search results.", chat_id=chat_id)
         return
 
-    await send_safe_message(context, update, final_response, placeholder_message)
+    # Never deliver silence: an empty model output becomes a visible error.
+    if not final_response.strip():
+        logger.warning(f"{log_prefix}Search synthesis returned an empty response.")
+        final_response = "[Error: The AI returned an empty response after searching. Please try again or rephrase.]"
+
+    # Dismiss the "Asking…" placeholder, then deliver the answer as its own
+    # message. (Previously the placeholder Message was passed as send_safe_message's
+    # reply_markup arg — a latent bug that made the final send fail for manual
+    # /search, i.e. a silent no-reply.)
+    if placeholder_message:
+        try:
+            await placeholder_message.delete()
+        except Exception:
+            pass
+    await send_safe_message(context, update, final_response, chat_id=chat_id)
 
     if not skip_save and not final_response.startswith("[Error:"):
         try:
@@ -624,6 +659,12 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         # chat_data — so concurrent handlers don't clobber each other's PKs.
         pending_pk = getattr(llm_task, '_pending_user_message_pk', None)
 
+        # User-initiated cancel is expected: flag it so the task's harness wrapper
+        # stays silent (this handler sends its own confirmation below).
+        try:
+            llm_task._expected_cancel = True  # type: ignore[attr-defined]
+        except AttributeError:
+            pass
         llm_task.cancel()
         logger.info(f"(Chat {chat_id}) Normal chat LLM task cancelled by user.")
 

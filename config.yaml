@@ -11,6 +11,18 @@ timezone:
 # --- Storage Backend ---
 storage_backend: "database" # Options: "database", "file"
 
+# --- Robustness harness ---
+# Inactivity budget for a streaming chat turn. Resets on every token, so a
+# healthy slow generation is never cut off; only a stalled stream (no output for
+# this long) is aborted and surfaced to the user. Set 0 to disable.
+generation_idle_timeout_seconds: 180
+
+# On startup, take over the most recent message a prior (crashed/failed) session
+# never answered. Telegram can't expose chat history, so this is DB-driven.
+recovery:
+  enabled: true
+  window_seconds: 3600   # only resume stranded user messages newer than this (1h)
+
 # --- Primary Provider Settings ---
 default_provider: "nvidia"
 default_ollama_model: "qwq"

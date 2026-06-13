@@ -452,12 +452,20 @@ async def _execute_council_flow(update: Update, context: ContextTypes.DEFAULT_TY
 
     # Register task for cancellation. Defensively cancel any previous task on
     # this slot first (concurrent_updates=True can let two /ask_selected
-    # invocations race for the same chat).
+    # invocations race for the same chat). Never cancel the task we are running
+    # in — guard on identity so a (future) nested invocation can't self-abort.
+    _current = asyncio.current_task()
     _old_task = context.chat_data.get('llm_task')
-    if _old_task and not _old_task.done():
+    if _old_task and _old_task is not _current and not _old_task.done():
         logger.warning(f"(Chat {update.effective_chat.id}) Cancelling zombie llm_task before ask_selected override.")
+        # Deliberate supersede — flag expected so a cancelled chat-generation task's
+        # harness wrapper doesn't surface a spurious "interrupted" notice.
+        try:
+            _old_task._expected_cancel = True  # type: ignore[attr-defined]
+        except AttributeError:
+            pass
         _old_task.cancel()
-    context.chat_data['llm_task'] = asyncio.current_task()
+    context.chat_data['llm_task'] = _current
 
     # Fetch context history (limit to 500 lines)
     chat_id = update.effective_chat.id
@@ -612,9 +620,13 @@ async def cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     query = update.callback_query
     await query.answer()
     
-    # Cancel any running LLM task associated with this flow
+    # Cancel any running LLM task associated with this flow (deliberate → expected)
     llm_task = context.chat_data.get('llm_task')
     if llm_task and not llm_task.done():
+        try:
+            llm_task._expected_cancel = True  # type: ignore[attr-defined]
+        except AttributeError:
+            pass
         llm_task.cancel()
         logger.info(f"Cancelled in-flight /ask_selected task.")
         
@@ -654,9 +666,13 @@ async def conversation_timeout(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data.pop('current_provider_selection', None)
     context.user_data.pop('model_metadata', None)
 
-    # Cancel any running LLM task
+    # Cancel any running LLM task (deliberate timeout → expected)
     llm_task = context.chat_data.get('llm_task')
     if llm_task and not llm_task.done():
+        try:
+            llm_task._expected_cancel = True  # type: ignore[attr-defined]
+        except AttributeError:
+            pass
         llm_task.cancel()
         logger.info(f"/ask_selected LLM task cancelled due to timeout for chat_id: {chat_id}")
     context.chat_data.pop('llm_task', None)

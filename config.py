@@ -138,6 +138,24 @@ def get_expert_panel_config():
 def get_enable_streaming():
     return _yaml_config.get("enable_streaming", True)
 
+def get_generation_idle_timeout_seconds():
+    """Inactivity (not total runtime) budget for a streaming normal-chat turn.
+
+    The watchdog resets this deadline on every token/tool event, so a healthy
+    long generation is never cut off — only a genuinely stalled stream (no output
+    for this many seconds) is aborted and surfaced to the user. 0 disables it.
+    """
+    return _yaml_config.get("generation_idle_timeout_seconds", 180)
+
+def get_recovery_enabled():
+    """Whether to take over messages a prior session failed to answer, on startup."""
+    return _yaml_config.get("recovery", {}).get("enabled", True)
+
+def get_recovery_window_seconds():
+    """Freshness window for startup take-over: only resume stranded user messages
+    newer than this (default 1 hour). Older dangling messages are left alone."""
+    return _yaml_config.get("recovery", {}).get("window_seconds", 3600)
+
 def get_utility_model_provider():
     return _yaml_config.get("utility_agent", {}).get("provider", "gemini")
 

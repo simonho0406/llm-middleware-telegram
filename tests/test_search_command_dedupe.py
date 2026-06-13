@@ -1,6 +1,7 @@
 import pytest
 import os
 import sys
+import asyncio
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -83,6 +84,69 @@ async def test_search_deduplication():
                     assert mock_storage.save_message.call_count == 2
                     assert mock_storage.save_message.call_args_list[0][0][1] == 'user'
                     assert mock_storage.save_message.call_args_list[0][0][2] == 'test query'
+
+@pytest.mark.asyncio
+async def test_autosearch_does_not_self_cancel():
+    """Regression: the auto-search delegation runs INSIDE the existing 'llm_task',
+    so chat_data['llm_task'] equals asyncio.current_task() when search_command
+    executes. The defensive cancel-before-override guard must NOT cancel the task
+    it is running in — otherwise the search aborts and no reply is ever sent.
+
+    We simulate that by pre-storing the running task into the slot and asserting
+    (a) it is not cancelled, and (b) the search completes (assistant message saved).
+    """
+    update = MagicMock()
+    context = MagicMock()
+    context.args = ["test", "query"]
+    chat_id = 123
+    update.effective_chat.id = chat_id
+    update.effective_user.id = 456
+
+    # Real dict so the identity guard reads/writes the actual stored task object.
+    running_task = asyncio.current_task()
+    context.chat_data = {'llm_task': running_task}
+
+    with patch('bot.handlers.misc_commands.storage_manager') as mock_storage, \
+         patch('bot.handlers.misc_commands.web_search_service') as mock_search, \
+         patch('bot.handlers.misc_commands.providers') as mock_providers, \
+         patch('bot.handlers.misc_commands.send_safe_message'), \
+         patch('bot.handlers.misc_commands.send_plain_message', new_callable=AsyncMock), \
+         patch('bot.handlers.misc_commands.config') as mock_config:
+
+        mock_config.get_default_provider.return_value = 'ollama'
+        mock_storage.get_thread_key = AsyncMock(side_effect=lambda chat_id, key, default=None: default)
+        mock_storage.get_thread_history = AsyncMock(return_value=[])
+        mock_storage.save_message = AsyncMock()
+
+        mock_search.perform_search = AsyncMock(return_value={'status': 'success', 'content': 'results'})
+
+        mock_service = MagicMock()
+        async def async_gen(*args, **kwargs):
+            yield "the answer"
+        mock_service.generate_response = async_gen
+
+        mock_providers.get_provider_details.return_value = {
+            'ollama': {'service': mock_service, 'default_model': 'model'},
+            'default': {'service': mock_service, 'default_model': 'model'},
+        }
+        mock_providers.get_config_for_provider.return_value = {'default_model': 'model'}
+
+        # If the bug were present, .cancel() on the running task would arm a
+        # CancelledError and this await would raise instead of completing.
+        await misc_commands.search_command(update, context)
+
+        # The running task must not have been cancelled by the guard.
+        assert not running_task.cancelling(), "search_command self-cancelled the running task"
+
+        # The search completed end-to-end: the assistant response was saved.
+        assert any(
+            call.args[1] == 'assistant'
+            for call in mock_storage.save_message.call_args_list
+        ), "assistant response was not saved — search aborted early"
+
+        # The slot still points at the running task (reassignment was a no-op).
+        assert context.chat_data['llm_task'] is running_task
+
 
 @pytest.mark.asyncio
 async def test_search_reply_handling():

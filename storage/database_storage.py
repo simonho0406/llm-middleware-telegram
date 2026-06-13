@@ -75,10 +75,34 @@ async def init_database():
         
         # Check and migrate existing user_settings table if it has wrong data type
         await _migrate_user_settings_table(db)
-        
+
         # Check and migrate existing messages table for tool calling columns
         await _migrate_messages_table(db)
-        
+
+        # LLM-friendly history view. The model (via the read-only sqlite MCP) can't
+        # easily join `messages` (keyed by internal thread_fk) to `threads` to scope
+        # by chat, and it tends to guess a table named `conversation_history`. This
+        # view meets that expectation: a flat, self-describing shape with chat_id,
+        # thread name, role, content and timestamp — so a single
+        #   SELECT ... FROM conversation_history WHERE chat_id = ? ORDER BY timestamp
+        # answers "what's in my history". Created on the read-write connection so the
+        # read-only MCP connection can SELECT from it. Use CREATE VIEW IF NOT EXISTS
+        # so column/shape changes require a drop; keep it in sync with the schema.
+        await db.execute("DROP VIEW IF EXISTS conversation_history")
+        await db.execute("""
+            CREATE VIEW conversation_history AS
+            SELECT
+                m.message_pk  AS id,
+                t.chat_id     AS chat_id,
+                t.thread_id   AS thread_id,
+                t.name        AS thread_name,
+                m.role        AS role,
+                m.content     AS content,
+                m.timestamp   AS timestamp
+            FROM messages m
+            JOIN threads  t ON m.thread_fk = t.thread_pk
+        """)
+
         await db.commit()
         logger.info("Database initialized successfully.")
 

@@ -46,6 +46,52 @@ async def run_startup_checks(application: Application) -> None:
         else:
             logger.warning(f"{name} connection check returned unexpected result: {result}")
 
+# --- Global Error Handler (harness backstop) ---
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Last-resort backstop: any exception escaping a handler OR a JobQueue
+    callback reaches here. We resolve a chat_id (including from context.job, which
+    is how the debounced process_buffered_message surfaces) and deliver a notice,
+    so a failure never ends as "executed successfully" with no reply to the user.
+    """
+    logger.error("Exception while handling an update:", exc_info=context.error)
+    error_msg = "Sorry, an internal error occurred. The developers have been notified."
+
+    chat_id = None
+    if isinstance(update, Update) and update.effective_chat:
+        chat_id = update.effective_chat.id
+    job = getattr(context, 'job', None)
+    if chat_id is None and job is not None:
+        chat_id = getattr(job, 'chat_id', None)
+        if chat_id is None and isinstance(getattr(job, 'data', None), dict):
+            chat_id = job.data.get('chat_id')
+
+    if chat_id is None:
+        return  # No deliverable target (e.g. polling-level error) — already logged.
+
+    from bot.messaging import send_plain_message
+    try:
+        # Prefer replying to the originating message when we have one.
+        if isinstance(update, Update) and update.effective_message:
+            await asyncio.wait_for(
+                update.effective_message.reply_text(error_msg, parse_mode=None),
+                timeout=10.0
+            )
+        else:
+            await asyncio.wait_for(
+                send_plain_message(context, chat_id, error_msg),
+                timeout=10.0
+            )
+    except (asyncio.TimeoutError, Exception) as e:
+        logger.error(f"Failed to send error notification to user: {e}")
+        try:
+            await asyncio.wait_for(
+                send_plain_message(context, chat_id, error_msg),
+                timeout=10.0
+            )
+        except (asyncio.TimeoutError, Exception) as fallback_error:
+            logger.error(f"Fallback error notification also failed: {fallback_error}")
+
+
 # --- Main Execution ---
 
 def main() -> None:
@@ -130,6 +176,19 @@ def main() -> None:
         # (see utils/service_registry.py). The supervisor handles its own idle
         # shutdown — no external watchdog job needed.
 
+        # Take over any message a prior session failed to answer (DB-based, since
+        # Telegram can't expose chat history). Spawned as a background task — NOT
+        # awaited — so generation latency can't delay the bot coming online; it
+        # runs concurrently with polling. A reference is stashed in bot_data so the
+        # task isn't garbage-collected before it finishes.
+        try:
+            from bot.recovery import reconcile_unanswered_messages
+            application.bot_data['_recovery_task'] = asyncio.create_task(
+                reconcile_unanswered_messages(application), name="startup_recovery"
+            )
+        except Exception as e:
+            logger.exception(f"Failed to schedule startup recovery (non-fatal): {e}")
+
     async def cleanup_services(application: Application):
         """Lifecycle hook to clean up resources on shutdown."""
         logger.info("Running shutdown lifecycle hook...")
@@ -142,28 +201,6 @@ def main() -> None:
         # fresh asyncio.Lock instances bound to the new event loop (ticket 030).
         from bot.handlers.discuss_panel_handler import reset_panel_locks
         reset_panel_locks()
-
-    async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-        logger.error("Exception while handling an update:", exc_info=context.error)
-        if isinstance(update, Update) and update.effective_message:
-            error_msg = "Sorry, an internal error occurred. The developers have been notified."
-            try:
-                await asyncio.wait_for(
-                    update.effective_message.reply_text(error_msg, parse_mode=None),
-                    timeout=10.0
-                )
-            except (asyncio.TimeoutError, Exception) as e:
-                logger.error(f"Failed to send error notification to user: {e}")
-                try:
-                    chat_id = update.effective_chat.id if update.effective_chat else None
-                    if chat_id:
-                        from bot.messaging import send_plain_message
-                        await asyncio.wait_for(
-                            send_plain_message(context, chat_id, error_msg),
-                            timeout=10.0
-                        )
-                except (asyncio.TimeoutError, Exception) as fallback_error:
-                    logger.error(f"Fallback error notification also failed: {fallback_error}")
 
     logger.info("Starting bot polling loop...")
     while True:

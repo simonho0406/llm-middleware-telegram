@@ -110,8 +110,8 @@ async def test_full_user_flow_simulation():
         # Run the actual processing logic
         await callback(mock_context)
         
-        # Verify response was sent
-        mock_send_msg.assert_called_with(mock_context, mock_update, "Quantum computing is cool.")
+        # Verify response was sent (chat_id is now passed for headless-capable delivery)
+        mock_send_msg.assert_called_with(mock_context, mock_update, "Quantum computing is cool.", chat_id=chat_id)
         
         # Verify history was updated (check all potential mocks)
         # We expect save_message to be called TWICE (User then Assistant)
