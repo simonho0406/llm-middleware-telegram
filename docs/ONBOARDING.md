@@ -1,167 +1,160 @@
-# 🧭 Agent Onboarding: MCP & Skill Integration Sprint
+# 🧭 Architecture & Onboarding
 
-> **Last Updated:** 2026-05-24 by Tech Lead session (conversation `423ba8f4-2d21-4194-b05f-804c169c9cae`)
-> **Branch:** `main` (clean, at commit `b80059f`)
-> **Tests:** 87 collected, all passing
-> **Unstaged files:** 5 new ticket files (020–024) ready to commit
+Contributor reference for how this bot is built. For setup and usage, see the
+[README](../README.md). For per-feature history, see `docs/tickets/archive/`.
 
 ---
 
-## 1. READ THIS FIRST: The Project Constitution
+## 1. Architectural Pillars
 
-This project operates under a strict **Brain vs. Hands** protocol defined in the user's global rules. Before doing anything:
+All code should uphold these four principles:
 
-1. **You are the `gemini-cli-dev` (Developer / Hands)** unless told otherwise.
-2. **You execute Tickets.** You do NOT make architectural decisions. If a ticket violates the architecture, you halt and report.
-3. **TDD Mandate:** You write the test *first* (or ensure one exists), then write the code to pass the test.
-4. **4 Immutable Architectural Pillars** govern all code:
-   - **Pillar A — Stateless, Class-Based Services:** All external services must be Classes instantiated with config. No global module-level variables for state.
-   - **Pillar B — Centralized, Safe Rendering:** ALL user-facing output goes through `messaging.send_safe_message`. Use the AST-based renderer. Never manually escape Markdown.
-   - **Pillar C — Robust State Management:** `ConversationHandler`s in `group=0`. Every stateful flow needs an `asyncio.Task` tracker and cleanup to kill zombies on cancel/timeout.
-   - **Pillar D — Configuration-Driven:** No hardcoded model names or provider logic. Behavior from `config.yaml` and `user_settings` DB table.
-
----
-
-## 2. What Was Accomplished (Prior Sessions)
-
-### Session 1: Tech Debt Refactor (Complete ✅)
-- Full 38-file codebase review → `docs/comprehensive_code_review.md`
-- Branch `feature/tech-debt-refactor` merged to `main`
-- Created Tickets 018 (NameError bug) and 019 (WAL mode)
-- All 79→87 tests passing
-
-### Session 2: MCP/Skill Architecture Design (Complete ✅)
-- **Thorough industry research** of MCP (Anthropic), OpenClaw Skills, Claude Code skill registry
-- **Architecture decision: Hybrid approach** — MCP for external APIs/data, Skill Playbooks for procedural workflows
-- **Implementation plan created** at: `<appDataDir>/brain/423ba8f4-2d21-4194-b05f-804c169c9cae/implementation_plan.md`
-- **5 development tickets created** (020–024), currently unstaged in git
+- **Pillar A — Stateless, class-based services.** External services are classes
+  instantiated with config; avoid module-level mutable state. (Two legacy
+  modules — `services/ollama_service.py` and `services/openrouter_service.py` —
+  predate this and use module-level state; prefer `gemini_service.py` /
+  `openai_compatible_service.py` as the pattern. The main OpenRouter path now
+  goes through `OpenAICompatibleService`, not `openrouter_service.py`.)
+- **Pillar B — Centralized, safe rendering.** All user-facing output goes through
+  `bot/messaging.py::send_safe_message` (AST-based Markdown→TelegramV2). Never
+  hand-escape Markdown.
+- **Pillar C — Robust state management.** Every cancellable flow tracks its
+  `asyncio.Task` and cleans up on cancel/timeout. State that must not be shared
+  across concurrent handlers (`concurrent_updates=True`) is attached to the task,
+  not to `chat_data` (see `_pending_user_message_pk`, `_llm_bg_tasks`,
+  `_active_draft_id`, `_expected_cancel` on the LLM task).
+- **Pillar D — Configuration-driven.** No hardcoded model names or provider
+  logic; behavior comes from `config.yaml` and the `user_settings` DB table.
 
 ---
 
-## 3. The Active Work: MCP & Skill Integration
+## 2. Directory Layout
 
-### What We're Building
-A hybrid extensibility layer that gives the LLM two new capabilities:
-1. **MCP Client** — Spawns local subprocess servers (SQLite, GitHub CLI, etc.) via the `mcp` Python SDK, queries their tools, and lets the LLM call them natively.
-2. **Skill Registry** — Loads markdown-based "playbooks" from a `skills/` directory. Each skill is a `SKILL.md` with YAML frontmatter (parameters, description) and a natural-language procedure body. Skills are registered as lightweight tool stubs; the full body is loaded only when invoked (deferred activation pattern from Claude Code).
-3. **Agentic Loop** — The response generator becomes a multi-turn recursive loop: LLM generates → if tool call, execute it → feed result back → LLM synthesizes. Capped at 5 turns.
-
-### Execution Order (Dependency Graph)
-
-```
-Tickets 020, 021, 022, 024  ← Can be done in parallel (no interdependencies)
-         ↓
-      Ticket 023             ← Depends on all four above
-```
-
-| Ticket | File | Summary | Status |
-|--------|------|---------|--------|
-| **020** | `docs/tickets/020-mcp-client-subsystem.md` | `services/mcp_service.py` — McpClientService class | **Ready** |
-| **021** | `docs/tickets/021-skill-registry-subsystem.md` | `services/skill_service.py` — SkillRegistryService class | **Ready** |
-| **022** | `docs/tickets/022-database-migration-for-tool-calling.md` | SQLite migration: add `tool_calls`, `tool_call_id` columns | **Ready** |
-| **024** | `docs/tickets/024-unified-tool-security-hooks.md` | Expand `utils/hooks.py` for all tool types | **Ready** |
-| **023** | `docs/tickets/023-agentic-response-loop.md` | Rewrite `response_generator.py` + provider tool support | **Ready** (depends on 020-022, 024) |
-
-### User Approval Status
-> **⚠️ The implementation plan has been presented to the user but explicit "go ahead" approval has NOT yet been recorded in conversation.** The user's last message was asking for this onboarding document. **Ask the user for approval before starting implementation.**
-
----
-
-## 4. Codebase Quick Reference
-
-### Directory Layout
 ```
 llm-middleware-telegram/
-├── main.py                          # Entry point, PTB handler registration
-├── config.py / config.yaml          # All configuration accessors and values
+├── main.py                       # Entry point: polling loop (recreates event loop on
+│                                 #   NetworkError), handler registration, global
+│                                 #   error_handler (job-aware), post_init/shutdown hooks
+├── config.py / config.yaml       # Config accessors and values
 ├── bot/
-│   ├── response_generator.py        # ★ Core LLM pipeline (will be modified in T023)
-│   ├── messaging.py                 # send_safe_message, send_draft_message
-│   ├── providers.py                 # initialize_providers(), get_service_for_provider()
-│   ├── agent_utils.py               # is_search_required() classifier
-│   ├── settings.py                  # USER_SETTINGS dict
-│   └── handlers/
-│       ├── misc_commands.py         # /search, /help, etc.
-│       ├── discuss_panel_handler.py  # Expert Panel orchestration (1,497 lines)
-│       └── ...                      # config, model selection, thread mgmt
+│   ├── application.py            # PTB Application builder (concurrent_updates=True)
+│   ├── response_generator.py     # ★ Core LLM pipeline: agentic tool loop, streaming,
+│   │                             #   harness (notify-on-failure), inactivity watchdog
+│   ├── recovery.py               # Startup take-over of unanswered turns (DB-based)
+│   ├── messaging.py              # send_safe_message / draft messages (Pillar B)
+│   ├── providers.py              # Provider registry; get_provider_details(), shutdown
+│   ├── settings.py               # USER_SETTINGS (enable_mcp, enable_skills, auto_retry…)
+│   ├── middleware.py             # auth_middleware (allowed_chat_ids)
+│   ├── prompt_loader.py          # Loads prompts/*.md into config.PROMPTS
+│   ├── agent_utils.py            # search-need heuristics
+│   └── handlers/                 # chat, misc_commands, ask_selected, discuss,
+│                                 #   discuss_panel, configure_panel, config,
+│                                 #   context_sidebar, flash
 ├── services/
-│   ├── gemini_service.py            # GeminiService class (v2 SDK)
-│   ├── openai_compatible_service.py # OpenAICompatibleService class (NVIDIA, Groq)
-│   ├── openrouter_service.py        # Module-level (Pillar A violation — legacy)
-│   ├── ollama_service.py            # Module-level singleton (Pillar A violation — legacy)
-│   └── web_search_service.py        # Tavily/Google search
+│   ├── gemini_service.py         # GeminiService (per-key client cache, tools support)
+│   ├── openai_compatible_service.py # NVIDIA/Groq/OpenRouter/custom (tools support)
+│   ├── ollama_service.py         # Ollama (legacy module-level)
+│   ├── openrouter_service.py     # legacy; main path uses OpenAICompatibleService
+│   ├── mcp_service.py            # McpClientService: stdio MCP servers, per-server pass_env
+│   ├── skill_service.py          # SkillRegistryService: loads skills/*/SKILL.md
+│   └── web_search_service.py     # Tavily/Google search (optional MCP routing)
 ├── storage/
-│   ├── database_storage.py          # SQLite via aiosqlite (will be modified in T022)
-│   └── storage_manager.py           # High-level storage API
+│   ├── database_storage.py       # SQLite via aiosqlite; schema + conversation_history view
+│   ├── file_storage.py           # JSON backend (limited; no per-message PK/history view)
+│   └── __init__.py               # StorageManager facade (storage_manager)
 ├── utils/
-│   ├── hooks.py                     # HookRunner class (will be modified in T024)
-│   ├── search_agent.py              # Iterative search agent loop
-│   ├── text_processing.py           # AST-based Markdown→TelegramV2 renderer
-│   ├── context_manager.py           # ensure_context_fits()
-│   └── llm_utilities.py             # get_robust_llm_response()
-├── hooks/                           # Directory for user hook scripts
-├── skills/                          # NEW — Will contain SKILL.md playbooks
-├── tests/                           # 87 tests, all passing
-└── docs/tickets/                    # Development tickets (002–024)
+│   ├── service_registry.py       # MCP supervisor + lazy skill init (see §4)
+│   ├── hooks.py                  # HookRunner: pre-tool-use security gate
+│   ├── context_manager.py        # ensure_context_fits() token budgeting
+│   ├── text_processing.py        # AST Markdown→TelegramV2 renderer
+│   ├── search_agent.py / llm_utilities.py
+├── hooks/                        # External hook scripts + security_policy.py
+├── prompts/                      # *.md system/panel prompts (loaded at startup)
+├── skills/                       # SKILL.md playbooks (+ README); empty by default
+├── tests/                        # pytest suite
+└── docs/                         # README lives at root; tickets archived here
 ```
 
-### Key Patterns to Follow
-- **Service instantiation**: See `GeminiService.__init__` in `services/gemini_service.py` — takes config, no globals.
-- **generate_response signature**: `async def generate_response(self, model, prompt, context_history=None, request_timeout=None)` — returns `AsyncGenerator[str, None]`.
-- **Safe message sending**: Always use `bot.messaging.send_safe_message(context, update, text)`.
-- **DB pattern**: Connection-per-call via `async with aiosqlite.connect(config.DB_PATH) as db`.
-- **History format**: List of `{"role": "user"|"assistant"|"system", "content": "..."}` dicts.
+---
 
-### Existing Extension Points (Already in Codebase)
-- `utils/hooks.py` → `HookRunner` class with `run_pre_tool_use()` — currently only used for search in `misc_commands.py:117`.
-- `.roo/mcp.json` → An existing MCP config file (Docker-based SQLite server) from a prior experiment. Not wired into the bot.
-- `docs/tickets/007-mcp-integration-specification.md` → The original MCP spec ticket (predecessor to our new 020–024 series). Useful for historical context but **superseded** by the new tickets.
+## 3. The Response Pipeline (`bot/response_generator.py`)
+
+1. A message is debounced (`handlers/chat.py`) then `_generate_and_send_response`
+   wraps generation in a tracked, cancellable task — **the harness choke point**.
+2. `_generate_llm_response` builds history, injects `CHAT_SYSTEM_PROMPT` + a live
+   **tool catalog** (connected MCP servers, skills, and a `conversation_history`
+   cheat-sheet scoped to the current chat_id + thread_id), then runs an **agentic
+   loop** (max 5 turns): model emits text or a `{"tool_calls": …}` request →
+   tools execute (`skill_*` before `server__tool` routing) via the hook security
+   gate → results feed back → repeat until a plain answer.
+3. **Auto-search:** if the model emits `<search>…</search>` and auto-search is on,
+   the turn delegates to `search_command` (web search → synthesis).
+4. **Delivery & archival:** the answer is sent via `send_safe_message`, then saved
+   with `asyncio.shield` so a late `/cancel` can't drop a shown reply.
+
+### The harness (never fail silently)
+- **Layer 1** (`_generate_and_send_response`): unexpected cancels or exceptions →
+  `_notify_user_failure` (the turn always ends visibly). *Expected* cancels
+  (user `/cancel`, edit-supersede, deliberate zombie-cancel) are flagged
+  `task._expected_cancel = True` and stay silent.
+- **Layer 2** (`main.py::error_handler`): resolves a chat_id even for JobQueue
+  errors (`context.job`), so debounced-job failures reach the user.
+- **Layer 3** (inactivity watchdog): aborts a stream with no token for
+  `generation_idle_timeout_seconds`; resets on every token so healthy long
+  generations are never cut.
+- **Recovery** (`bot/recovery.py`): on startup, resumes the most recent
+  unanswered user message per chat within `recovery.window_seconds` (in place,
+  `save_input=False` — no delete, no data-loss window). DB-based, since Telegram
+  can't expose chat history.
 
 ---
 
-## 5. Pre-Flight Checklist Before Starting
+## 4. MCP Supervisor Pattern (`utils/service_registry.py`)
 
-1. **Ask user for explicit approval** on the implementation plan.
-2. **Commit the 5 new ticket files** (020–024) to a new feature branch:
-   ```bash
-   git checkout -b feature/mcp-skill-integration
-   git add docs/tickets/02*.md
-   git commit -m "docs: add tickets 020-024 for MCP and Skill integration"
-   ```
-3. **Install the `mcp` SDK** and verify it imports:
-   ```bash
-   pip install mcp
-   python -c "from mcp import ClientSession; print('MCP SDK OK')"
-   ```
-4. **Run the existing test suite** to confirm green baseline:
-   ```bash
-   python -m pytest -q
-   ```
+The MCP SDK's `stdio_client()` uses anyio cancel scopes that **must be entered
+and exited from the same asyncio task**. Violating that leaks subprocess zombies
+and corrupts the loop. So the entire MCP lifecycle (connect → keep-alive → idle
+shutdown → cleanup) is owned by a single long-lived **supervisor task** spawned on
+first use; callers talk to it via `asyncio.Event`s. It idle-shuts-down the
+subprocesses after ~30 min and reconnects transparently on the next request.
+`shutdown_mcp_supervisor()` is called from the shutdown hook.
+
+`get_or_init_mcp_service` / `get_or_init_skill_service` are the race-free
+accessors (double-checked locking; honor `enable_mcp` / `enable_skills`).
 
 ---
 
-## 6. Critical Gotchas & Landmines
+## 5. Security: tool hooks
 
-| Issue | Details |
-|-------|---------|
-| **`openrouter_service.py` is module-level** | It violates Pillar A. Do NOT follow its patterns. Follow `gemini_service.py` or `openai_compatible_service.py` instead. |
-| **`ollama_service.py` has a global singleton** | Same as above — legacy pattern. |
-| **`hooks.py` line 52 has a module-level instance** | `hook_runner = HookRunner()` — this is a Pillar A violation but is currently depended on by `misc_commands.py:30`. When modifying hooks, keep backward compatibility or refactor the import site. |
-| **`response_generator.py` uses `<search>` tag extraction** | Lines 108–122: The current auto-search system works by instructing the LLM to emit `<search>query</search>` tags, then regex-extracting them. The new agentic loop should eventually **replace** this with proper tool calling, but keep it working during the transition. |
-| **Expert Panel** (`discuss_panel_handler.py`) | 1,497 lines of complex multi-agent orchestration. **Do NOT touch this file** in this sprint. It has its own provider/model routing and is independent of the main response pipeline. |
-| **Database migrations must be backwards-compatible** | Use `ALTER TABLE ... ADD COLUMN` with `PRAGMA table_info` checks. Never `DROP TABLE` on the messages table. |
+`utils/hooks.py::HookRunner.run_pre_tool_use` runs before every tool execution
+and can deny it (e.g. write/DDL SQL, dangerous shell). The blocklists live in one
+place (`hooks/security_policy.py`) shared by the in-process runner and the
+external `hooks/pre_tool_use.py` script. A hook *script* failure raises
+`HookScriptError` (a `PermissionError` subclass) so config errors are
+distinguishable from genuine security denials. MCP secrets are confined per server
+via each server's `pass_env` allowlist in `config.yaml`.
 
 ---
 
-## 7. Definition of Done
+## 6. Conventions
 
-For the sprint to be considered complete:
-- [ ] `McpClientService` class exists, connects to a configured stdio server, lists tools, executes a tool, and cleans up (Ticket 020)
-- [ ] `SkillRegistryService` class exists, parses `SKILL.md` files, exposes tool schemas (Ticket 021)
-- [ ] `messages` table has `tool_calls` and `tool_call_id` columns with migration (Ticket 022)
-- [ ] `HookRunner` validates all tool types, sample hook exists (Ticket 024)
-- [ ] `response_generator.py` runs recursive agentic loop with tool calling (Ticket 023)
-- [ ] `openai_compatible_service.py` and `gemini_service.py` accept `tools` parameter (Ticket 023)
-- [ ] All new code has tests written FIRST (TDD mandate)
-- [ ] All 87+ existing tests still pass
-- [ ] No Pillar violations introduced
+- **generate_response signature:** `async def generate_response(self, model, prompt,
+  context_history=None, tools=None, ...) -> AsyncGenerator[str, None]`.
+- **History format:** `[{"role": "user"|"assistant"|"system"|"tool", "content": …}]`.
+- **DB access:** connection-per-call via `async with aiosqlite.connect(config.DB_PATH)`.
+- **Event-loop-bound singletons** (provider httpx pools, MCP service, panel locks)
+  are reset on shutdown because the polling loop builds a fresh event loop on
+  restart — see `shutdown_providers`, `shutdown_mcp_supervisor`, `reset_panel_locks`.
+- **Tests:** `python -m pytest -q`. Prefer writing/adjusting a test alongside any
+  behavior change.
+
+---
+
+## 7. Running & verifying
+
+```bash
+python -m pytest -q                         # full suite
+docker compose up --build -d                # build & run
+docker logs -f llm-middleware-telegram      # live logs
+docker exec llm-middleware-telegram python scripts/panel_qa.py   # panel E2E (needs keys)
+```
