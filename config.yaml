@@ -191,5 +191,5 @@ mcp_servers:
     args: ["-y", "@notionhq/notion-mcp-server"]
     transport: "stdio"
     panel_execution: true    # Knowledge lookup allowed in panel Quality Gate
-    pass_env: ["NOTION_TOKEN", "OPENAI_API_KEY"]  # notion-mcp uses OPENAI_API_KEY for embeddings
+    pass_env: ["NOTION_TOKEN"]  # @notionhq/notion-mcp-server reads NOTION_TOKEN only (not NOTION_API_KEY / OPENAI_API_KEY)
 

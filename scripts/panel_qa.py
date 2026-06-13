@@ -10,7 +10,7 @@ Usage (from project root):
     python scripts/panel_qa.py
 
 Prerequisites:
-    - .env with API keys (TAVILY_API_KEY, NOTION_API_KEY, NVIDIA/etc.)
+    - .env with API keys (TAVILY_API_KEY, NOTION_TOKEN, NVIDIA/etc.)
     - npx and uvx available in PATH (for MCP subprocesses)
     - data/bot_sessions.db exists for SQLite test (or SQLite test will connect but find empty tables)
 """
