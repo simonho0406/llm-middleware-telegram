@@ -23,6 +23,7 @@ from bot.settings import USER_SETTINGS  # Added for settings access
 from bot.messaging import send_safe_message, send_plain_message
 from bot.handlers.configure_panel_handler import load_panel_config
 from utils.context_manager import ensure_context_fits, get_model_context_limits, truncate_text_to_tokens
+from utils.tool_distiller import distill_tool_result
 from .misc_commands import cancel_command
 
 # Per-chat panel locks. Stored at module scope (not in user_data) so the Lock's
@@ -178,12 +179,57 @@ def _format_tools_for_prompt(tools: list) -> str:
     return "\n".join(lines)
 
 
+def _extract_json_object(text: str) -> str:
+    """Extract the first complete top-level JSON object from LLM text.
+
+    String-aware brace matching (ignores braces inside quoted strings, so a value
+    like "{a}" doesn't throw off the counter), with regex fallbacks. Returns the
+    JSON substring or "" if none found. Note: a returned string is brace-balanced
+    but may still fail json.loads if the model left unescaped quotes inside a value
+    — callers should retry the LLM in that case.
+    """
+    if not text:
+        return ""
+    start = text.find('{')
+    if start != -1:
+        depth = 0
+        in_str = False
+        esc = False
+        for i in range(start, len(text)):
+            c = text[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif c == '\\':
+                    esc = True
+                elif c == '"':
+                    in_str = False
+            else:
+                if c == '"':
+                    in_str = True
+                elif c == '{':
+                    depth += 1
+                elif c == '}':
+                    depth -= 1
+                    if depth == 0:
+                        return text[start:i + 1]
+    # Fallbacks for malformed/oddly-nested output
+    m = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', text)
+    if m:
+        return m.group(0)
+    m = re.search(r'{[\s\S]*}', text)
+    if m:
+        return m.group(0)
+    return ""
+
+
 async def _run_refinement_cycle(
     update: Update, context: ContextTypes.DEFAULT_TYPE, proposer_task, critic_task, user_prompt, full_history, placeholder_msg, panel_results,
     orchestrator_service, orchestrator_model, orchestrator_timeout, orchestrator_config, panel_config: dict,
     mcp_service=None, skill_service=None, available_tools_text: str = "No tools available.",
     panel_execution_tool_names: frozenset = frozenset(),
-    quality_gate_tools_text: str = "No tools available."
+    quality_gate_tools_text: str = "No tools available.",
+    initial_grounding: str = ""
 ):
     """
     Executes the Master & Apprentice iterative refinement cycle.
@@ -227,9 +273,27 @@ async def _run_refinement_cycle(
     # quality_gate_history stores ONLY compact audit entries (score + instructions), never the
     # full proposer/critic response text. That text is already in each round's current prompt,
     # so re-embedding it in history causes context overflow and score anchoring.
-    proposer_history = []
+    #
+    # The Proposer is driven STATELESS (history=[]): the refine prompt is fully self-contained
+    # (user query + previous draft + cumulative grounding dossier + Master instructions). Passing
+    # an accumulating chat history here used to double-store each draft and force ensure_context_fits
+    # to evict the OLDEST (most grounded) turns — the grounding cliff that made refinement worse.
     critic_history = []
     quality_gate_history = []
+
+    # Cumulative grounding dossier — the fix for the grounding cliff. Iteration 1's grounding
+    # (workspace pre-queries + research dossier) is seeded here so it survives into every refine
+    # round; each round's tool results are appended (deduped). The FULL dossier is fed into every
+    # refine prompt instead of only the current round's results, so grounding accumulates instead
+    # of being discarded each iteration.
+    grounding_dossier = (initial_grounding or "").strip()
+    _tool_result_cache: dict = {}  # (tool_name, canonical_args_json) -> result string, to break re-fetch loops
+
+    # Safety cap on the cumulative dossier. Individual tool results now arrive
+    # pre-distilled (small), so this is just a backstop against many rounds piling up.
+    _dossier_token_budget = config.get_panel_dossier_max_tokens()
+    if grounding_dossier:
+        grounding_dossier = truncate_text_to_tokens(grounding_dossier, _dossier_token_budget)
 
     # Iterative refinement loop
     for iteration in range(1, max_iterations + 1):
@@ -245,7 +309,7 @@ async def _run_refinement_cycle(
             provider_name=proposer_provider,
             model=proposer_model,
             prompt=current_proposer_prompt,
-            history=proposer_history,
+            history=[],  # stateless: refine prompt + dossier are self-contained (see note above)
             role_name='Proposer',
             request_timeout=proposer_role_config.get('request_timeout_seconds'),
             fallback_provider=fallback_provider,
@@ -254,9 +318,6 @@ async def _run_refinement_cycle(
         proposer_response = proposer_llm_result['response']
         proposer_retries = proposer_llm_result['retries']
         proposer_fallback_used = proposer_llm_result['fallback_used']
-
-        proposer_history.append({"role": "user", "content": current_proposer_prompt})
-        proposer_history.append({"role": "assistant", "content": proposer_response})
 
         # Update panel results with Proposer response
         panel_results['Proposer'] = {
@@ -285,7 +346,7 @@ async def _run_refinement_cycle(
                         provider_name=fallback_provider,
                         model=fallback_model,
                         prompt=fallback_proposer_prompt,
-                        history=proposer_history,
+                        history=[],
                         role_name='Backup Proposer',
                         request_timeout=orchestrator_timeout,
                         fallback_provider=None,  # No further fallback for backup
@@ -512,6 +573,25 @@ async def _run_refinement_cycle(
                         except json.JSONDecodeError as e:
                             logger.warning(f"Panel tool '{tool_name}': failed to parse arguments JSON ({e}). Using empty args.")
                             args = {}
+
+                    # Dedup: if an identical call already ran this turn, serve the cached result
+                    # instead of re-fetching. Breaks the loop where the Orchestrator re-requests the
+                    # same oversized page every round and gets the same (truncated) head back.
+                    try:
+                        _cache_key = (tool_name, json.dumps(args, sort_keys=True, default=str))
+                    except Exception:
+                        _cache_key = (tool_name, str(args))
+                    if _cache_key in _tool_result_cache:
+                        logger.info(f"Panel tool '{tool_name}' served from cache (identical call already executed this turn).")
+                        result = (
+                            _tool_result_cache[_cache_key]
+                            + "\n[Note: identical call already executed earlier this turn — result is unchanged. "
+                              "To get different content, target a more specific sub-resource (a particular "
+                              "heading/block_id or a narrower query) instead of re-fetching the same item.]"
+                        )
+                        tool_results_parts.append(f"Tool: {tool_name}\nResult: {result}")
+                        continue
+
                     try:
                         # skill_ prefix checked BEFORE __ to prevent a skill named `server__foo`
                         # from being misrouted to MCP execution.
@@ -546,12 +626,19 @@ async def _run_refinement_cycle(
                                     logger.info(f"Panel tool '{tool_name}' executed for iteration {iteration + 1}.")
                         else:
                             result = f"[Error: Unknown tool or service unavailable for '{tool_name}']"
-                        # Truncate large results to prevent context overflow in the next Proposer call.
-                        # Web search / DB results can be 100k+ characters; cap at ~8 000 chars (~2 000 tokens).
-                        _MAX_RESULT_CHARS = 8_000
-                        if isinstance(result, str) and len(result) > _MAX_RESULT_CHARS:
-                            logger.warning(f"Panel tool '{tool_name}' result truncated from {len(result)} to {_MAX_RESULT_CHARS} chars.")
-                            result = result[:_MAX_RESULT_CHARS] + "\n[Result truncated to prevent context overflow]"
+
+                        # Query-aware distillation: extract only what's relevant to the user's
+                        # task instead of head-truncating a huge page (which dropped the deep
+                        # section the user wanted). Keeps grounding while shrinking context.
+                        if isinstance(result, str):
+                            result = await distill_tool_result(
+                                result, query=user_prompt,
+                                max_keep_tokens=_dossier_token_budget, tool_name=tool_name
+                            )
+                            # Cache only genuine executions, so denials/errors can be retried legitimately.
+                            if not result.startswith("[Denied") and not result.startswith("[Error"):
+                                _tool_result_cache[_cache_key] = result
+
                         tool_results_parts.append(f"Tool: {tool_name}\nResult: {result}")
                     except Exception as tool_exc:
                         logger.exception(f"Panel tool call failed for '{tool_name}': {tool_exc}")
@@ -560,10 +647,18 @@ async def _run_refinement_cycle(
                 if tool_results_parts:
                     tool_results_text = "\n\n".join(tool_results_parts)
                     logger.info(f"Panel orchestrator provided {len(tool_results_parts)} tool result(s) to Proposer for iteration {iteration + 1}.")
+                    # Accumulate into the cumulative grounding dossier (token-budgeted) so grounding
+                    # PERSISTS across refinement rounds instead of being discarded each iteration.
+                    grounding_dossier = (
+                        (grounding_dossier + "\n\n" + tool_results_text).strip()
+                        if grounding_dossier else tool_results_text
+                    )
+                    grounding_dossier = truncate_text_to_tokens(grounding_dossier, _dossier_token_budget)
                     # Feed compact results into quality_gate_history so the next Quality Gate
                     # invocation knows which queries succeeded or failed (e.g. "no such table").
                     # Without this, the gate repeats identical failing queries every round.
-                    _qg_summary = tool_results_text[:1500] + ("\n[truncated]" if len(tool_results_text) > 1500 else "")
+                    _qg_chars = config.get_panel_quality_gate_summary_chars()
+                    _qg_summary = tool_results_text[:_qg_chars] + ("\n[truncated]" if len(tool_results_text) > _qg_chars else "")
                     quality_gate_history.append({
                         "role": "user",
                         "content": f"[Tool execution results from Round {iteration}]:\n{_qg_summary}"
@@ -579,7 +674,8 @@ async def _run_refinement_cycle(
                 proposer_response=proposer_response,
                 quality_score=quality_score,
                 refinement_instructions=refinement_instructions,
-                tool_results=tool_results_text
+                # Cumulative dossier (seed grounding + all rounds' results), not just this round's.
+                tool_results=grounding_dossier or "(no external tool results yet)"
             )
         else:
             logger.warning(f"Max iterations reached. Final quality score: {quality_score}")
@@ -803,94 +899,87 @@ async def _run_panel_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE
     requires_search = False
     search_query = ""
     
-    # Use consolidated LLM response function for orchestrator call
+    # Use consolidated LLM response function for orchestrator call.
+    # The orchestrator must return a parseable JSON plan. LLMs intermittently emit
+    # malformed JSON (an unescaped quote/newline in a value, a stray code fence) — a
+    # single bad plan used to kill the ENTIRE panel turn (QA-surfaced). Retry the
+    # call a few times, asking explicitly for clean JSON, before giving up.
     fallback_provider, fallback_model = get_expert_panel_fallback_config()
-    orchestrator_llm_result = await get_robust_llm_response(
-        provider_name=orchestrator_provider,
-        model=orchestrator_model,
-        prompt=meta_prompt,
-        history=None,  # No history for the initial plan
-        role_name='Initial Orchestrator',
-        request_timeout=orchestrator_timeout,
-        fallback_provider=fallback_provider,
-        fallback_model=fallback_model
-    )
-    orchestrator_response = orchestrator_llm_result['response']
-    orchestrator_retries = orchestrator_llm_result['retries']
-    orchestrator_fallback_used = orchestrator_llm_result['fallback_used']
+    _PLAN_ATTEMPTS = config.get_panel_plan_parse_attempts()
+    orchestrator_plan = None
+    orchestrator_response = ""
+    _plan_prompt = meta_prompt
+    _last_plan_err = ""
 
-    panel_results['Initial_Orchestrator'] = {
-        'provider': orchestrator_provider,
-        'model': orchestrator_model,
-        'status': 'Success' if not orchestrator_llm_result['is_error'] else 'Failure',
-        'response': orchestrator_response,
-        'retries': orchestrator_retries,
-        'fallback_used': orchestrator_fallback_used
-    }
+    for _plan_attempt in range(1, _PLAN_ATTEMPTS + 1):
+        orchestrator_llm_result = await get_robust_llm_response(
+            provider_name=orchestrator_provider,
+            model=orchestrator_model,
+            prompt=_plan_prompt,
+            history=None,  # No history for the initial plan
+            role_name='Initial Orchestrator',
+            request_timeout=orchestrator_timeout,
+            fallback_provider=fallback_provider,
+            fallback_model=fallback_model
+        )
+        orchestrator_response = orchestrator_llm_result['response']
+        panel_results['Initial_Orchestrator'] = {
+            'provider': orchestrator_provider,
+            'model': orchestrator_model,
+            'status': 'Success' if not orchestrator_llm_result['is_error'] else 'Failure',
+            'response': orchestrator_response,
+            'retries': orchestrator_llm_result['retries'],
+            'fallback_used': orchestrator_llm_result['fallback_used']
+        }
+        logger.debug(f"Initial Orchestrator response (attempt {_plan_attempt}/{_PLAN_ATTEMPTS}): {orchestrator_response[:200]}...")
 
-    logger.debug(f"Initial Orchestrator response: {orchestrator_response[:200]}...")  # Log first 200 chars
+        if orchestrator_llm_result['is_error']:
+            _last_plan_err = "LLM call error"
+        else:
+            json_str = _extract_json_object(orchestrator_response)
+            if not json_str:
+                _last_plan_err = "no JSON object found in response"
+                logger.warning(f"Orchestrator plan attempt {_plan_attempt}: {_last_plan_err}.")
+            else:
+                try:
+                    _candidate_plan = json.loads(json_str)
+                    _candidate_tasks = _candidate_plan.get("tasks", []) if isinstance(_candidate_plan, dict) else []
+                    if not isinstance(_candidate_tasks, list) or len(_candidate_tasks) < 2:
+                        # Parsed but unusable — retry instead of killing the turn (QA-surfaced).
+                        _last_plan_err = (
+                            f"incomplete plan: 'tasks' must be an array with at least a Proposer and a "
+                            f"Critic (got {len(_candidate_tasks) if isinstance(_candidate_tasks, list) else 0})"
+                        )
+                        logger.warning(f"Orchestrator plan attempt {_plan_attempt}: {_last_plan_err}.")
+                    else:
+                        orchestrator_plan = _candidate_plan
+                        break  # parsed AND complete
+                except json.JSONDecodeError as parse_error:
+                    _last_plan_err = f"JSON parse error: {parse_error}"
+                    logger.warning(f"Orchestrator plan attempt {_plan_attempt}: {_last_plan_err}. Extracted: {json_str[:200]}")
 
-    # Handle potential error responses from get_robust_llm_response
-    if orchestrator_llm_result['is_error']:
-        try:
-            await placeholder_msg.edit_text(
-                f"⚠️ The orchestrator failed to create a valid plan. "
-                f"Please use /reroll to try again or /cancel to exit.",
-                parse_mode=None
+        # Prepare a repair prompt for the next attempt (if any remain).
+        if _plan_attempt < _PLAN_ATTEMPTS:
+            _plan_prompt = (
+                meta_prompt
+                + "\n\n--- IMPORTANT: YOUR PREVIOUS PLAN WAS INVALID ---\n"
+                + f"Problem: {_last_plan_err}\n"
+                + "Return ONLY a single valid JSON object — no prose, no markdown code fences. "
+                + "Escape every double-quote and newline inside string values. The object MUST include a "
+                + "\"tasks\" array containing at least a Proposer task and a Critic task."
             )
-        except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
-            logger.warning(f"Failed to update placeholder message (Orchestrator plan failed): {e}")
-        return {}, f"[System Error: Orchestrator planning failed. Use /reroll to retry.]", ""
-    
-    # Parse JSON from the response using the established extraction strategies
-    json_str = None
-    
-    # Try multiple strategies to extract valid JSON
-    # Strategy 1: Look for complete JSON object with balanced braces
-    brace_count = 0
-    start_pos = None
-    for i, char in enumerate(orchestrator_response):
-        if char == '{':
-            if start_pos is None:
-                start_pos = i
-            brace_count += 1
-        elif char == '}':
-            brace_count -= 1
-            if brace_count == 0 and start_pos is not None:
-                json_str = orchestrator_response[start_pos:i+1]
-                break
-    
-    # Strategy 2: Fallback to regex if brace counting didn't work
-    if not json_str:
-        json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', orchestrator_response)
-        if json_match:
-            json_str = json_match.group(0)
-    
-    # Strategy 3: Last resort - try the original greedy approach
-    if not json_str:
-        json_match = re.search(r'{[\s\S]*}', orchestrator_response)
-        if json_match:
-            json_str = json_match.group(0)
-    
-    if not json_str:
-        logger.error("No valid JSON found in the orchestrator's response.")
+            try:
+                await placeholder_msg.edit_text(
+                    f"Re-planning (attempt {_plan_attempt + 1}/{_PLAN_ATTEMPTS})…", parse_mode=None
+                )
+            except (telegram.error.NetworkError, telegram.error.TimedOut):
+                pass
+
+    if orchestrator_plan is None:
+        logger.error(f"Orchestrator failed to produce a parseable plan after {_PLAN_ATTEMPTS} attempts. Last error: {_last_plan_err}")
         try:
             await placeholder_msg.edit_text(
-                f"⚠️ The orchestrator response was invalid. "
-                f"Please use /reroll to try again or /cancel to exit.",
-                parse_mode=None
-            )
-        except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
-            logger.warning(f"Failed to update placeholder message (Invalid orchestrator response): {e}")
-        return {}, f"[System Error: Invalid orchestrator response format. Use /reroll to retry.]", ""
-    
-    try:
-        orchestrator_plan = json.loads(json_str)
-    except json.JSONDecodeError as parse_error:
-        logger.error(f"JSON parsing failed for extracted string: {json_str[:200]}...")
-        try:
-            await placeholder_msg.edit_text(
-                f"⚠️ The orchestrator response could not be parsed. "
+                f"⚠️ The orchestrator response could not be parsed after {_PLAN_ATTEMPTS} attempts. "
                 f"Please use /reroll to try again or /cancel to exit.",
                 parse_mode=None
             )
@@ -939,8 +1028,15 @@ async def _run_panel_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE
             try:
                 hook_runner.run_pre_tool_use(_wq_tool, {"arguments": _wq_args})
                 _wq_result = await mcp_service.execute_tool(_wq_server, _wq_name, _wq_args)
-                if isinstance(_wq_result, str) and len(_wq_result) > 8_000:
-                    _wq_result = _wq_result[:8_000] + "\n[Truncated]"
+                # Token-aware truncation (not a char head-slice) so a deep section of a large page
+                # isn't silently discarded. The aggregate is token-capped again below.
+                # Distill the pre-query result against the user's task — a get-block-children
+                # pre-query returns the whole page body; keep only the relevant part.
+                if isinstance(_wq_result, str):
+                    _wq_result = await distill_tool_result(
+                        _wq_result, query=user_prompt,
+                        max_keep_tokens=config.get_panel_workspace_max_tokens(), tool_name=_wq_tool
+                    )
                 workspace_context_parts.append(f"[{_wq_tool}]\n{_wq_result}")
                 logger.info(f"Workspace pre-query '{_wq_tool}' executed successfully.")
             except PermissionError as _hook_err:
@@ -950,9 +1046,9 @@ async def _run_panel_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         if workspace_context_parts:
             _workspace_context = "\n\n".join(workspace_context_parts)
-            # Cap the aggregate workspace context to 4 000 tokens (~16 KB) so multiple
-            # large Notion results don't overflow the Proposer's context budget.
-            _max_workspace_tokens = 4000
+            # Safety cap on the aggregate. Each part is already distilled to the task, so
+            # this is just a backstop against many pre-queries piling up.
+            _max_workspace_tokens = config.get_panel_workspace_max_tokens()
             _workspace_context = truncate_text_to_tokens(_workspace_context, _max_workspace_tokens)
             _proposer_task = next((t for t in tasks_list if t.get("role") == "Proposer"), None)
             if _proposer_task:
@@ -963,6 +1059,11 @@ async def _run_panel_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE
                     "generalize where specific data is available.\n\n"
                     f"--- WORKSPACE CONTEXT ---\n{_workspace_context}\n\n"
                     f"--- ORIGINAL TASK ---\n{_original_prompt}"
+                )
+                # Persist the raw grounding so the refinement cycle can carry it forward into every
+                # refine round (otherwise it only lives in iteration 1's prompt — the grounding cliff).
+                _proposer_task["_grounding"] = (
+                    (_proposer_task.get("_grounding", "") + "\n\n--- WORKSPACE CONTEXT ---\n" + _workspace_context).strip()
                 )
                 logger.info(f"Augmented Proposer's prompt with {len(workspace_context_parts)} workspace pre-query result(s).")
             else:
@@ -1065,6 +1166,9 @@ async def _run_panel_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE
                                     f"--- ORIGINAL TASK ---\n{original_prompt}"
                                 )
                                 proposer_task["prompt"] = augmented_prompt
+                                proposer_task["_grounding"] = (
+                                    (proposer_task.get("_grounding", "") + "\n\n--- RESEARCH DOSSIER ---\n" + truncated_dossier).strip()
+                                )
                                 logger.info("Augmented Proposer's prompt with comprehensive research dossier.")
                                 logger.info("Successfully created research dossier.") # Log for test assertion
                             else:
@@ -1097,6 +1201,9 @@ async def _run_panel_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE
                                         f"--- ORIGINAL TASK ---\n{original_prompt}"
                                     )
                                     proposer_task["prompt"] = augmented_prompt
+                                    proposer_task["_grounding"] = (
+                                        (proposer_task.get("_grounding", "") + "\n\n--- WEB SEARCH RESULTS ---\n" + search_results).strip()
+                                    )
                                     logger.info("Augmented Proposer's prompt with web search results.")
                                 else:
                                     logger.warning("Could not find Proposer task to augment with search results.")
@@ -1162,7 +1269,9 @@ async def _run_panel_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE
         orchestrator_service, orchestrator_model, orchestrator_timeout, orchestrator_config, panel_config,
         mcp_service=mcp_service, skill_service=skill_service, available_tools_text=available_tools_text,
         panel_execution_tool_names=panel_execution_tool_names,
-        quality_gate_tools_text=quality_gate_tools_text
+        quality_gate_tools_text=quality_gate_tools_text,
+        # Seed the cumulative grounding dossier with iteration-1 grounding so it survives refine rounds.
+        initial_grounding=proposer_task.get('_grounding', '')
     )
     if quality_score < quality_threshold and iteration == max_iterations:
         try:

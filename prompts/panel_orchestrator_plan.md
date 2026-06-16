@@ -12,6 +12,8 @@ Create a comprehensive execution plan by analyzing the user's request in context
 
 **When to populate `workspace_queries`:** The query involves the user's OWN content stored in a connected workspace tool (e.g., reviewing their Notion pages, understanding their existing notes or databases). Populate with 1–3 specific tool calls to fetch that content BEFORE the Proposer drafts. Leave empty `[]` for queries about general knowledge or public information.
 
+**Reading Notion page CONTENT:** if the user wants what's *inside* a page (text, lists, an h3 section — not just its title), you must fetch the page **body**, which lives in its blocks. Plan `notion-workspace__API-post-search` to find the page id, then `notion-workspace__API-get-block-children` on that page id to get the actual content. `API-post-search` and `API-retrieve-a-page` return only metadata (title, properties, relations) — they will NEVER contain the body, so a draft built from them alone cannot answer a content question.
+
 ### Output Structure
 ```json
 {{

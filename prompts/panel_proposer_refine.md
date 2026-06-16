@@ -18,10 +18,10 @@ Master's Refinement Instructions (Quality Score: {quality_score}):
 {refinement_instructions}
 --- END FEEDBACK ---
 
-Tool Results (provided by Master — use these to ground any claims flagged as unverified):
---- TOOL RESULTS ---
+Grounding Dossier (cumulative — workspace data plus every tool result gathered so far this turn; use it to ground your claims, especially any flagged as unverified):
+--- GROUNDING DOSSIER ---
 {tool_results}
---- END TOOL RESULTS ---
+--- END GROUNDING DOSSIER ---
 
 **Detailed Instructions:**
 • Address each point in the Master's feedback systematically

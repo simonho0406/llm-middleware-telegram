@@ -47,8 +47,11 @@ MODEL_CONTEXT_LIMITS = {
     "meta/llama3-70b-instruct": ModelContextLimits(8192, 2048, 2048, False),
     "meta/llama3-8b-instruct": ModelContextLimits(8192, 2048, 2048, False),
 
-    # Gemini Models
-    "gemini-1.5-flash-latest": ModelContextLimits(1048576, 8192, 8192, True),
+    # Gemini Models (gemini-1.5-* aliases were retired by Google → 404; use current aliases)
+    "gemini-flash-latest": ModelContextLimits(1048576, 8192, 8192, True),
+    "gemini-flash-lite-latest": ModelContextLimits(1048576, 8192, 8192, True),
+    "gemini-2.5-flash": ModelContextLimits(1048576, 8192, 8192, True),
+    "gemini-2.5-flash-lite": ModelContextLimits(1048576, 8192, 8192, True),
     "gemini-1.5-pro-latest": ModelContextLimits(2097152, 8192, 8192, True),
 
     # Default fallback

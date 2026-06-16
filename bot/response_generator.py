@@ -396,7 +396,7 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
     if provider_config.get('enable_streaming') is False:
          enable_streaming = False
 
-    MAX_TOOL_TURNS = 5
+    MAX_TOOL_TURNS = config.get_chat_max_tool_turns()
     augmented_prompt = prompt
     if autosearch_enabled:
          search_instruction = "If you need to perform a web search for current information, include the search query inside <search> tags like <search>latest news on the Artemis mission</search>, but ALWAYS also provide your best answer based on your existing knowledge after the search tags."
@@ -413,7 +413,7 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
         # We need a draft ID for this turn
         draft_id = random.randint(100000, 999999)
         last_draft_time = time.time()
-        draft_throttle_seconds = 0.5
+        draft_throttle_seconds = config.get_chat_draft_throttle_seconds()
         
         # active_draft_id is scoped to THIS asyncio task (not chat_data) so
         # concurrent handlers in the same chat don't trample each other's
@@ -598,7 +598,13 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
                 except Exception as e:
                     logger.exception(f"{log_prefix}Exception executing tool {tool_name}: {e}")
                     tool_result = f"[Error: Exception during tool execution: {str(e)}]"
-                    
+
+                # Distill large tool results to only what's relevant to the user's query
+                # BEFORE they enter context. Without this the agentic loop appended raw
+                # results (a 100k+ char page) with no cap → overflow + grounding dilution.
+                from utils.tool_distiller import distill_tool_result
+                tool_result = await distill_tool_result(tool_result, query=prompt, tool_name=tool_name)
+
                 # finalize progress draft
                 await finalize_draft(context, chat_id, temp_draft_id)
                 
@@ -625,8 +631,8 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
             break
             
     else:
-        logger.warning(f"{log_prefix}Maximum tool turns (5) reached!")
-        raw_full_llm_response = "[Warning: Maximum tool execution depth of 5 turns reached to prevent runaway billing or infinite loops.]"
+        logger.warning(f"{log_prefix}Maximum tool turns ({MAX_TOOL_TURNS}) reached!")
+        raw_full_llm_response = f"[Warning: Maximum tool execution depth of {MAX_TOOL_TURNS} turns reached to prevent runaway billing or infinite loops.]"
 
     # Strip <thinking> blocks BEFORE search tag extraction so that <search> tags
     # nested inside a model's internal monologue are never treated as real queries.
