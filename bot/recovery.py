@@ -68,8 +68,14 @@ async def reconcile_unanswered_messages(app) -> int:
 
 
 async def _reconcile_one_chat(app, chat_id: int, now: int, window: int) -> bool:
-    """Resume the single most-recent stranded user message for one chat, if any."""
-    history = await storage_manager.get_thread_history_with_pk(chat_id, limit=1)
+    """Resume the single most-recent stranded user message for one chat, if any.
+
+    Recovery only resumes NORMAL-chat turns. It must not inject a normal-chat answer
+    into a message that belonged to another mode (panel/discuss/etc.), and must not
+    collide with a generation that is already running for the chat.
+    """
+    # Look back a few messages so we can tell what mode the stranded message was in.
+    history = await storage_manager.get_thread_history_with_pk(chat_id, limit=config.get_recovery_history_lookback())
     if not history:
         return False
 
@@ -89,6 +95,31 @@ async def _reconcile_one_chat(app, chat_id: int, now: int, window: int) -> bool:
             f"(> {window}s window) — leaving it alone."
         )
         return False
+
+    # ── Mode guard ──────────────────────────────────────────────────────────────
+    # If the most recent non-user message is a panel turn, the stranded message was a
+    # panel follow-up. Resuming it as NORMAL chat is a mode conflict (and the panel's
+    # ConversationHandler state is gone after restart anyway). Skip — the user can
+    # re-engage the panel manually.
+    _prev_role = next((m.get('role') for m in reversed(history[:-1]) if m.get('role') != 'user'), None)
+    if _prev_role and str(_prev_role).startswith('assistant:'):
+        logger.info(
+            f"Recovery: chat {chat_id} stranded message followed a '{_prev_role}' turn "
+            f"(non-normal-chat mode) — skipping to avoid a cross-mode conflict."
+        )
+        return False
+
+    # ── Concurrency guard ───────────────────────────────────────────────────────
+    # Recovery runs concurrently with polling. If a generation is already live for
+    # this chat (normal-chat llm_task in chat_data, or a panel_task in user_data),
+    # don't pile a second one on top.
+    _cd = app.chat_data.get(chat_id) if hasattr(app, 'chat_data') else None
+    _ud = app.user_data.get(chat_id) if hasattr(app, 'user_data') else None
+    for _store, _key in ((_cd, 'llm_task'), (_ud, 'panel_task')):
+        _t = _store.get(_key) if isinstance(_store, dict) else None
+        if _t is not None and not _t.done():
+            logger.info(f"Recovery: chat {chat_id} already has a live '{_key}' — skipping to avoid a concurrent generation.")
+            return False
 
     logger.info(
         f"Recovery: taking over stranded message for chat {chat_id} "

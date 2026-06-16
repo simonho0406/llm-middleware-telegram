@@ -156,8 +156,55 @@ def get_recovery_window_seconds():
     newer than this (default 1 hour). Older dangling messages are left alone."""
     return _yaml_config.get("recovery", {}).get("window_seconds", 3600)
 
+def get_recovery_history_lookback():
+    """How many recent messages recovery inspects to decide mode/concurrency."""
+    return _yaml_config.get("recovery", {}).get("history_lookback", 8)
+
+# --- Normal-chat agentic loop tunables ---
+def get_chat_max_tool_turns():
+    return _yaml_config.get("chat", {}).get("max_tool_turns", 5)
+
+def get_chat_draft_throttle_seconds():
+    return _yaml_config.get("chat", {}).get("draft_throttle_seconds", 0.5)
+
+# --- Expert-panel context-management tunables ---
+def get_panel_plan_parse_attempts():
+    return get_expert_panel_config().get("plan_parse_attempts", 3)
+
+def get_panel_dossier_max_tokens():
+    return get_expert_panel_config().get("dossier_max_tokens", 30000)
+
+def get_panel_workspace_max_tokens():
+    return get_expert_panel_config().get("workspace_max_tokens", 12000)
+
+def get_panel_quality_gate_summary_chars():
+    return get_expert_panel_config().get("quality_gate_summary_chars", 1500)
+
 def get_utility_model_provider():
     return _yaml_config.get("utility_agent", {}).get("provider", "gemini")
 
 def get_utility_model_name():
-    return _yaml_config.get("utility_agent", {}).get("model", "gemini-1.5-flash-latest")
+    return _yaml_config.get("utility_agent", {}).get("model", "gemini-flash-latest")
+
+# --- Context distiller (query-aware compression of large tool results) ---
+def _distiller():
+    return _yaml_config.get("context_distiller", {})
+
+def get_distiller_enabled():
+    return _distiller().get("enabled", True)
+
+def get_distiller_provider():
+    # Falls back to the utility agent's provider so it works even if the block is absent.
+    return _distiller().get("provider", get_utility_model_provider())
+
+def get_distiller_model():
+    return _distiller().get("model", get_utility_model_name())
+
+def get_distiller_max_output_tokens():
+    """Default keep-budget: results over this are distilled; the extract is capped here.
+    (Callers like the panel pass their own budget; this is the fallback/chat default.)"""
+    return _distiller().get("max_output_tokens", 16000)
+
+def get_distiller_max_input_tokens():
+    """Upper bound on what we feed the distiller model in one pass."""
+    return _distiller().get("max_input_tokens", 128000)

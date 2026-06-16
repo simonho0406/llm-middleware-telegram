@@ -24,7 +24,13 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir uv && \
     pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application code
+# Copy the rest of the application code.
+# CACHEBUST forces this layer (and only this layer) to rebuild on demand so code
+# changes are always picked up — the dependency layers above stay cached. Pass a
+# changing value to guarantee a fresh copy:
+#   docker compose build --build-arg CACHEBUST=$(date +%s)
+# (Works around a BuildKit COPY-cache staleness seen on the OneDrive-backed source dir.)
+ARG CACHEBUST=0
 COPY . .
 
 # Command to run the application

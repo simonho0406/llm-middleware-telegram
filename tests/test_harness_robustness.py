@@ -229,6 +229,44 @@ async def test_recovery_resumes_recent_stranded_message():
 
 
 @pytest.mark.asyncio
+async def test_recovery_skips_panel_followup():
+    # A stranded message that followed a panel turn must NOT be resumed as normal chat.
+    now = int(time.time())
+    sm = _recovery_storage([
+        {'id': 8, 'role': 'assistant:panel', 'content': 'panel answer', 'timestamp': now - 120},
+        {'id': 9, 'role': 'user', 'content': 'panel follow-up', 'timestamp': now - 60},
+    ])
+    with patch.object(recovery, 'storage_manager', sm), \
+         patch.object(recovery.config, 'get_recovery_enabled', return_value=True), \
+         patch.object(recovery.config, 'get_recovery_window_seconds', return_value=3600), \
+         patch('bot.messaging.send_plain_message', new_callable=AsyncMock), \
+         patch('bot.response_generator._generate_and_send_response', new_callable=AsyncMock) as gen:
+        resumed = await recovery.reconcile_unanswered_messages(MagicMock())
+    assert resumed == 0
+    gen.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_recovery_skips_when_live_task_running():
+    # Recovery must not pile a second generation onto a chat that already has one live.
+    now = int(time.time())
+    sm = _recovery_storage([{'id': 9, 'role': 'user', 'content': 'do x', 'timestamp': now - 60}])
+    live = MagicMock()
+    live.done.return_value = False
+    app = MagicMock()
+    app.chat_data = {123: {'llm_task': live}}
+    app.user_data = {}
+    with patch.object(recovery, 'storage_manager', sm), \
+         patch.object(recovery.config, 'get_recovery_enabled', return_value=True), \
+         patch.object(recovery.config, 'get_recovery_window_seconds', return_value=3600), \
+         patch('bot.messaging.send_plain_message', new_callable=AsyncMock), \
+         patch('bot.response_generator._generate_and_send_response', new_callable=AsyncMock) as gen:
+        resumed = await recovery.reconcile_unanswered_messages(app)
+    assert resumed == 0
+    gen.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_recovery_ignores_old_message():
     now = int(time.time())
     sm = _recovery_storage([{'id': 9, 'role': 'user', 'content': 'do x', 'timestamp': now - 7200}])

@@ -22,16 +22,22 @@ generation_idle_timeout_seconds: 180
 recovery:
   enabled: true
   window_seconds: 3600   # only resume stranded user messages newer than this (1h)
+  history_lookback: 8    # messages to inspect when deciding mode/concurrency before resuming
+
+# --- Normal-chat agentic loop tunables ---
+chat:
+  max_tool_turns: 5            # max tool-call rounds before forcing a final answer
+  draft_throttle_seconds: 0.5  # min gap between streaming draft edits
 
 # --- Primary Provider Settings ---
 default_provider: "nvidia"
 default_ollama_model: "qwq"
 
 # --- Gemini Configuration (Free Tier: 5 RPM / 25 RPD) ---
-default_gemini_model: "gemini-1.5-flash-latest"  # Using flash for better free tier compatibility
+default_gemini_model: "gemini-flash-latest"  # Using flash for better free tier compatibility
 max_output_tokens: 8192
 gemini_ask_all_models:
-  - "gemini-1.5-flash-latest"
+  - "gemini-flash-latest"
   - "gemini-1.5-pro-latest"
 
 # --- OpenRouter Configuration (Free Tier: 20 RPM / 1000 daily with $10 credit) ---
@@ -109,10 +115,17 @@ expert_panel:
   quality_threshold: 85
   max_refinement_iterations: 4
 
+  # Context-management tunables (token budgets / retry counts)
+  plan_parse_attempts: 3             # orchestrator plan JSON parse retries before giving up
+  dossier_max_tokens: 30000          # cap on the cumulative grounding dossier
+  workspace_max_tokens: 12000        # cap on aggregate workspace pre-query context
+  quality_gate_summary_chars: 1500   # chars of tool results summarised into the quality-gate audit trail
+
   # Orchestrator (Project Manager) - Keep original working configuration
   orchestrator:
     provider: "nvidia"
-    model: "nvidia/nemotron-3-super-120b-a12b"
+    # model: "nvidia/nemotron-3-super-120b-a12b"
+    model: "nvidia/nemotron-3-ultra-550b-a55b"
     fallback_provider: "nvidia"
     fallback_model: "google/gemma-4-31b-it"
     request_timeout_seconds: 600
@@ -128,7 +141,7 @@ expert_panel:
 
     Critic:
       provider: "nvidia"
-      model: "minimaxai/minimax-m2"
+      model: "minimaxai/minimax-m3"
       request_timeout_seconds: 600
 
     Refiner:
@@ -167,7 +180,22 @@ rate_limits:
 # --- Utility Agent Configuration ---
 utility_agent:
   provider: "gemini"
-  model: "gemini-1.5-flash-latest"
+  model: "gemini-flash-lite-latest"
+
+# --- Context Distiller ---
+# When a tool result is large, a fast utility pass extracts only the task-relevant
+# content before it enters the main model's context (instead of head-truncating a
+# huge page and losing the section the user wanted). The model needs a large context
+# window to read the whole result in one pass.
+context_distiller:
+  enabled: true
+  provider: "gemini"
+  model: "gemini-flash-lite-latest"   # ~1M window. If Gemini quota is tight, point this at a
+                                       # high-quota large-context model (e.g. an OpenRouter 163k model).
+  # A result is only distilled when it EXCEEDS the caller's keep-budget (the panel passes its
+  # dossier/workspace budget; chat uses max_output_tokens). Results that already fit pass through raw.
+  max_output_tokens: 16000             # default keep-budget / cap for the (comprehensive) extract
+  max_input_tokens: 128000             # cap on what we feed the distiller in one pass
 
 # --- Model Context Protocol (MCP) Servers ---
 # Declares standard stdio-based MCP servers dynamically mounted at startup.
