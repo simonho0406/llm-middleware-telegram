@@ -29,6 +29,10 @@ chat:
   max_tool_turns: 5            # max tool-call rounds before forcing a final answer
   draft_throttle_seconds: 0.5  # min gap between streaming draft edits
 
+# --- Context management ---
+context:
+  emergency_buffer_ratio: 0.2  # if the system-prompt buffer exceeds the context window, cap it to this fraction
+
 # --- Primary Provider Settings ---
 default_provider: "nvidia"
 default_ollama_model: "qwq"
@@ -153,6 +157,7 @@ expert_panel:
 web_search:
   manual_provider: "tavily"
   automated_provider: "google"
+  max_context_ratio: 0.5   # fraction of the model's input limit allocated to search results
 
 # --- Rate Limiting Configuration ---
 # Conservative limits to respect free tier quotas
@@ -185,6 +190,7 @@ utility_agent:
   model: "gemma-4-31b-it"
   fallback_provider: "gemini"
   fallback_model: "gemini-flash-lite-latest"
+  search_classifier_timeout: 15   # seconds; how long to wait for a YES/NO search decision
 
 # --- Context Distiller ---
 # When a tool result is large, a utility pass extracts only the task-relevant content before it

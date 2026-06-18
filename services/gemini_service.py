@@ -266,19 +266,16 @@ class GeminiService:
                             yield chunk.text
                         elif chunk.candidates and chunk.candidates[0].finish_reason:
                             reason = chunk.candidates[0].finish_reason
-                            reason_str = str(reason)
-                            if reason_str in ('STOP', 'FinishReason.STOP',
-                                              'FINISH_REASON_UNSPECIFIED',
-                                              'FinishReason.FINISH_REASON_UNSPECIFIED',
-                                              '1', '0'):
+                            reason_name = getattr(reason, 'name', str(reason))
+                            if reason_name in ('STOP', 'FINISH_REASON_UNSPECIFIED'):
                                 pass  # Normal completion
-                            elif 'MAX_TOKENS' in reason_str or reason_str in ('2',):
+                            elif reason_name in ('MAX_TOKENS',):
                                 # Soft truncation: partial content was already streamed; just warn.
                                 logger.warning(f"Gemini response truncated at token limit (Key Index: {i}). Partial content returned.")
                             else:
                                 # Safety block, recitation, or other hard stop — flag as error.
-                                logger.warning(f"Gemini content blocked (Key Index: {i}, Reason: {reason_str})")
-                                yield f"[Error: Content blocked by Gemini - {reason_str}]"
+                                logger.warning(f"Gemini content blocked (Key Index: {i}, Reason: {reason_name})")
+                                yield f"[Error: Content blocked by Gemini - {reason_name}]"
                                 return
 
                     if tool_calls:

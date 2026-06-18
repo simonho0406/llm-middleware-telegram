@@ -3,7 +3,7 @@ Centralized LLM utilities for robust API calls across all handlers.
 
 This module provides consistent, resilient LLM interaction patterns with:
 - Automatic retry logic with configurable attempts and delays
-- Provider fallback handling for improved reliability  
+- Provider fallback handling for improved reliability
 - Comprehensive error handling and logging
 - Timeout management and graceful degradation
 - Consistent response formatting across all handlers
@@ -20,6 +20,46 @@ from config import get_expert_panel_config
 logger = logging.getLogger(__name__)
 
 
+def _is_error_response(s: str) -> bool:
+    """True if `s` is a provider-level error sentinel, not legitimate model output."""
+    return s.startswith("[Error:") or s.startswith("Error:")
+
+
+async def _attempt_call(
+    provider_name: str,
+    model: str,
+    prompt: str,
+    history: List[Dict[str, Any]],
+    request_timeout: Optional[int],
+    role_name: str,
+) -> str:
+    """One provider call: resolve service, fit context, stream, return text. Raises on any failure."""
+    service = providers.get_service_for_provider(provider_name)
+    if service is None:
+        raise ValueError(f"Service for '{provider_name}' not configured or available.")
+
+    from utils.context_manager import ensure_context_fits
+    truncated_history, context_info = await ensure_context_fits(
+        prompt=prompt, history=history, model=model, provider=provider_name
+    )
+    if context_info:
+        logger.debug(f"{role_name} Context Info: {context_info}")
+
+    response_chunks = []
+    async for chunk in service.generate_response(
+        model=model,
+        prompt=prompt,
+        context_history=truncated_history,
+        request_timeout=request_timeout,
+    ):
+        response_chunks.append(chunk)
+
+    response = "".join(response_chunks)
+    if _is_error_response(response):
+        raise ValueError(f"Provider returned error: {response}")
+    return response
+
+
 async def get_robust_llm_response(
     provider_name: str,
     model: str,
@@ -34,7 +74,7 @@ async def get_robust_llm_response(
 ) -> Dict[str, Any]:
     """
     Centralized, robust LLM response function with built-in retry logic and fallback handling.
-    
+
     Returns:
         Dict[str, Any]: A dictionary containing:
             - 'response': The LLM's response string or an error message.
@@ -43,98 +83,41 @@ async def get_robust_llm_response(
             - 'is_error': True only when the response is an error sentinel, never when a
               valid response happens to quote an error string as evidence.
     """
+    _history = history if history is not None else []
     last_error = None
     retries = 0
     fallback_used = False
-    
+
     for attempt in range(max_retries):
         retries = attempt
         try:
             logger.debug(f"Attempting {role_name} call (attempt {attempt + 1}/{max_retries})")
-            
-            # Get the service for the primary provider
-            service = providers.get_service_for_provider(provider_name)
-            if service is None:
-                raise ValueError(f"Service for '{provider_name}' not configured or available.")
-            
-            from utils.context_manager import ensure_context_fits
-            truncated_history, context_info = await ensure_context_fits(
-                prompt=prompt,
-                history=history if history is not None else [],
-                model=model,
-                provider=provider_name
-            )
-            if context_info:
-                logger.debug(f"{role_name} Context Info: {context_info}")
-            
-            # Make the primary API call
-            response_chunks = []
-            async for chunk in service.generate_response(
-                model=model,
-                prompt=prompt,
-                context_history=truncated_history,
-                request_timeout=request_timeout
-            ):
-                response_chunks.append(chunk)
-            
-            response = ''.join(response_chunks)
-            
-            # Check for provider-level errors in the response
-            if response.startswith("[Error:") or response.startswith("Error:"):
-                raise ValueError(f"Provider returned error: {response}")
-            
+            response = await _attempt_call(provider_name, model, prompt, _history, request_timeout, role_name)
             logger.debug(f"{role_name} call succeeded on attempt {attempt + 1}")
             return {'response': response, 'retries': retries, 'fallback_used': fallback_used, 'is_error': False}
-            
+
         except asyncio.TimeoutError as e:
             last_error = f"Timeout after {request_timeout}s: {str(e)}"
             logger.warning(f"{role_name} timeout on attempt {attempt + 1}: {last_error}")
-            
+
         except Exception as e:
             last_error = str(e)
             logger.exception(f"{role_name} failed on attempt {attempt + 1}: {last_error}")
-        
-        # Wait before retrying (except on the last attempt)
+
         if attempt < max_retries - 1:
             await asyncio.sleep(retry_delay)
-    
-    # All primary attempts failed - try fallback if configured
+
+    # All primary attempts failed — try fallback if configured.
     if fallback_provider and fallback_model:
         fallback_used = True
         logger.info(f"Primary {role_name} failed after {max_retries} attempts. Trying fallback: {fallback_provider}/{fallback_model}")
-        
         try:
-            fallback_service = providers.get_service_for_provider(fallback_provider)
-            if fallback_service is not None:
-                from utils.context_manager import ensure_context_fits
-                truncated_fallback_history, fallback_context_info = await ensure_context_fits(
-                    prompt=prompt,
-                    history=history if history is not None else [],
-                    model=fallback_model,
-                    provider=fallback_provider
-                )
-                if fallback_context_info:
-                    logger.debug(f"Fallback {role_name} Context Info: {fallback_context_info}")
-
-                response_chunks = []
-                async for chunk in fallback_service.generate_response(
-                    model=fallback_model,
-                    prompt=prompt,
-                    context_history=truncated_fallback_history,
-                    request_timeout=request_timeout
-                ):
-                    response_chunks.append(chunk)
-                
-                response = ''.join(response_chunks)
-                
-                if not response.startswith("[Error:") and not response.startswith("Error:"):
-                    logger.info(f"{role_name} fallback succeeded")
-                    return {'response': f"[Fallback by {fallback_provider}] {response}", 'retries': retries, 'fallback_used': fallback_used, 'is_error': False}
-                    
+            response = await _attempt_call(fallback_provider, fallback_model, prompt, _history, request_timeout, role_name)
+            logger.info(f"{role_name} fallback succeeded")
+            return {'response': f"[Fallback by {fallback_provider}] {response}", 'retries': retries, 'fallback_used': fallback_used, 'is_error': False}
         except Exception as fallback_error:
             logger.exception(f"{role_name} fallback also failed: {fallback_error}")
-    
-    # Both primary and fallback failed
+
     error_msg = f"[Error: {role_name} failed after {max_retries} attempts. Last error: {last_error}]"
     logger.error(error_msg)
     return {'response': error_msg, 'retries': retries, 'fallback_used': fallback_used, 'is_error': True}

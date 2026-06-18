@@ -28,15 +28,16 @@ async def is_search_required(prompt: str) -> tuple[bool, bool]:
             prompt=meta_prompt,
             history=[],
             role_name="Search Classifier",
-            request_timeout=15,
+            request_timeout=config.get_search_classifier_timeout(),
             fallback_provider=config.get_utility_model_fallback_provider(),
             fallback_model=config.get_utility_model_fallback_model(),
         )
         decision = (res.get("response") or "").strip().upper()
         error_occurred = res.get("is_error", False)
-
+        # Use first-token exact match so "Definitely YES" or "YESSS" don't incorrectly pass.
+        first_token = decision.split()[0].rstrip('.!?,') if decision.split() else ""
         logger.info(f"Search detection agent decided: {decision}")
-        return "YES" in decision, error_occurred
+        return first_token == "YES", error_occurred
 
     except Exception as e:
         logger.exception(f"Search detection agent failed: {e}")

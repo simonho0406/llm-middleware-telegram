@@ -279,6 +279,27 @@ def _extract_and_process_search_tags(raw_response: str, autosearch_enabled: bool
 
     return raw_response.strip(), extracted_search_queries
 
+
+async def _attempt_forced_synthesis(service, model: str, prompt: str, history: list, log_prefix: str) -> str | None:
+    """Request a final answer with tools disabled. Returns text on success, None on failure."""
+    try:
+        chunks = []
+        async for chunk in service.generate_response(
+            model=model, prompt=prompt, context_history=history, tools=None
+        ):
+            chunks.append(chunk)
+        result = "".join(chunks)
+        if (not result.strip()
+                or result.lstrip().startswith("[Error:")
+                or '{"tool_calls"' in result):
+            raise RuntimeError("synthesis returned empty, error-sentinel, or another tool call")
+        logger.info(f"{log_prefix}Forced synthesis succeeded (len={len(result)}).")
+        return result
+    except Exception as err:
+        logger.warning(f"{log_prefix}Forced synthesis failed: {err}")
+        return None
+
+
 async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: int, prompt: str, is_reroll: bool = False, force_truncate: bool = False, operation_id: str = "chat_response", is_retry: bool = False) -> dict:
     """
     Core LLM response generation logic, decoupled from message formatting and sending.
@@ -638,27 +659,12 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
             "write a complete final answer to the user's question now. "
             "Do not request any more tools."
         )
-        try:
-            _syn_agen = service.generate_response(
-                model=model_to_use,
-                prompt=_synthesis_prompt,
-                context_history=truncated_history,
-                tools=None,
-            )
-            raw_full_llm_response = ""
-            async for _chunk in _syn_agen:
-                raw_full_llm_response += _chunk
-            if (not raw_full_llm_response.strip()
-                    or raw_full_llm_response.lstrip().startswith("[Error:")
-                    or '{"tool_calls"' in raw_full_llm_response):
-                raise RuntimeError("synthesis returned empty, error-sentinel, or another tool call")
-            logger.info(f"{log_prefix}Forced synthesis succeeded (len={len(raw_full_llm_response)}).")
-        except Exception as _syn_err:
-            logger.warning(f"{log_prefix}Forced synthesis failed: {_syn_err}")
-            raw_full_llm_response = (
-                f"[Warning: Reached the {MAX_TOOL_TURNS}-turn tool-call limit and the "
-                f"forced synthesis also failed. Try /reroll or switch models with /provider.]"
-            )
+        raw_full_llm_response = await _attempt_forced_synthesis(
+            service, model_to_use, _synthesis_prompt, truncated_history, log_prefix
+        ) or (
+            f"[Warning: Reached the {MAX_TOOL_TURNS}-turn tool-call limit and the "
+            f"forced synthesis also failed. Try /reroll or switch models with /provider.]"
+        )
 
     # Strip <thinking> blocks BEFORE search tag extraction so that <search> tags
     # nested inside a model's internal monologue are never treated as real queries.
