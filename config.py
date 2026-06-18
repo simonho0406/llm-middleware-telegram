@@ -184,7 +184,13 @@ def get_utility_model_provider():
     return _yaml_config.get("utility_agent", {}).get("provider", "gemini")
 
 def get_utility_model_name():
-    return _yaml_config.get("utility_agent", {}).get("model", "gemini-flash-latest")
+    return _yaml_config.get("utility_agent", {}).get("model", "gemma-4-31b-it")
+
+def get_utility_model_fallback_provider():
+    return _yaml_config.get("utility_agent", {}).get("fallback_provider", None)
+
+def get_utility_model_fallback_model():
+    return _yaml_config.get("utility_agent", {}).get("fallback_model", None)
 
 # --- Context distiller (query-aware compression of large tool results) ---
 def _distiller():
@@ -208,3 +214,9 @@ def get_distiller_max_output_tokens():
 def get_distiller_max_input_tokens():
     """Upper bound on what we feed the distiller model in one pass."""
     return _distiller().get("max_input_tokens", 128000)
+
+def get_distiller_fallback_provider():
+    return _distiller().get("fallback_provider", None)
+
+def get_distiller_fallback_model():
+    return _distiller().get("fallback_model", None)

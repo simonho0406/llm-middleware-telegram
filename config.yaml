@@ -178,23 +178,26 @@ rate_limits:
 #   - -987654321
 
 # --- Utility Agent Configuration ---
+# Primary: gemma-4-31b-it (Gemini API, score 64 on instruction-following, 256K ctx, 140+ langs)
+# Fallback: gemini-flash-lite-latest (same 4 Gemini keys, separate per-model quota, score 47)
 utility_agent:
   provider: "gemini"
-  model: "gemini-flash-lite-latest"
+  model: "gemma-4-31b-it"
+  fallback_provider: "gemini"
+  fallback_model: "gemini-flash-lite-latest"
 
 # --- Context Distiller ---
-# When a tool result is large, a fast utility pass extracts only the task-relevant
-# content before it enters the main model's context (instead of head-truncating a
-# huge page and losing the section the user wanted). The model needs a large context
-# window to read the whole result in one pass.
+# When a tool result is large, a utility pass extracts only the task-relevant content before it
+# enters the main model's context. Same model pair as utility_agent — primary is smart (256K
+# context covers our 128K input cap), fallback is available. Results that already fit the
+# keep-budget pass through raw without an LLM call.
 context_distiller:
   enabled: true
   provider: "gemini"
-  model: "gemini-flash-lite-latest"   # ~1M window. If Gemini quota is tight, point this at a
-                                       # high-quota large-context model (e.g. an OpenRouter 163k model).
-  # A result is only distilled when it EXCEEDS the caller's keep-budget (the panel passes its
-  # dossier/workspace budget; chat uses max_output_tokens). Results that already fit pass through raw.
-  max_output_tokens: 16000             # default keep-budget / cap for the (comprehensive) extract
+  model: "gemma-4-31b-it"
+  fallback_provider: "gemini"
+  fallback_model: "gemini-flash-lite-latest"
+  max_output_tokens: 16000             # default keep-budget / cap for the verbatim extract
   max_input_tokens: 128000             # cap on what we feed the distiller in one pass
 
 # --- Model Context Protocol (MCP) Servers ---

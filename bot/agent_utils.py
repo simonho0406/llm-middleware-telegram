@@ -1,6 +1,6 @@
 import logging
 import config
-from bot import providers
+from utils.llm_utilities import get_robust_llm_response
 
 logger = logging.getLogger(__name__)
 
@@ -22,19 +22,21 @@ async def is_search_required(prompt: str) -> tuple[bool, bool]:
             f"Respond with only YES or NO."
         )
 
-        service = providers.get_service_for_provider(config.get_utility_model_provider())
-        response_chunks = [
-            chunk async for chunk in service.generate_response(
-                model=config.get_utility_model_name(),
-                prompt=meta_prompt,
-                context_history=None,
-                request_timeout=15
-            )
-        ]
-        decision = "".join(response_chunks).strip().upper()
+        res = await get_robust_llm_response(
+            provider_name=config.get_utility_model_provider(),
+            model=config.get_utility_model_name(),
+            prompt=meta_prompt,
+            history=[],
+            role_name="Search Classifier",
+            request_timeout=15,
+            fallback_provider=config.get_utility_model_fallback_provider(),
+            fallback_model=config.get_utility_model_fallback_model(),
+        )
+        decision = (res.get("response") or "").strip().upper()
+        error_occurred = res.get("is_error", False)
 
         logger.info(f"Search detection agent decided: {decision}")
-        return "YES" in decision, False
+        return "YES" in decision, error_occurred
 
     except Exception as e:
         logger.exception(f"Search detection agent failed: {e}")

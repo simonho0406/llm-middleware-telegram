@@ -84,6 +84,8 @@ async def distill_tool_result(result, query: str, *, max_keep_tokens: int = None
             history=[],
             role_name="Context Distiller",
             request_timeout=180,
+            fallback_provider=config.get_distiller_fallback_provider(),
+            fallback_model=config.get_distiller_fallback_model(),
         )
         if res.get("is_error"):
             raise RuntimeError(str(res.get("response", ""))[:160])

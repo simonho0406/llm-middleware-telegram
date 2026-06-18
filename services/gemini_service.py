@@ -267,7 +267,10 @@ class GeminiService:
                         elif chunk.candidates and chunk.candidates[0].finish_reason:
                             reason = chunk.candidates[0].finish_reason
                             reason_str = str(reason)
-                            if reason_str in ('STOP', 'FINISH_REASON_UNSPECIFIED', '1'):
+                            if reason_str in ('STOP', 'FinishReason.STOP',
+                                              'FINISH_REASON_UNSPECIFIED',
+                                              'FinishReason.FINISH_REASON_UNSPECIFIED',
+                                              '1', '0'):
                                 pass  # Normal completion
                             elif 'MAX_TOKENS' in reason_str or reason_str in ('2',):
                                 # Soft truncation: partial content was already streamed; just warn.
