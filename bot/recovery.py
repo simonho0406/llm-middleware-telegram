@@ -94,6 +94,14 @@ async def _reconcile_one_chat(app, chat_id: int, now: int, window: int) -> bool:
             f"Recovery: chat {chat_id} has a stranded message but it's {age}s old "
             f"(> {window}s window) — leaving it alone."
         )
+        try:
+            await app.bot.send_message(
+                chat_id,
+                "⚠️ The bot restarted while processing your message, but it was too old to "
+                "recover automatically. Please resend it if you still need a response."
+            )
+        except Exception as _notify_err:
+            logger.debug(f"Recovery: could not notify chat {chat_id} of age-out: {_notify_err}")
         return False
 
     # ── Mode guard ──────────────────────────────────────────────────────────────
@@ -107,6 +115,15 @@ async def _reconcile_one_chat(app, chat_id: int, now: int, window: int) -> bool:
             f"Recovery: chat {chat_id} stranded message followed a '{_prev_role}' turn "
             f"(non-normal-chat mode) — skipping to avoid a cross-mode conflict."
         )
+        try:
+            await app.bot.send_message(
+                chat_id,
+                "⚠️ The bot restarted while processing your message. It was part of a "
+                "panel or discussion session that can't be resumed automatically — "
+                "please resend it to start fresh."
+            )
+        except Exception as _notify_err:
+            logger.debug(f"Recovery: could not notify chat {chat_id} of mode-skip: {_notify_err}")
         return False
 
     # ── Concurrency guard ───────────────────────────────────────────────────────

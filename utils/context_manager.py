@@ -143,7 +143,7 @@ def get_model_context_limits(model: str, provider: str) -> ModelContextLimits:
     # Ensure buffer doesn't swallow the whole context if user sets a very low limit
     effective_buffer = base_limits.buffer_tokens
     if effective_buffer >= effective_max_context:
-        effective_buffer = int(effective_max_context * 0.2) # Reduce buffer to 20% if it's too large
+        effective_buffer = int(effective_max_context * config.get_context_emergency_buffer_ratio())
         
     return ModelContextLimits(
         max_context_tokens=effective_max_context,

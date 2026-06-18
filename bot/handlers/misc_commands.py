@@ -209,8 +209,7 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
     model_to_use = await storage_manager.get_thread_key(chat_id, 'model', provider_config['default_model'])
 
     limits = get_model_context_limits(model_to_use, session_provider)
-    # First-pass safety net: cap absurdly large web scrapes to 50% of model limit
-    max_search_tokens = int(limits.effective_input_limit * 0.5)
+    max_search_tokens = int(limits.effective_input_limit * config.get_search_max_context_ratio())
     truncated_search_results = truncate_text_to_tokens(search_results, max_search_tokens)
     
     if len(truncated_search_results) < len(search_results):

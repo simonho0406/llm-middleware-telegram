@@ -192,6 +192,9 @@ def get_utility_model_fallback_provider():
 def get_utility_model_fallback_model():
     return _yaml_config.get("utility_agent", {}).get("fallback_model", None)
 
+def get_search_classifier_timeout():
+    return _yaml_config.get("utility_agent", {}).get("search_classifier_timeout", 15)
+
 # --- Context distiller (query-aware compression of large tool results) ---
 def _distiller():
     return _yaml_config.get("context_distiller", {})
@@ -220,3 +223,10 @@ def get_distiller_fallback_provider():
 
 def get_distiller_fallback_model():
     return _distiller().get("fallback_model", None)
+
+
+def get_search_max_context_ratio():
+    return _yaml_config.get("web_search", {}).get("max_context_ratio", 0.5)
+
+def get_context_emergency_buffer_ratio():
+    return _yaml_config.get("context", {}).get("emergency_buffer_ratio", 0.2)

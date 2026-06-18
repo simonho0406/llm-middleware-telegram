@@ -223,6 +223,99 @@ def _extract_json_object(text: str) -> str:
     return ""
 
 
+async def _execute_panel_tool_calls(
+    tool_calls: list,
+    mcp_service,
+    skill_service,
+    panel_execution_tool_names: frozenset,
+    tool_result_cache: dict,
+    user_prompt: str,
+    dossier_token_budget: int,
+    context,
+) -> list[str]:
+    """Execute Orchestrator tool calls and return formatted result strings.
+
+    Updates ``tool_result_cache`` in-place for cross-call deduplication.
+    Never raises — per-tool exceptions are caught and included in the return list.
+    """
+    parts = []
+    for tc in tool_calls:
+        tool_name = tc.get('name', '')
+        args = tc.get('arguments', {})
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except json.JSONDecodeError as e:
+                logger.warning(f"Panel tool '{tool_name}': failed to parse arguments JSON ({e}). Using empty args.")
+                args = {}
+
+        try:
+            cache_key = (tool_name, json.dumps(args, sort_keys=True, default=str))
+        except Exception:
+            cache_key = (tool_name, str(args))
+
+        if cache_key in tool_result_cache:
+            logger.info(f"Panel tool '{tool_name}' served from cache (identical call already executed this turn).")
+            result = (
+                tool_result_cache[cache_key]
+                + "\n[Note: identical call already executed earlier this turn — result is unchanged. "
+                  "To get different content, target a more specific sub-resource (a particular "
+                  "heading/block_id or a narrower query) instead of re-fetching the same item.]"
+            )
+            parts.append(f"Tool: {tool_name}\nResult: {result}")
+            continue
+
+        try:
+            # skill_ prefix checked BEFORE __ to prevent a skill named `server__foo`
+            # from being misrouted to MCP execution.
+            if tool_name.startswith("skill_") and skill_service:
+                result = skill_service.get_skill_playbook(tool_name[len("skill_"):])
+                logger.info(f"Panel skill '{tool_name}' executed.")
+            elif "__" in tool_name and mcp_service:
+                server, tool = tool_name.split("__", 1)
+                # Gate 1: authority allowlist — only panel_execution: true servers.
+                # Empty frozenset means no servers are authorized → deny all (fail-closed).
+                if not panel_execution_tool_names:
+                    logger.warning(
+                        f"Panel: Gate 1 has no authorized tools (empty authority set). "
+                        f"Denying '{tool_name}'. Set panel_execution: true in config.yaml."
+                    )
+                    result = f"[Denied: Panel tool authority set is empty. Check config.yaml panel_execution flags.]"
+                elif tool_name not in panel_execution_tool_names:
+                    logger.warning(f"Panel: Orchestrator requested unauthorized tool '{tool_name}' — blocked by authority policy.")
+                    result = f"[Denied: '{tool_name}' is not authorised in the panel context.]"
+                else:
+                    # Gate 2: hook validation — same path as normal chat tool execution.
+                    try:
+                        hook_runner.run_pre_tool_use(tool_name, {"arguments": args})
+                    except PermissionError as hook_err:
+                        logger.warning(f"Panel: Tool '{tool_name}' denied by security hook: {hook_err}")
+                        result = f"[Denied by security hook: {hook_err}]"
+                    else:
+                        from utils.service_registry import touch_mcp_last_used
+                        touch_mcp_last_used(getattr(context, 'application', None))
+                        result = await mcp_service.execute_tool(server, tool, args)
+                        logger.info(f"Panel tool '{tool_name}' executed.")
+            else:
+                result = f"[Error: Unknown tool or service unavailable for '{tool_name}']"
+
+            if isinstance(result, str):
+                result = await distill_tool_result(
+                    result, query=user_prompt,
+                    max_keep_tokens=dossier_token_budget, tool_name=tool_name
+                )
+                # Cache only genuine executions so denials/errors can be retried legitimately.
+                if not result.startswith("[Denied") and not result.startswith("[Error"):
+                    tool_result_cache[cache_key] = result
+
+            parts.append(f"Tool: {tool_name}\nResult: {result}")
+        except Exception as tool_exc:
+            logger.exception(f"Panel tool call failed for '{tool_name}': {tool_exc}")
+            parts.append(f"Tool: {tool_name}\nResult: [Error: {tool_exc}]")
+
+    return parts
+
+
 async def _run_refinement_cycle(
     update: Update, context: ContextTypes.DEFAULT_TYPE, proposer_task, critic_task, user_prompt, full_history, placeholder_msg, panel_results,
     orchestrator_service, orchestrator_model, orchestrator_timeout, orchestrator_config, panel_config: dict,
@@ -267,8 +360,6 @@ async def _run_refinement_cycle(
     best_proposer_response = ""
     prev_score = -1
     consecutive_declines = 0
-    _quality_gate_emergency = False  # True when the gate parse failed; score is synthetic
-
     # Stateful Persona History
     # quality_gate_history stores ONLY compact audit entries (score + instructions), never the
     # full proposer/critic response text. That text is already in each round's current prompt,
@@ -297,7 +388,6 @@ async def _run_refinement_cycle(
 
     # Iterative refinement loop
     for iteration in range(1, max_iterations + 1):
-        _quality_gate_emergency = False  # reset each iteration; True only when gate parse fails this round
         try:
             await placeholder_msg.edit_text(f"Round {iteration}/{max_iterations}: Proposer is working...", parse_mode=None)
         except (telegram.error.NetworkError, telegram.error.TimedOut) as e:
@@ -522,19 +612,16 @@ async def _run_refinement_cycle(
                 raise ValueError("No valid JSON object found in the quality gate response.")
 
         except (json.JSONDecodeError, ValueError) as e:
-            logger.error(f"Quality gate parsing failed: {e}")
+            logger.warning(f"Quality gate parsing failed ({e}). Breaking refinement loop with best response so far.")
             logger.debug(f"Problematic quality response (first 500 chars): {quality_response[:500]}")
-            logger.warning("Quality gate failed, using emergency fallback to break loop.")
-            quality_score = quality_threshold  # Set to threshold to break loop
-            refinement_instructions = ""
-            _quality_gate_emergency = True
+            break
 
         # Track the best response seen across all iterations.
         # The Proposer can regress when its model times out and the fallback takes over,
         # causing later iterations to score LOWER than earlier ones. We give the Refiner
         # the best draft, not the last one.
         # Skip update when quality_score is a synthetic emergency value — it is not a real measurement.
-        if not _quality_gate_emergency and quality_score > best_score:
+        if quality_score > best_score:
             best_score = quality_score
             best_proposer_response = proposer_response
 
@@ -560,95 +647,18 @@ async def _run_refinement_cycle(
             logger.info(f"Quality threshold met (Score: {quality_score} >= {quality_threshold}). Finalizing response.")
             break
         elif iteration < max_iterations:
-            # Execute any tool calls the Orchestrator requested to ground the next Proposer iteration
             tool_results_text = ""
             if requested_tool_calls and (mcp_service or skill_service):
-                tool_results_parts = []
-                for tc in requested_tool_calls:
-                    tool_name = tc.get('name', '')
-                    args = tc.get('arguments', {})
-                    if isinstance(args, str):
-                        try:
-                            args = json.loads(args)
-                        except json.JSONDecodeError as e:
-                            logger.warning(f"Panel tool '{tool_name}': failed to parse arguments JSON ({e}). Using empty args.")
-                            args = {}
-
-                    # Dedup: if an identical call already ran this turn, serve the cached result
-                    # instead of re-fetching. Breaks the loop where the Orchestrator re-requests the
-                    # same oversized page every round and gets the same (truncated) head back.
-                    try:
-                        _cache_key = (tool_name, json.dumps(args, sort_keys=True, default=str))
-                    except Exception:
-                        _cache_key = (tool_name, str(args))
-                    if _cache_key in _tool_result_cache:
-                        logger.info(f"Panel tool '{tool_name}' served from cache (identical call already executed this turn).")
-                        result = (
-                            _tool_result_cache[_cache_key]
-                            + "\n[Note: identical call already executed earlier this turn — result is unchanged. "
-                              "To get different content, target a more specific sub-resource (a particular "
-                              "heading/block_id or a narrower query) instead of re-fetching the same item.]"
-                        )
-                        tool_results_parts.append(f"Tool: {tool_name}\nResult: {result}")
-                        continue
-
-                    try:
-                        # skill_ prefix checked BEFORE __ to prevent a skill named `server__foo`
-                        # from being misrouted to MCP execution.
-                        if tool_name.startswith("skill_") and skill_service:
-                            skill_name_str = tool_name[len("skill_"):]
-                            result = skill_service.get_skill_playbook(skill_name_str)
-                            logger.info(f"Panel skill '{tool_name}' executed for iteration {iteration + 1}.")
-                        elif "__" in tool_name and mcp_service:
-                            server, tool = tool_name.split("__", 1)
-                            # Gate 1: authority allowlist — only panel_execution: true servers.
-                            # Empty frozenset means no servers are authorized → deny all (fail-closed).
-                            if not panel_execution_tool_names:
-                                logger.warning(
-                                    f"Panel: Gate 1 has no authorized tools (empty authority set). "
-                                    f"Denying '{tool_name}'. Set panel_execution: true in config.yaml."
-                                )
-                                result = f"[Denied: Panel tool authority set is empty. Check config.yaml panel_execution flags.]"
-                            elif tool_name not in panel_execution_tool_names:
-                                logger.warning(f"Panel: Orchestrator requested unauthorized tool '{tool_name}' — blocked by authority policy.")
-                                result = f"[Denied: '{tool_name}' is not authorised in the panel context.]"
-                            else:
-                                # Gate 2: hook validation — same path as normal chat tool execution
-                                try:
-                                    hook_runner.run_pre_tool_use(tool_name, {"arguments": args})
-                                except PermissionError as hook_err:
-                                    logger.warning(f"Panel: Tool '{tool_name}' denied by security hook: {hook_err}")
-                                    result = f"[Denied by security hook: {hook_err}]"
-                                else:
-                                    from utils.service_registry import touch_mcp_last_used
-                                    touch_mcp_last_used(getattr(context, 'application', None))
-                                    result = await mcp_service.execute_tool(server, tool, args)
-                                    logger.info(f"Panel tool '{tool_name}' executed for iteration {iteration + 1}.")
-                        else:
-                            result = f"[Error: Unknown tool or service unavailable for '{tool_name}']"
-
-                        # Query-aware distillation: extract only what's relevant to the user's
-                        # task instead of head-truncating a huge page (which dropped the deep
-                        # section the user wanted). Keeps grounding while shrinking context.
-                        if isinstance(result, str):
-                            result = await distill_tool_result(
-                                result, query=user_prompt,
-                                max_keep_tokens=_dossier_token_budget, tool_name=tool_name
-                            )
-                            # Cache only genuine executions, so denials/errors can be retried legitimately.
-                            if not result.startswith("[Denied") and not result.startswith("[Error"):
-                                _tool_result_cache[_cache_key] = result
-
-                        tool_results_parts.append(f"Tool: {tool_name}\nResult: {result}")
-                    except Exception as tool_exc:
-                        logger.exception(f"Panel tool call failed for '{tool_name}': {tool_exc}")
-                        tool_results_parts.append(f"Tool: {tool_name}\nResult: [Error: {tool_exc}]")
-
+                tool_results_parts = await _execute_panel_tool_calls(
+                    requested_tool_calls, mcp_service, skill_service,
+                    panel_execution_tool_names, _tool_result_cache,
+                    user_prompt, _dossier_token_budget, context,
+                )
                 if tool_results_parts:
                     tool_results_text = "\n\n".join(tool_results_parts)
                     logger.info(f"Panel orchestrator provided {len(tool_results_parts)} tool result(s) to Proposer for iteration {iteration + 1}.")
-                    # Accumulate into the cumulative grounding dossier (token-budgeted) so grounding
-                    # PERSISTS across refinement rounds instead of being discarded each iteration.
+                    # Accumulate into the cumulative grounding dossier so grounding PERSISTS
+                    # across refinement rounds instead of being discarded each iteration.
                     grounding_dossier = (
                         (grounding_dossier + "\n\n" + tool_results_text).strip()
                         if grounding_dossier else tool_results_text
@@ -656,7 +666,6 @@ async def _run_refinement_cycle(
                     grounding_dossier = truncate_text_to_tokens(grounding_dossier, _dossier_token_budget)
                     # Feed compact results into quality_gate_history so the next Quality Gate
                     # invocation knows which queries succeeded or failed (e.g. "no such table").
-                    # Without this, the gate repeats identical failing queries every round.
                     _qg_chars = config.get_panel_quality_gate_summary_chars()
                     _qg_summary = tool_results_text[:_qg_chars] + ("\n[truncated]" if len(tool_results_text) > _qg_chars else "")
                     quality_gate_history.append({
@@ -674,53 +683,16 @@ async def _run_refinement_cycle(
                 proposer_response=proposer_response,
                 quality_score=quality_score,
                 refinement_instructions=refinement_instructions,
-                # Cumulative dossier (seed grounding + all rounds' results), not just this round's.
                 tool_results=grounding_dossier or "(no external tool results yet)"
             )
         else:
             logger.warning(f"Max iterations reached. Final quality score: {quality_score}")
-            # If the Orchestrator still requested tools on the final iteration, execute them
-            # and do one forced synthesis Proposer pass so the user gets the benefit of that
-            # data rather than an answer that was graded before those tool results existed.
             if requested_tool_calls and quality_score < quality_threshold and (mcp_service or skill_service):
-                _final_parts = []
-                for _tc in requested_tool_calls:
-                    _tc_name = _tc.get('name', '')
-                    _tc_args = _tc.get('arguments', {})
-                    if isinstance(_tc_args, str):
-                        try: _tc_args = json.loads(_tc_args)
-                        except json.JSONDecodeError: _tc_args = {}
-                    try:
-                        _ck = (_tc_name, json.dumps(_tc_args, sort_keys=True, default=str))
-                    except Exception:
-                        _ck = (_tc_name, str(_tc_args))
-                    try:
-                        if _ck in _tool_result_cache:
-                            _res = _tool_result_cache[_ck]
-                        elif _tc_name.startswith("skill_") and skill_service:
-                            _res = skill_service.get_skill_playbook(_tc_name[len("skill_"):])
-                        elif "__" in _tc_name and mcp_service and _tc_name in panel_execution_tool_names:
-                            _svr, _tl = _tc_name.split("__", 1)
-                            try:
-                                hook_runner.run_pre_tool_use(_tc_name, {"arguments": _tc_args})
-                            except PermissionError as _he:
-                                _res = f"[Denied by security hook: {_he}]"
-                            else:
-                                from utils.service_registry import touch_mcp_last_used
-                                touch_mcp_last_used(getattr(context, 'application', None))
-                                _res = await mcp_service.execute_tool(_svr, _tl, _tc_args)
-                                logger.info(f"Final synthesis tool '{_tc_name}' executed.")
-                        else:
-                            _res = f"[Skipped: '{_tc_name}' not available for final synthesis.]"
-                        if isinstance(_res, str):
-                            _res = await distill_tool_result(
-                                _res, query=user_prompt,
-                                max_keep_tokens=_dossier_token_budget, tool_name=_tc_name
-                            )
-                        _final_parts.append(f"Tool: {_tc_name}\nResult: {_res}")
-                    except Exception as _fte:
-                        logger.warning(f"Final synthesis tool '{_tc_name}' failed: {_fte}")
-
+                _final_parts = await _execute_panel_tool_calls(
+                    requested_tool_calls, mcp_service, skill_service,
+                    panel_execution_tool_names, _tool_result_cache,
+                    user_prompt, _dossier_token_budget, context,
+                )
                 if _final_parts:
                     grounding_dossier = truncate_text_to_tokens(
                         (grounding_dossier + "\n\n" + "\n\n".join(_final_parts)).strip()
