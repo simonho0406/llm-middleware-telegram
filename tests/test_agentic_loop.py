@@ -297,7 +297,9 @@ async def test_turn_limit_ceiling(mock_update_context):
 
         result = await _generate_llm_response(mock_context, chat_id, prompt)
 
-        # Assertions
-        assert "Maximum tool execution depth of 5 turns reached" in result['content']
-        # The service generate_response should be called exactly 5 times (turns 0, 1, 2, 3, 4)
-        assert mock_service.generate_response.call_count == 5
+        # After 5 tool turns the loop forces a synthesis call (6th call, tools=None).
+        # The mock still returns a tool-call payload, so synthesis fails and the
+        # fallback warning message is emitted.
+        assert "5-turn tool-call limit" in result['content']
+        # 5 tool-loop turns + 1 forced synthesis attempt = 6 total service calls
+        assert mock_service.generate_response.call_count == 6

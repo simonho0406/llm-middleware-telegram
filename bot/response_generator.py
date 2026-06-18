@@ -631,8 +631,34 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
             break
             
     else:
-        logger.warning(f"{log_prefix}Maximum tool turns ({MAX_TOOL_TURNS}) reached!")
-        raw_full_llm_response = f"[Warning: Maximum tool execution depth of {MAX_TOOL_TURNS} turns reached to prevent runaway billing or infinite loops.]"
+        logger.warning(f"{log_prefix}Maximum tool turns ({MAX_TOOL_TURNS}) reached — forcing final synthesis.")
+        _synthesis_prompt = (
+            "You have used the maximum number of tool-call rounds. "
+            "Based on all the information gathered in this conversation, "
+            "write a complete final answer to the user's question now. "
+            "Do not request any more tools."
+        )
+        try:
+            _syn_agen = service.generate_response(
+                model=model_to_use,
+                prompt=_synthesis_prompt,
+                context_history=truncated_history,
+                tools=None,
+            )
+            raw_full_llm_response = ""
+            async for _chunk in _syn_agen:
+                raw_full_llm_response += _chunk
+            if (not raw_full_llm_response.strip()
+                    or raw_full_llm_response.lstrip().startswith("[Error:")
+                    or '{"tool_calls"' in raw_full_llm_response):
+                raise RuntimeError("synthesis returned empty, error-sentinel, or another tool call")
+            logger.info(f"{log_prefix}Forced synthesis succeeded (len={len(raw_full_llm_response)}).")
+        except Exception as _syn_err:
+            logger.warning(f"{log_prefix}Forced synthesis failed: {_syn_err}")
+            raw_full_llm_response = (
+                f"[Warning: Reached the {MAX_TOOL_TURNS}-turn tool-call limit and the "
+                f"forced synthesis also failed. Try /reroll or switch models with /provider.]"
+            )
 
     # Strip <thinking> blocks BEFORE search tag extraction so that <search> tags
     # nested inside a model's internal monologue are never treated as real queries.

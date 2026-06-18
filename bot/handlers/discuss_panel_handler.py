@@ -679,6 +679,83 @@ async def _run_refinement_cycle(
             )
         else:
             logger.warning(f"Max iterations reached. Final quality score: {quality_score}")
+            # If the Orchestrator still requested tools on the final iteration, execute them
+            # and do one forced synthesis Proposer pass so the user gets the benefit of that
+            # data rather than an answer that was graded before those tool results existed.
+            if requested_tool_calls and quality_score < quality_threshold and (mcp_service or skill_service):
+                _final_parts = []
+                for _tc in requested_tool_calls:
+                    _tc_name = _tc.get('name', '')
+                    _tc_args = _tc.get('arguments', {})
+                    if isinstance(_tc_args, str):
+                        try: _tc_args = json.loads(_tc_args)
+                        except json.JSONDecodeError: _tc_args = {}
+                    try:
+                        _ck = (_tc_name, json.dumps(_tc_args, sort_keys=True, default=str))
+                    except Exception:
+                        _ck = (_tc_name, str(_tc_args))
+                    try:
+                        if _ck in _tool_result_cache:
+                            _res = _tool_result_cache[_ck]
+                        elif _tc_name.startswith("skill_") and skill_service:
+                            _res = skill_service.get_skill_playbook(_tc_name[len("skill_"):])
+                        elif "__" in _tc_name and mcp_service and _tc_name in panel_execution_tool_names:
+                            _svr, _tl = _tc_name.split("__", 1)
+                            try:
+                                hook_runner.run_pre_tool_use(_tc_name, {"arguments": _tc_args})
+                            except PermissionError as _he:
+                                _res = f"[Denied by security hook: {_he}]"
+                            else:
+                                from utils.service_registry import touch_mcp_last_used
+                                touch_mcp_last_used(getattr(context, 'application', None))
+                                _res = await mcp_service.execute_tool(_svr, _tl, _tc_args)
+                                logger.info(f"Final synthesis tool '{_tc_name}' executed.")
+                        else:
+                            _res = f"[Skipped: '{_tc_name}' not available for final synthesis.]"
+                        if isinstance(_res, str):
+                            _res = await distill_tool_result(
+                                _res, query=user_prompt,
+                                max_keep_tokens=_dossier_token_budget, tool_name=_tc_name
+                            )
+                        _final_parts.append(f"Tool: {_tc_name}\nResult: {_res}")
+                    except Exception as _fte:
+                        logger.warning(f"Final synthesis tool '{_tc_name}' failed: {_fte}")
+
+                if _final_parts:
+                    grounding_dossier = truncate_text_to_tokens(
+                        (grounding_dossier + "\n\n" + "\n\n".join(_final_parts)).strip()
+                        if grounding_dossier else "\n\n".join(_final_parts),
+                        _dossier_token_budget
+                    )
+                    _final_synth_prompt = config.PROMPTS.get_prompt('panel_proposer_refine').format(
+                        user_prompt=user_prompt,
+                        proposer_response=proposer_response,
+                        quality_score=quality_score,
+                        refinement_instructions=(
+                            "⚠️ FINAL SYNTHESIS PASS — no further iterations follow. "
+                            "Write the most complete, fully-grounded answer possible using the "
+                            "dossier below. Fulfil the user's request in full; do not defer."
+                        ),
+                        tool_results=grounding_dossier,
+                    )
+                    try:
+                        _fb_prov, _fb_mod = get_expert_panel_fallback_config()
+                        _final_llm = await get_robust_llm_response(
+                            provider_name=proposer_provider,
+                            model=proposer_model,
+                            prompt=_final_synth_prompt,
+                            history=[],
+                            role_name="Proposer (final synthesis)",
+                            request_timeout=proposer_role_config.get('request_timeout_seconds'),
+                            fallback_provider=_fb_prov,
+                            fallback_model=_fb_mod,
+                        )
+                        if not _final_llm.get('is_error') and _final_llm.get('response'):
+                            proposer_response = _final_llm['response']
+                            best_proposer_response = proposer_response
+                            logger.info("Final synthesis Proposer pass succeeded.")
+                    except Exception as _fpe:
+                        logger.warning(f"Final synthesis Proposer pass failed: {_fpe}")
             break
 
     # Return the best-scoring response, not necessarily the last one.
