@@ -328,7 +328,6 @@ async def new_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     try:
         await storage_manager.create_thread(chat_id, new_thread_id)
         await storage_manager.set_current_thread_id(chat_id, new_thread_id)
-        await storage_manager.set_thread_history(chat_id, [])
         default_provider = config.get_default_provider()
         await storage_manager.set_thread_key(chat_id, 'provider', default_provider)
         provider_config = providers.get_config_for_provider(default_provider)

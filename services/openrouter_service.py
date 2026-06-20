@@ -7,6 +7,38 @@ from typing import AsyncGenerator, List, Dict, Optional, Any
 
 logger = logging.getLogger(__name__)
 
+# Module-level reasoning capability cache.
+# Populated on first generate_response call (or when list_models() runs).
+# Models in this set accept reasoning params; others skip the attempt entirely.
+_reasoning_capable_models: set[str] = set()
+_capabilities_fetched: bool = False
+
+
+async def _ensure_capabilities_fetched() -> None:
+    """Fetch and cache reasoning-capable model IDs from OpenRouter (once per process)."""
+    global _reasoning_capable_models, _capabilities_fetched
+    if _capabilities_fetched:
+        return
+    if not config.OPENROUTER_API_KEY or config.OPENROUTER_API_KEY == "YOUR_OPENROUTER_API_KEY":
+        _capabilities_fetched = True
+        return
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                "https://openrouter.ai/api/v1/models",
+                headers={"Authorization": f"Bearer {config.OPENROUTER_API_KEY}"},
+            )
+            resp.raise_for_status()
+            for m in resp.json().get("data", []):
+                if "reasoning" in m.get("supported_parameters", []):
+                    _reasoning_capable_models.add(m["id"])
+        logger.info(f"OpenRouter: {len(_reasoning_capable_models)} reasoning-capable model(s) cached.")
+    except Exception as e:
+        logger.warning(f"OpenRouter capability fetch failed ({e}); will skip reasoning params for all models.")
+    finally:
+        _capabilities_fetched = True
+
+
 async def generate_response(
     model: str,
     prompt: str,
@@ -54,40 +86,21 @@ async def generate_response(
         "stream": True
     }
 
+    await _ensure_capabilities_fetched()
+
     try:
         timeout_config = request_timeout if request_timeout is not None else config.get_request_timeout_seconds()
         async with httpx.AsyncClient(timeout=timeout_config) as client:
-            # Universal Reasoning Payload for OpenRouter
-            reasoning_data = data.copy()
-            reasoning_data.update({
-                "include_reasoning": True,
-                "reasoning": {"effort": "high"},
-            })
-            
-            # ATTEMPT 1: Try with reasoning parameters (streaming)
-            try:
-                async with client.stream("POST", "https://openrouter.ai/api/v1/chat/completions", headers=headers, json=reasoning_data) as response:
-                    if response.status_code == 400:
-                         logger.warning(f"OpenRouter model {model} rejected reasoning params. Fallback triggered.")
-                         raise ValueError("fallback") # Trigger fallback
-                    
-                    async for chunk in process_openrouter_response(response):
-                        yield chunk
-                    return # SUCCESS -> Exit
-            except ValueError as e:
-                if str(e) == "fallback":
-                    pass # Continue to fallback
-                else:
-                    raise e
-            except Exception as e:
-                 logger.exception(f"OpenRouter Error on Attempt 1: {e}")
-                 yield f"[Error: {e}]"
-                 return
+            if model in _reasoning_capable_models:
+                payload = data.copy()
+                payload.update({"include_reasoning": True, "reasoning": {"effort": "high"}})
+                logger.debug(f"OpenRouter: sending reasoning params for {model}.")
+            else:
+                payload = data
 
-            # FALLBACK ATTEMPT: Standard payload without reasoning params
-            async with client.stream("POST", "https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data) as response:
-                 async for chunk in process_openrouter_response(response):
-                     yield chunk
+            async with client.stream("POST", "https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload) as response:
+                async for chunk in process_openrouter_response(response):
+                    yield chunk
 
 
 
@@ -146,7 +159,12 @@ async def check_status() -> (bool, str):
     return is_configured, message
 
 async def list_models() -> List[Dict[str, Any]]:
-    """Fetches the list of models from OpenRouter and filters for free ones."""
+    """Fetches the list of free models from OpenRouter.
+
+    Also populates the module-level reasoning capability cache as a side effect,
+    so subsequent generate_response() calls skip redundant capability probing.
+    """
+    global _reasoning_capable_models, _capabilities_fetched
     if not config.OPENROUTER_API_KEY or config.OPENROUTER_API_KEY == "YOUR_OPENROUTER_API_KEY":
         logger.warning("OpenRouter API Key not configured, cannot fetch models.")
         return []
@@ -159,20 +177,31 @@ async def list_models() -> List[Dict[str, Any]]:
             response.raise_for_status()
             models_data = response.json().get("data", [])
 
+            new_reasoning_capable: set[str] = set()
             for model in models_data:
-                # Check pricing: prompt price is 0 and completion price is 0
-                pricing = model.get("pricing", {})
-                prompt_cost = float(pricing.get("prompt", "1")) # Default to non-zero if missing
-                completion_cost = float(pricing.get("completion", "1")) # Default to non-zero if missing
+                model_id = model.get("id")
+                supported = model.get("supported_parameters", [])
+                if "reasoning" in supported and model_id:
+                    new_reasoning_capable.add(model_id)
 
+                pricing = model.get("pricing", {})
+                prompt_cost = float(pricing.get("prompt", "1"))
+                completion_cost = float(pricing.get("completion", "1"))
                 if prompt_cost == 0.0 and completion_cost == 0.0:
                     free_models.append({
-                        "id": model.get("id"),
-                        "name": model.get("name", model.get("id")), # Use name if available
-                        # Add other relevant info if needed, e.g., context_length
-                        "context_length": model.get("context_length")
+                        "id": model_id,
+                        "name": model.get("name", model_id),
+                        "context_length": model.get("context_length"),
+                        "supports_reasoning": "reasoning" in supported,
                     })
-            logger.info(f"Fetched {len(free_models)} free models from OpenRouter.")
+
+            # Refresh the module-level cache from this authoritative fetch.
+            _reasoning_capable_models = new_reasoning_capable
+            _capabilities_fetched = True
+            logger.info(
+                f"Fetched {len(free_models)} free models from OpenRouter "
+                f"({len(_reasoning_capable_models)} reasoning-capable total)."
+            )
 
     except httpx.HTTPStatusError as http_err:
         logger.error(f"Failed to fetch OpenRouter models: HTTP Error {http_err.response.status_code}")
