@@ -32,7 +32,7 @@ MODELS_PER_PAGE = 8
 MODEL_PAGE_CALLBACK_PREFIX = "config_model_page_"
 
 # Available roles that can be configured
-CONFIGURABLE_ROLES = ["Proposer", "Critic", "Refiner"]
+CONFIGURABLE_ROLES = ["Orchestrator", "Proposer", "Critic", "Refiner"]
 
 async def start_configure_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Entry point for the /configure_panel command."""
@@ -54,9 +54,11 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     current_config = await load_panel_config(chat_id)
     
     menu_text = "*🔧 Expert Panel Configuration*\n\n*Current Configuration:*\n"
-    roles_section = current_config.get('roles', {})
     for role in CONFIGURABLE_ROLES:
-        role_config = roles_section.get(role, {})
+        if role == "Orchestrator":
+            role_config = current_config.get('orchestrator', {})
+        else:
+            role_config = current_config.get('roles', {}).get(role, {})
         provider = role_config.get('provider', 'Not Set')
         model = role_config.get('model', 'Not Set')
         display_model = model if len(model) <= 30 else f"{model[:27]}..."
@@ -96,7 +98,10 @@ async def show_provider_selection(update: Update, context: ContextTypes.DEFAULT_
     """Display available providers for the selected role."""
     chat_id = update.effective_chat.id
     current_config = await load_panel_config(chat_id)
-    current_role_config = current_config.get('roles', {}).get(role, {})
+    if role == "Orchestrator":
+        current_role_config = current_config.get('orchestrator', {})
+    else:
+        current_role_config = current_config.get('roles', {}).get(role, {})
     current_provider = current_role_config.get('provider', None)
     
     available_providers = providers.get_available_provider_names()
@@ -166,7 +171,10 @@ async def show_model_selection(update: Update, context: ContextTypes.DEFAULT_TYP
     models_page = models_result[start_index:end_index]
     
     current_config = await load_panel_config(update.effective_chat.id)
-    current_model = current_config.get('roles', {}).get(role, {}).get('model', None)
+    if role == "Orchestrator":
+        current_model = current_config.get('orchestrator', {}).get('model', None)
+    else:
+        current_model = current_config.get('roles', {}).get(role, {}).get('model', None)
     
     menu_text = f"*🔧 Configure {role} → {provider}*\n\n*Current Model:* `{current_model or 'Not Set'}`\n\n*Select a Model* (Page {page}/{total_pages}):"
     
@@ -318,12 +326,18 @@ async def save_role_config(chat_id: int, role: str, provider: str, model: str) -
     except (json.JSONDecodeError, TypeError):
         current_overrides = {}
     
-    if 'roles' not in current_overrides:
-        current_overrides['roles'] = {}
-    current_overrides['roles'][role] = {
-        'provider': provider,
-        'model': model
-    }
+    if role == "Orchestrator":
+        current_overrides['orchestrator'] = {
+            'provider': provider,
+            'model': model
+        }
+    else:
+        if 'roles' not in current_overrides:
+            current_overrides['roles'] = {}
+        current_overrides['roles'][role] = {
+            'provider': provider,
+            'model': model
+        }
     
     await storage_manager.set_user_setting(chat_id, 'panel_config', json.dumps(current_overrides))
     logger.info(f"Saved override for {role} in chat {chat_id}: {provider}/{model}")

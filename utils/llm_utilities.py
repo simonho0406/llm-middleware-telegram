@@ -15,12 +15,13 @@ from typing import List, Dict, Any, Optional, AsyncGenerator
 
 from bot import providers
 from config import get_expert_panel_config
+from utils.context_manager import ensure_context_fits
 
 
 logger = logging.getLogger(__name__)
 
 
-def _is_error_response(s: str) -> bool:
+def is_error_response(s: str) -> bool:
     """True if `s` is a provider-level error sentinel, not legitimate model output."""
     return s.startswith("[Error:") or s.startswith("Error:")
 
@@ -38,7 +39,6 @@ async def _attempt_call(
     if service is None:
         raise ValueError(f"Service for '{provider_name}' not configured or available.")
 
-    from utils.context_manager import ensure_context_fits
     truncated_history, context_info = await ensure_context_fits(
         prompt=prompt, history=history, model=model, provider=provider_name
     )
@@ -55,7 +55,7 @@ async def _attempt_call(
         response_chunks.append(chunk)
 
     response = "".join(response_chunks)
-    if _is_error_response(response):
+    if is_error_response(response):
         raise ValueError(f"Provider returned error: {response}")
     return response
 
@@ -114,7 +114,7 @@ async def get_robust_llm_response(
         try:
             response = await _attempt_call(fallback_provider, fallback_model, prompt, _history, request_timeout, role_name)
             logger.info(f"{role_name} fallback succeeded")
-            return {'response': f"[Fallback by {fallback_provider}] {response}", 'retries': retries, 'fallback_used': fallback_used, 'is_error': False}
+            return {'response': response, 'retries': retries, 'fallback_used': fallback_used, 'is_error': False}
         except Exception as fallback_error:
             logger.exception(f"{role_name} fallback also failed: {fallback_error}")
 

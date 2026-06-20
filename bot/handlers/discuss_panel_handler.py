@@ -12,7 +12,7 @@ from telegram import BotCommandScopeChat
 
 from utils import text_processing
 from utils.hooks import hook_runner
-from utils.llm_utilities import get_robust_llm_response, get_expert_panel_fallback_config
+from utils.llm_utilities import get_robust_llm_response, get_expert_panel_fallback_config, is_error_response
 from telegram import constants
 import config
 from bot import providers
@@ -305,7 +305,7 @@ async def _execute_panel_tool_calls(
                     max_keep_tokens=dossier_token_budget, tool_name=tool_name
                 )
                 # Cache only genuine executions so denials/errors can be retried legitimately.
-                if not result.startswith("[Denied") and not result.startswith("[Error"):
+                if not result.startswith("[Denied") and not is_error_response(result):
                     tool_result_cache[cache_key] = result
 
             parts.append(f"Tool: {tool_name}\nResult: {result}")
@@ -614,13 +614,13 @@ async def _run_refinement_cycle(
         except (json.JSONDecodeError, ValueError) as e:
             logger.warning(f"Quality gate parsing failed ({e}). Breaking refinement loop with best response so far.")
             logger.debug(f"Problematic quality response (first 500 chars): {quality_response[:500]}")
+            quality_score = -1
             break
 
         # Track the best response seen across all iterations.
         # The Proposer can regress when its model times out and the fallback takes over,
         # causing later iterations to score LOWER than earlier ones. We give the Refiner
         # the best draft, not the last one.
-        # Skip update when quality_score is a synthetic emergency value — it is not a real measurement.
         if quality_score > best_score:
             best_score = quality_score
             best_proposer_response = proposer_response
@@ -701,8 +701,8 @@ async def _run_refinement_cycle(
                     )
                     _final_synth_prompt = config.PROMPTS.get_prompt('panel_proposer_refine').format(
                         user_prompt=user_prompt,
-                        proposer_response=proposer_response,
-                        quality_score=quality_score,
+                        proposer_response=best_proposer_response,
+                        quality_score=best_score,
                         refinement_instructions=(
                             "⚠️ FINAL SYNTHESIS PASS — no further iterations follow. "
                             "Write the most complete, fully-grounded answer possible using the "
@@ -725,6 +725,7 @@ async def _run_refinement_cycle(
                         if not _final_llm.get('is_error') and _final_llm.get('response'):
                             proposer_response = _final_llm['response']
                             best_proposer_response = proposer_response
+                            best_score = quality_threshold
                             logger.info("Final synthesis Proposer pass succeeded.")
                     except Exception as _fpe:
                         logger.warning(f"Final synthesis Proposer pass failed: {_fpe}")
@@ -744,7 +745,8 @@ async def set_panel_commands(application, chat_id: int) -> None:
         BotCommand("reroll", "Rerun the last panel turn"),
         BotCommand("search", "Inject web search results into the discussion"),
         BotCommand("end_discussion", "End the current panel discussion"),
-        BotCommand("cancel", "Cancel the current operation"), # Add this line
+        BotCommand("configure_panel", "Configure panel models"),
+        BotCommand("cancel", "Cancel the current operation"),
     ]
     try:
         await application.bot.set_my_commands(

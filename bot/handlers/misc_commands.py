@@ -29,6 +29,7 @@ from services import web_search_service
 from bot.response_generator import _generate_and_send_response
 from utils.hooks import hook_runner
 from utils.context_manager import get_model_context_limits, truncate_text_to_tokens, ensure_context_fits
+from utils.llm_utilities import is_error_response
 
 logger = logging.getLogger(__name__)
 
@@ -287,14 +288,14 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
             pass
     await send_safe_message(context, update, final_response, chat_id=chat_id)
 
-    if not skip_save and not final_response.startswith("[Error:"):
+    if not skip_save and not is_error_response(final_response):
         try:
             # Save the assistant's response (Append-Only) — but NEVER save error strings
             await storage_manager.save_message(chat_id, 'assistant', final_response)
             logger.info(f"{log_prefix}Search command successful. Response saved.")
         except Exception as e:
             logger.error(f"{log_prefix}Failed to save assistant response: {e}", exc_info=True)
-    elif final_response.startswith("[Error:"):
+    elif is_error_response(final_response):
         logger.warning(f"{log_prefix}Search returned an error response. NOT saving to history.")
 
 async def retry_search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

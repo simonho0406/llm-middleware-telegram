@@ -175,7 +175,9 @@ async def story2_history_mining(mcp) -> dict:
         result = await _generate_llm_response(make_context(mcp), QA_CHAT_ID, prompt)
         content = result.get("content", "") or ""
         err = result.get("error")
-        found = QA_HIST_FACT.lower() in content.lower()
+        # Normalize Unicode hyphens (e.g. U+2011 non-breaking hyphen) to ASCII before matching.
+        _normalized = content.replace('‐', '-').replace('‑', '-').replace('‒', '-').replace('–', '-')
+        found = QA_HIST_FACT.lower() in _normalized.lower()
         ok = (err is None) and found
         logger.info(f"[S2] preview: {content[:280]}")
         return _r(name, ok, start, f"err={err} found_'{QA_HIST_FACT}'={found}")

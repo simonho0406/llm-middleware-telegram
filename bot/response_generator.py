@@ -22,9 +22,30 @@ from services.openai_compatible_service import OpenAICompatibleService
 from storage import storage_manager
 from bot.messaging import send_safe_message, finalize_draft, send_draft_message, send_plain_message
 from utils.context_manager import ensure_context_fits
+from utils.llm_utilities import is_error_response
 from bot.settings import USER_SETTINGS
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_xml_tool_calls(text: str) -> list:
+    """Parse NVIDIA nemotron XML-style tool calls into the same dict structure as JSON tool_calls.
+
+    Nemotron emits:  <tool_call><function=server__tool><parameter=key>val</parameter></function></tool_call>
+    Output matches the JSON path: [{"id": ..., "function": {"name": ..., "arguments": {...}}}]
+    """
+    calls = []
+    for i, block in enumerate(re.finditer(r'<tool_call>(.*?)</tool_call>', text, re.DOTALL)):
+        content = block.group(1)
+        fn_match = re.search(r'<function=([^>]+)>', content)
+        if not fn_match:
+            continue
+        tool_name = fn_match.group(1).strip()
+        args = {}
+        for p in re.finditer(r'<parameter=([^>]+)>\s*(.*?)\s*</parameter>', content, re.DOTALL):
+            args[p.group(1).strip()] = p.group(2).strip()
+        calls.append({"id": f"xml_tc_{i}", "function": {"name": tool_name, "arguments": args}})
+    return calls
 
 
 def _build_tool_catalog_section(mcp_tools: list, skill_tools: list, chat_id: int = None, thread_id: str = None) -> str:
@@ -280,18 +301,22 @@ def _extract_and_process_search_tags(raw_response: str, autosearch_enabled: bool
     return raw_response.strip(), extracted_search_queries
 
 
-async def _attempt_forced_synthesis(service, model: str, prompt: str, history: list, log_prefix: str) -> str | None:
+async def _attempt_forced_synthesis(
+    service, model: str, prompt: str, history: list, log_prefix: str,
+    request_timeout: int | None = None,
+) -> str | None:
     """Request a final answer with tools disabled. Returns text on success, None on failure."""
     try:
         chunks = []
         async for chunk in service.generate_response(
-            model=model, prompt=prompt, context_history=history, tools=None
+            model=model, prompt=prompt, context_history=history, tools=None,
+            request_timeout=request_timeout,
         ):
             chunks.append(chunk)
         result = "".join(chunks)
         if (not result.strip()
-                or result.lstrip().startswith("[Error:")
-                or '{"tool_calls"' in result):
+                or is_error_response(result.lstrip())
+                or result.lstrip().startswith('{"tool_calls"')):
             raise RuntimeError("synthesis returned empty, error-sentinel, or another tool call")
         logger.info(f"{log_prefix}Forced synthesis succeeded (len={len(result)}).")
         return result
@@ -517,7 +542,7 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
             # Check the fully-assembled response for the error sentinel — only the
             # bracket-delimited form [Error: ...] is the provider sentinel; checking
             # individual streaming chunks risks false positives on partial sentences.
-            if raw_full_llm_response.lstrip().startswith("[Error:"):
+            if is_error_response(raw_full_llm_response.lstrip()):
                 llm_error_reported_by_model = True
 
             if llm_error_reported_by_model:
@@ -548,6 +573,14 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
             logger.warning(f"{log_prefix}Turn {turn}: Malformed tool_calls JSON at pos {json_start}: {e}. Treating as plain text.")
         except Exception as e:
             logger.exception(f"{log_prefix}Turn {turn}: Unexpected error parsing tool call response: {e}")
+
+        # Fallback: detect NVIDIA nemotron XML-style tool calls (<tool_call><function=...>)
+        if not is_tool_call and '<tool_call>' in cleaned_response:
+            xml_calls = _parse_xml_tool_calls(cleaned_response)
+            if xml_calls:
+                is_tool_call = True
+                parsed_tool_calls = xml_calls
+                logger.info(f"{log_prefix}Turn {turn}: XML tool call format detected, parsed {len(xml_calls)} call(s).")
 
         if is_tool_call and parsed_tool_calls:
             logger.info(f"{log_prefix}Turn {turn}: Tool call request detected: {parsed_tool_calls}")
@@ -660,7 +693,8 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
             "Do not request any more tools."
         )
         raw_full_llm_response = await _attempt_forced_synthesis(
-            service, model_to_use, _synthesis_prompt, truncated_history, log_prefix
+            service, model_to_use, _synthesis_prompt, truncated_history, log_prefix,
+            request_timeout=config.get_request_timeout_seconds(),
         ) or (
             f"[Warning: Reached the {MAX_TOOL_TURNS}-turn tool-call limit and the "
             f"forced synthesis also failed. Try /reroll or switch models with /provider.]"

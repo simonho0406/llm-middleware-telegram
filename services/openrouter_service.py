@@ -10,9 +10,10 @@ logger = logging.getLogger(__name__)
 async def generate_response(
     model: str,
     prompt: str,
-    context_history: Optional[List[Dict]] = None, # Use Optional and correct type hint
-    request_timeout: Optional[int] = None
-) -> AsyncGenerator[str, None]: # Correct return type hint for async generator
+    context_history: Optional[List[Dict]] = None,
+    request_timeout: Optional[int] = None,
+    tools: list = None,
+) -> AsyncGenerator[str, None]:
     """
     Sends a request to OpenRouter API with streaming support.
     Handles rate limits and errors gracefully.

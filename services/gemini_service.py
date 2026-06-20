@@ -11,6 +11,10 @@ from google.genai import errors as google_exceptions
 
 logger = logging.getLogger(__name__)
 
+# Maps raw protobuf integer values to canonical enum names — fallback for SDK versions
+# that return unrecognized FinishReason as a plain int instead of an enum object.
+_FINISH_REASON_INT_MAP = {'0': 'FINISH_REASON_UNSPECIFIED', '1': 'STOP', '2': 'MAX_TOKENS'}
+
 def map_json_schema_to_gemini(schema_dict: dict) -> types.Schema:
     if not schema_dict:
         return None
@@ -267,6 +271,7 @@ class GeminiService:
                         elif chunk.candidates and chunk.candidates[0].finish_reason:
                             reason = chunk.candidates[0].finish_reason
                             reason_name = getattr(reason, 'name', str(reason))
+                            reason_name = _FINISH_REASON_INT_MAP.get(reason_name, reason_name)
                             if reason_name in ('STOP', 'FINISH_REASON_UNSPECIFIED'):
                                 pass  # Normal completion
                             elif reason_name in ('MAX_TOKENS',):

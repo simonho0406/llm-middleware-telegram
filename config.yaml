@@ -216,6 +216,13 @@ mcp_servers:
     panel_execution: true    # Read-only history queries permitted; write_query/create_table blocked by hooks
     pass_env: []             # sqlite-tools needs no API keys
 
+  - name: "notion-workspace"
+    command: "npx"
+    args: ["-y", "@notionhq/notion-mcp-server"]
+    transport: "stdio"
+    panel_execution: true    # Knowledge lookup allowed in panel Quality Gate
+    pass_env: ["NOTION_TOKEN"]  # @notionhq/notion-mcp-server reads NOTION_TOKEN only (not NOTION_API_KEY / OPENAI_API_KEY)
+
   - name: "tavily-search"
     command: "npx"
     args: ["-y", "tavily-mcp"]
@@ -223,10 +230,4 @@ mcp_servers:
     panel_execution: true    # Web search allowed in panel Quality Gate
     pass_env: ["TAVILY_API_KEY"]
 
-  - name: "notion-workspace"
-    command: "npx"
-    args: ["-y", "@notionhq/notion-mcp-server"]
-    transport: "stdio"
-    panel_execution: true    # Knowledge lookup allowed in panel Quality Gate
-    pass_env: ["NOTION_TOKEN"]  # @notionhq/notion-mcp-server reads NOTION_TOKEN only (not NOTION_API_KEY / OPENAI_API_KEY)
 
