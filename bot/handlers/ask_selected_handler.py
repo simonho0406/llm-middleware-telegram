@@ -1,8 +1,7 @@
 import logging
 import asyncio
-import zlib
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.error import BadRequest # Import BadRequest
+from telegram.error import BadRequest
 from telegram.ext import (
     CommandHandler,
     ContextTypes,
@@ -11,13 +10,11 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-from typing import List, Dict, Any # Import missing types
-from hashlib import sha256 # Import sha256
-from telegram.helpers import escape_markdown # Import escape_markdown
-import re # Import regex for parsing grades
+from typing import List, Dict, Any
+from hashlib import sha256
+from telegram.helpers import escape_markdown
+import re
 
-import config
-from services import ollama_service, gemini_service, openai_compatible_service
 from storage import storage_manager
 from bot.messaging import send_safe_message, send_plain_message
 from bot import providers # Ensure this import exists

@@ -12,7 +12,7 @@ from markdown_it import MarkdownIt
 
 logger = logging.getLogger(__name__)
 
-md = MarkdownIt("commonmark", {"breaks": True, "html": False}).enable('table')
+md = MarkdownIt("commonmark", {"breaks": True, "html": False}).enable('table').enable('strikethrough')
 
 def escape_format_braces(value: object) -> str:
     """Escape curly braces in a runtime value before embedding it via str.format().
@@ -99,23 +99,17 @@ def sanitize_text_characters(text: str) -> str:
 
 def format_thinking_content(text: str) -> str:
     """
-    detects <think>...</think> blocks and formats them as a quoted block.
+    Detects <think>...</think> blocks and formats them as quoted blocks.
+    Uses re.sub to handle multiple blocks in a single pass.
     """
     if not isinstance(text, str):
         return text
-    
-    # Check for <think> tags
-    pattern = r"<think>(.*?)</think>"
-    match = re.search(pattern, text, re.DOTALL)
-    if match:
-        thought_content = match.group(1).strip()
-        # Format as a blockquote with a header
-        formatted_thought = f"> **Thought Process**\n> {thought_content.replace(chr(10), chr(10) + '> ')}\n\n"
-        
-        # Replace the original tag with the formatted version
-        text = text.replace(match.group(0), formatted_thought)
-        
-    return text
+
+    def _format_block(m):
+        thought_content = m.group(1).strip()
+        return f"> **Thought Process**\n> {thought_content.replace(chr(10), chr(10) + '> ')}\n\n"
+
+    return re.sub(r"<think>(.*?)</think>", _format_block, text, flags=re.DOTALL)
 
 class TelegramV2Renderer:
     def __init__(self):
@@ -161,11 +155,7 @@ class TelegramV2Renderer:
         sanitized_content = sanitize_text_characters(token.content)
         escaped_text = telegram.helpers.escape_markdown(sanitized_content, version=2)
         if self.in_blockquote:
-            # If inside blockquote, ensure newlines are prefixed with \>
-            # But wait, render_text usually doesn't contain newlines unless it's a code block or we missed a split?
-            # Actually, softbreaks are separate tokens.
-            # If the text itself has newlines (unlikely for 'text' token in commonmark unless preserved?), we handle it.
-            pass
+            pass  # softbreaks emit '> ' separately; text tokens don't contain newlines in CommonMark
         self._append_inline(escaped_text)
 
     def render_paragraph_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): pass
@@ -179,7 +169,7 @@ class TelegramV2Renderer:
             
             self.buffer.append('\n\n')
             if self.in_blockquote:
-                self.buffer.append('\\> ')
+                self.buffer.append('> ')
 
     def render_heading_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self.buffer.append('\n*')
     def render_heading_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self.buffer.append('*\n')
@@ -218,12 +208,12 @@ class TelegramV2Renderer:
     def render_softbreak(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
         self.buffer.append('\n')
         if self.in_blockquote:
-            self.buffer.append('\\> ')
+            self.buffer.append('> ')
 
     def render_hardbreak(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
         self.buffer.append('\n')
         if self.in_blockquote:
-            self.buffer.append('\\> ')
+            self.buffer.append('> ')
 
     def render_inline(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self.render_default(token, tokens, index)
 
@@ -232,6 +222,9 @@ class TelegramV2Renderer:
 
     def render_em_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self._append_inline('_')
     def render_em_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self._append_inline('_')
+
+    def render_s_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self._append_inline('~')
+    def render_s_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int): self._append_inline('~')
 
     def render_code_inline(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
         content = token.content
@@ -251,7 +244,7 @@ class TelegramV2Renderer:
         self.buffer.append(f'```{content}\n```\n')
 
     def render_blockquote_open(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
-        self.buffer.append('\\> ')
+        self.buffer.append('> ')
         self.in_blockquote = True
     def render_blockquote_close(self, token: Dict[str, Any], tokens: List[Dict[str, Any]], index: int):
         self.buffer.append('\n')
@@ -372,13 +365,53 @@ def render_ast_to_telegram_v2(tokens: List[Dict[str, Any]]) -> str:
 
 def replace_html_tags(text: str) -> str:
     """
-    Replaces <br> tags with newlines.
+    Converts LLM-emitted HTML to Markdown equivalents before AST parsing.
+    Handles: bold, italic, strikethrough, inline code, fenced code blocks,
+    headings, links, paragraphs, line breaks, lists. Unknown tags are
+    stripped while preserving their text content.
     """
     if not isinstance(text, str):
         return text
 
-    # Replace <br> tags with newlines
+    # Fenced code blocks: must precede inline <code> handler
+    text = re.sub(
+        r'<pre[^>]*>\s*<code[^>]*>(.*?)</code>\s*</pre>',
+        lambda m: f'\n```\n{m.group(1)}\n```\n',
+        text, flags=re.IGNORECASE | re.DOTALL
+    )
+    # Inline code
+    text = re.sub(r'<code[^>]*>(.*?)</code>', r'`\1`', text, flags=re.IGNORECASE | re.DOTALL)
+
+    # Inline formatting — allow optional attributes on opening tags
+    text = re.sub(r'<(?:strong|b)(?:\s[^>]*)?>(.*?)</(?:strong|b)>', r'**\1**', text, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r'<(?:em|i)(?:\s[^>]*)?>(.*?)</(?:em|i)>', r'_\1_', text, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r'<(?:s|del|strike)(?:\s[^>]*)?>(.*?)</(?:s|del|strike)>', r'~~\1~~', text, flags=re.IGNORECASE | re.DOTALL)
+
+    # Links
+    text = re.sub(r'<a\s[^>]*?href=["\']([^"\']*)["\'][^>]*>(.*?)</a>', r'[\2](\1)', text, flags=re.IGNORECASE | re.DOTALL)
+
+    # Headings
+    text = re.sub(
+        r'<(h[1-6])[^>]*>(.*?)</\1>',
+        lambda m: '#' * int(m.group(1)[1]) + ' ' + m.group(2).strip() + '\n',
+        text, flags=re.IGNORECASE | re.DOTALL
+    )
+
+    # Block structure
     text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
+    text = re.sub(r'<p[^>]*>', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'</p>', '\n\n', text, flags=re.IGNORECASE)
+
+    # Lists
+    text = re.sub(r'<li[^>]*>(.*?)</li>', lambda m: f'- {m.group(1).strip()}\n', text, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r'</?[uo]l[^>]*>', '', text, flags=re.IGNORECASE)
+
+    # Strip remaining structural wrapper tags (keep content)
+    text = re.sub(r'</?(?:div|span|section|article|header|footer|nav|main|aside)[^>]*>', '', text, flags=re.IGNORECASE)
+
+    # Strip any remaining unknown tags
+    text = re.sub(r'<[^>]+>', '', text)
+
     return text
 
 def split_document_ast_aware(tokens: List, max_len: int = 4096) -> List[List]:

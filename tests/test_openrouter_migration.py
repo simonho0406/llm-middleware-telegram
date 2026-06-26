@@ -41,22 +41,6 @@ def test_openrouter_provider_is_openai_compatible_service():
     assert 'openrouter.ai' in svc.base_url
 
 
-def test_openrouter_provider_not_module():
-    """The legacy openrouter_service module must not be registered as the provider service."""
-    import config
-    if not (config.OPENROUTER_API_KEY and config.OPENROUTER_API_KEY != "YOUR_OPENROUTER_API_KEY"):
-        pytest.skip("OPENROUTER_API_KEY not configured in environment")
-
-    import bot.providers as providers_mod
-    from services import openrouter_service as legacy_module
-
-    providers_mod._provider_details_cache = None
-    providers_mod._initialized_services.pop('openrouter', None)
-    details = providers_mod.get_provider_details()
-
-    svc = details.get('openrouter', {}).get('service')
-    assert svc is not legacy_module, "Legacy openrouter_service module must not be the active service"
-
 
 # ---------------------------------------------------------------------------
 # 2. check_status() exists on OpenAICompatibleService

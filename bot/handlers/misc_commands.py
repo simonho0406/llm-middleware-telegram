@@ -8,7 +8,6 @@ from telegram import (
     Update,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    constants,
 )
 from telegram.ext import (
     CommandHandler,
@@ -18,8 +17,6 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-from telegram.helpers import escape_markdown
-from telegram.error import BadRequest
 
 import config
 from bot import providers

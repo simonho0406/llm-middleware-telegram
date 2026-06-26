@@ -1,5 +1,5 @@
 import logging
-from telegram.ext import Application, ApplicationBuilder, Defaults
+from telegram.ext import Application, Defaults
 from telegram.constants import ParseMode
 from telegram.request import HTTPXRequest
 from typing import Callable, Awaitable

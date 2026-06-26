@@ -318,10 +318,6 @@ async def get_thread_key(chat_id: int, key: str, default: Any = None, thread_id:
 async def set_thread_key(chat_id: int, key: str, value: Any, thread_id: Optional[str] = None) -> None:
     valid_keys = {"name", "provider", "model", "last_user_prompt"}
     if key not in valid_keys:
-        # This is the new, critical check
-        if key == 'history':
-            # Redirect to the correct function instead of failing
-            return await replace_thread_history_dangerous(chat_id, value, thread_id)
         raise ValueError(f"Invalid key '{key}' for set_thread_key. Must be one of {valid_keys}")
 
     async with aiosqlite.connect(config.DB_PATH) as db:
@@ -424,33 +420,6 @@ async def update_message_content(message_pk: int, new_content: str) -> bool:
         logger.info(f"Updated content for message PK {message_pk}")
         return cursor.rowcount > 0
 
-async def replace_thread_history_dangerous(chat_id: int, history: List[Dict[str, Any]], thread_id: Optional[str] = None) -> None:
-    """
-    DEPRECATED: Completely replaces thread history. 
-    Use save_message (append) for normal chat flow.
-    Only use this for hard resets (e.g., /new or tests).
-    """
-    import warnings
-    import json
-    warnings.warn("replace_thread_history_dangerous is deprecated. Use targeted atomic methods.", DeprecationWarning, stacklevel=2)
-    async with aiosqlite.connect(config.DB_PATH) as db:
-        thread_pk = await _get_thread_pk(db, chat_id, thread_id)
-        if not thread_pk: return
-        await db.execute("BEGIN")
-        try:
-            await db.execute("DELETE FROM messages WHERE thread_fk = ?", (thread_pk,))
-            if history:
-                ts = int(time.time())
-                messages_to_insert = []
-                for i, msg in enumerate(history):
-                    tool_calls_str = json.dumps(msg.get('tool_calls')) if msg.get('tool_calls') is not None else None
-                    tool_call_id = msg.get('tool_call_id')
-                    messages_to_insert.append((thread_pk, msg['role'], msg.get('content'), ts + i, tool_calls_str, tool_call_id))
-                await db.executemany("INSERT INTO messages (thread_fk, role, content, timestamp, tool_calls, tool_call_id) VALUES (?, ?, ?, ?, ?, ?)", messages_to_insert)
-            await db.commit()
-        except Exception as e:
-            await db.rollback()
-            raise e
 
 async def remove_last_assistant_message(chat_id: int, thread_id: Optional[str] = None) -> bool:
     """Removes the last assistant message and any tool-result rows it owns."""

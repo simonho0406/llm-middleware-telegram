@@ -11,6 +11,7 @@ This module provides consistent, resilient LLM interaction patterns with:
 
 import asyncio
 import logging
+import re
 from typing import List, Dict, Any, Optional, AsyncGenerator
 
 from bot import providers
@@ -19,6 +20,80 @@ from utils.context_manager import ensure_context_fits
 
 
 logger = logging.getLogger(__name__)
+
+
+def format_tools_for_prompt(tools: list) -> str:
+    """Convert a list of OpenAI-style tool dicts into a human-readable string for LLM prompts.
+
+    Includes parameter names and types so the model knows how to call each tool, not just
+    that it exists. Without schema info the model defaults to guessing 'query' for all tools,
+    which only works for search-style tools.
+    """
+    if not tools:
+        return "No tools available."
+    lines = []
+    for t in tools:
+        func = t.get('function', {})
+        name = func.get('name', '')
+        desc = func.get('description', '')
+        params = func.get('parameters', {})
+        properties = params.get('properties', {})
+        required = set(params.get('required', []))
+        if properties:
+            param_parts = []
+            for prop_name, prop_schema in properties.items():
+                prop_type = prop_schema.get('type', 'any')
+                req_marker = '*' if prop_name in required else '?'
+                param_parts.append(f"{prop_name}{req_marker}: {prop_type}")
+            args_str = ", ".join(param_parts)
+            lines.append(f"- {name}({args_str}): {desc}")
+        else:
+            lines.append(f"- {name}: {desc}")
+    return "\n".join(lines)
+
+
+def extract_json_object(text: str) -> str:
+    """Extract the first complete top-level JSON object from LLM text.
+
+    String-aware brace matching (ignores braces inside quoted strings, so a value
+    like "{a}" doesn't throw off the counter), with regex fallbacks. Returns the
+    JSON substring or "" if none found. Note: a returned string is brace-balanced
+    but may still fail json.loads if the model left unescaped quotes inside a value
+    — callers should retry the LLM in that case.
+    """
+    if not text:
+        return ""
+    start = text.find('{')
+    if start != -1:
+        depth = 0
+        in_str = False
+        esc = False
+        for i in range(start, len(text)):
+            c = text[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif c == '\\':
+                    esc = True
+                elif c == '"':
+                    in_str = False
+            else:
+                if c == '"':
+                    in_str = True
+                elif c == '{':
+                    depth += 1
+                elif c == '}':
+                    depth -= 1
+                    if depth == 0:
+                        return text[start:i + 1]
+    # Fallbacks for malformed/oddly-nested output
+    m = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', text)
+    if m:
+        return m.group(0)
+    m = re.search(r'{[\s\S]*}', text)
+    if m:
+        return m.group(0)
+    return ""
 
 
 def is_error_response(s: str) -> bool:

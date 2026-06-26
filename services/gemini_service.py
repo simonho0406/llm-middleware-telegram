@@ -227,6 +227,7 @@ class GeminiService:
         )
 
         thought_sig_stripped = False
+        effective_timeout = request_timeout or config.get_request_timeout_seconds()
 
         # Allow one retry pass: normal first, then with legacy unsigned tool-call turns removed.
         for _pass in range(2):
@@ -235,11 +236,19 @@ class GeminiService:
                     logger.info(f"Attempting Gemini request with Key Index: {i}")
                     client = self._get_client(key)
 
-                    response_stream = await client.aio.models.generate_content_stream(
-                        model=model,
-                        contents=full_prompt,
-                        config=generation_config
-                    )
+                    try:
+                        response_stream = await asyncio.wait_for(
+                            client.aio.models.generate_content_stream(
+                                model=model,
+                                contents=full_prompt,
+                                config=generation_config
+                            ),
+                            timeout=effective_timeout,
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning(f"Gemini connection timeout after {effective_timeout}s (Key Index: {i}), trying next key.")
+                        await asyncio.sleep(0.1)
+                        continue
 
                     tool_calls = []
                     async for chunk in response_stream:
@@ -292,6 +301,7 @@ class GeminiService:
                 except google_exceptions.APIError as e:
                     if "429" in str(e) or "quota" in str(e).lower() or "exhausted" in str(e).lower():
                         logger.warning(f"Gemini key at index {i} is rate-limited, trying next key. Reason: {e}")
+                        await asyncio.sleep(0.1)  # brief pause so a burst doesn't exhaust all keys in ms
                         continue
                     elif "thought_signature" in str(e) and not thought_sig_stripped:
                         # Legacy tool-call turns in history lack thought_signature.

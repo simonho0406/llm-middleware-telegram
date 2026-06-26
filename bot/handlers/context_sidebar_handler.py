@@ -1,14 +1,24 @@
 import logging
-import math
 import html
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, constants
-from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler, ConversationHandler
+from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler
 from storage import storage_manager
 from bot.messaging import send_safe_message
 import tiktoken
-import config
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_html(user_content: str | None, max_len: int = 150) -> str:
+    """Escape and truncate user-supplied text for safe HTML-mode insertion.
+
+    The sidebar uses parse_mode=HTML (not MarkdownV2) because <pre> gives
+    proper monospace alignment. ALL user-controlled strings going into the
+    sidebar template MUST pass through this function — direct f-string
+    interpolation is an injection risk.
+    """
+    return html.escape((user_content or '')[:max_len])
+
 
 # Callback data prefixes
 CTX_PREFIX = "ctx_"
@@ -105,8 +115,7 @@ async def show_context_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     text += "──────────────────\n"
     
     if user_msg:
-        safe_user_content = html.escape((user_msg.get('content') or '')[:150])
-        text += f"👤 <b>User</b>: {safe_user_content}...\n\n"
+        text += f"👤 <b>User</b>: {_safe_html(user_msg.get('content'), 150)}...\n\n"
     else:
         text += f"👤 <b>User</b>: [Missing/System Prompt]\n\n"
         
@@ -115,8 +124,7 @@ async def show_context_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     
     # Show snippet of last message (tool-call turns have content=None — fall back to empty string)
     if block[-1]['role'] != 'user':
-        safe_last_content = html.escape((block[-1].get('content') or '')[:100])
-        text += f"<i>{safe_last_content}...</i>\n"
+        text += f"<i>{_safe_html(block[-1].get('content'), 100)}...</i>\n"
         
     text += "──────────────────"
     
@@ -270,6 +278,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def _respond(update: Update, text: str, keyboard=None, close_button=False):
+    # Caller contract: all user-supplied content in `text` must go through _safe_html().
     if close_button and not keyboard:
         keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Close", callback_data=CTX_CLOSE)]])
         

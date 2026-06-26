@@ -50,7 +50,7 @@ class TestTelegramRendering(unittest.TestCase):
 
     def test_blockquote(self):
         markdown = "> Quote line 1\n> Quote line 2"
-        expected = "\\> Quote line 1\n\\> Quote line 2"
+        expected = "> Quote line 1\n> Quote line 2"
         self.assertEqual(format_for_telegram_v2(markdown).strip(), expected.strip())
 
     def test_code_block(self):

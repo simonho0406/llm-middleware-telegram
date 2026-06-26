@@ -126,7 +126,7 @@ async def discover_and_print_tools(mcp: McpClientService) -> dict[str, list[str]
 # ── single test runner ────────────────────────────────────────────────────────
 async def run_test_case(case: dict, mcp: McpClientService) -> dict:
     """Runs one panel workflow end-to-end and returns a result dict."""
-    from bot.handlers.discuss_panel_handler import _run_panel_workflow
+    from bot.handlers.panel_workflow import _run_panel_workflow
 
     name = case["name"]
     logger.info("")

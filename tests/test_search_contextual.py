@@ -35,7 +35,6 @@ async def test_search_uses_full_context_and_save_message(mock_update_context):
     with patch('services.web_search_service.perform_search', new_callable=AsyncMock) as mock_search, \
          patch('bot.handlers.misc_commands.storage_manager.get_thread_history', new_callable=AsyncMock) as mock_get_history, \
          patch('bot.handlers.misc_commands.storage_manager.save_message', new_callable=AsyncMock) as mock_save_message, \
-         patch('bot.handlers.misc_commands.storage_manager.set_thread_history', new_callable=AsyncMock) as mock_set_history, \
          patch('bot.handlers.misc_commands.send_safe_message', new_callable=AsyncMock) as mock_send, \
          patch('bot.providers.get_provider_details') as mock_get_providers, \
          patch('config.get_default_provider', return_value='mock_provider'), \
@@ -72,5 +71,6 @@ async def test_search_uses_full_context_and_save_message(mock_update_context):
         assert calls[1].args[1] == 'assistant'
         assert calls[1].args[2] == 'LLM Answer'
         
-        # Verify 3: set_thread_history (Legacy/Destructive) is NOT called
-        assert not mock_set_history.called, "Deprecated set_thread_history should NOT be called"
+        # Verify 3: set_thread_history no longer exists on the database StorageManager
+        # (replace_thread_history_dangerous was eliminated in Ticket 013); any accidental
+        # call would raise AttributeError at runtime — no explicit assertion needed.

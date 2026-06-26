@@ -114,3 +114,37 @@ def test_get_skill_playbook(temp_skills_dir):
     # Non-existent skill
     missing = service.get_skill_playbook("non-existent")
     assert "not found" in missing
+
+
+def test_skill_missing_name_or_description_is_skipped(tmp_path):
+    """Frontmatter without both 'name' and 'description' is rejected (a skill the LLM
+    couldn't reliably call)."""
+    skills_dir = tmp_path / "skills"
+    no_desc = skills_dir / "no-desc"
+    no_desc.mkdir(parents=True)
+    (no_desc / "SKILL.md").write_text('---\nname: "no-desc"\n---\n# Body\n')
+
+    service = SkillRegistryService(skills_dir=str(skills_dir))
+    service.load_skills()
+    assert service.skills == {}
+
+
+def test_skill_missing_frontmatter_delimiters_is_skipped(tmp_path):
+    """A SKILL.md without the '---' frontmatter fences cannot be parsed and is skipped."""
+    skills_dir = tmp_path / "skills"
+    plain = skills_dir / "plain"
+    plain.mkdir(parents=True)
+    (plain / "SKILL.md").write_text("# Just a heading, no frontmatter\nsome text\n")
+
+    service = SkillRegistryService(skills_dir=str(skills_dir))
+    service.load_skills()
+    assert service.skills == {}
+
+
+def test_nonexistent_skills_dir_is_created_without_error(tmp_path):
+    """Pointing at a missing dir creates it and loads zero skills (no crash)."""
+    target = tmp_path / "does-not-exist-yet"
+    service = SkillRegistryService(skills_dir=str(target))
+    service.load_skills()
+    assert os.path.isdir(target)
+    assert service.skills == {}

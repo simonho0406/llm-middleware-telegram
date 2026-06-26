@@ -22,28 +22,14 @@ async def setup_test_db(tmp_path):
         os.remove(db_path)
 
 @pytest.mark.asyncio
-async def test_set_thread_history_redirect():
-    """Test that setting 'history' via set_thread_key correctly redirects to replace_thread_history_dangerous."""
+async def test_set_thread_history_key_raises():
+    """'history' is not a valid set_thread_key key — callers must use save_message."""
     chat_id = 9999
     thread_id = "test_thread"
-    
-    # Setup thread
     await database_storage.create_thread(chat_id, thread_id)
-    
-    # Set history using the special "history" key which should redirect
-    test_history = [
-        {"role": "user", "content": "Hello"},
-        {"role": "assistant", "content": "Hi there"}
-    ]
-    
-    # This previously raised NameError due to undefined set_thread_history
-    await database_storage.set_thread_key(chat_id, 'history', test_history, thread_id)
-    
-    # Verify the history was saved
-    saved_history = await database_storage.get_thread_history(chat_id, thread_id)
-    assert len(saved_history) == 2
-    assert saved_history[0]["content"] == "Hello"
-    assert saved_history[1]["content"] == "Hi there"
+
+    with pytest.raises(ValueError, match="Invalid key 'history'"):
+        await database_storage.set_thread_key(chat_id, 'history', [], thread_id)
 
 @pytest.mark.asyncio
 async def test_get_thread_history_redirect():

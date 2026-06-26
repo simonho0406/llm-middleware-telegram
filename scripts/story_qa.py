@@ -122,7 +122,7 @@ async def _llm_judge(user_prompt: str, answer: str, criteria: str) -> tuple:
 
 # ── Story 1: Panel deep Notion retrieval + verify ───────────────────────────────
 async def story1_panel_notion(mcp) -> dict:
-    from bot.handlers.discuss_panel_handler import _run_panel_workflow
+    from bot.handlers.panel_workflow import _run_panel_workflow
     name = "1 · Panel deep Notion retrieval + verify"
     prompt = (
         "List me the exact REDACTED in my ingredients. "

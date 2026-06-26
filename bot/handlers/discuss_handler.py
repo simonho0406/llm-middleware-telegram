@@ -1,7 +1,7 @@
 import logging
 import asyncio
 import hashlib
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, constants
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     CommandHandler,
     CallbackQueryHandler,

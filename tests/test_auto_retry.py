@@ -44,13 +44,30 @@ def mock_service_error():
 
 @pytest.fixture
 def mock_service_always_error():
-    """Service that always yields an error."""
+    """Service that always yields an error; also exposes a call counter so 'no retry'
+    can be asserted by count rather than inferred."""
+    call_count = 0
     async def generate_response(**kwargs):
+        nonlocal call_count
+        call_count += 1
         yield "[Error: provider unavailable]"
-    
+
     service = AsyncMock()
     service.generate_response = generate_response
-    return service
+    return service, lambda: call_count
+
+
+def _settings(**overrides):
+    """Key-based get_user_setting mock — robust to call order/count (unlike a positional
+    side_effect list, which broke whenever a new setting read was added)."""
+    base = {
+        'autosearch_chat': False,
+        'enable_mcp': True,
+        'enable_skills': True,
+        'auto_retry_on_error': False,
+    }
+    base.update(overrides)
+    return AsyncMock(side_effect=lambda cid, key, default=None: base.get(key, default))
 
 
 @pytest.fixture
@@ -77,16 +94,7 @@ async def test_auto_retry_enabled_retries_once(mock_context, mock_service_error)
          patch('bot.response_generator.config') as mock_config:
 
         mock_storage.get_thread_history = AsyncMock(return_value=[])
-        # New code reads enable_mcp and enable_skills before autosearch_chat / auto_retry_on_error.
-        mock_storage.get_user_setting = AsyncMock(side_effect=[
-            False,  # autosearch_chat (1st call)
-            True,   # enable_mcp  (1st call)
-            True,   # enable_skills (1st call)
-            True,   # auto_retry_on_error (1st call - triggers retry)
-            False,  # autosearch_chat (retry call)
-            True,   # enable_mcp  (retry call)
-            True,   # enable_skills (retry call)
-        ])
+        mock_storage.get_user_setting = _settings(auto_retry_on_error=True)
         mock_storage.save_message = AsyncMock(return_value=1)
 
         mock_provider.return_value = (
@@ -108,20 +116,14 @@ async def test_auto_retry_enabled_retries_once(mock_context, mock_service_error)
 @pytest.mark.asyncio
 async def test_auto_retry_disabled_no_retry(mock_context, mock_service_always_error):
     """When auto_retry_on_error is disabled, do NOT retry."""
-    service = mock_service_always_error
+    service, get_call_count = mock_service_always_error
 
     with patch('bot.response_generator.storage_manager') as mock_storage, \
          patch('bot.response_generator._get_provider_configuration') as mock_provider, \
          patch('bot.response_generator.config') as mock_config:
 
         mock_storage.get_thread_history = AsyncMock(return_value=[])
-        # New code reads enable_mcp and enable_skills before autosearch_chat / auto_retry_on_error.
-        mock_storage.get_user_setting = AsyncMock(side_effect=[
-            False,  # autosearch_chat
-            True,   # enable_mcp
-            True,   # enable_skills
-            False,  # auto_retry_on_error (disabled!)
-        ])
+        mock_storage.get_user_setting = _settings(auto_retry_on_error=False)
         mock_storage.save_message = AsyncMock(return_value=1)
 
         mock_provider.return_value = (
@@ -136,29 +138,21 @@ async def test_auto_retry_disabled_no_retry(mock_context, mock_service_always_er
 
         assert result['error'] == 'llm_error'
         assert "Error" in result['content']
+        # The point of "disabled": the model was invoked exactly once, no retry.
+        assert get_call_count() == 1
 
 
 @pytest.mark.asyncio
 async def test_auto_retry_both_fail_returns_error(mock_context, mock_service_always_error):
     """When auto-retry is enabled but both attempts fail, return error (no infinite loop)."""
-    service = mock_service_always_error
+    service, get_call_count = mock_service_always_error
 
     with patch('bot.response_generator.storage_manager') as mock_storage, \
          patch('bot.response_generator._get_provider_configuration') as mock_provider, \
          patch('bot.response_generator.config') as mock_config:
 
         mock_storage.get_thread_history = AsyncMock(return_value=[])
-        # New code reads enable_mcp and enable_skills before autosearch_chat / auto_retry_on_error.
-        mock_storage.get_user_setting = AsyncMock(side_effect=[
-            False,  # autosearch_chat (1st call)
-            True,   # enable_mcp  (1st call)
-            True,   # enable_skills (1st call)
-            True,   # auto_retry_on_error (1st call - triggers retry)
-            False,  # autosearch_chat (retry call)
-            True,   # enable_mcp  (retry call)
-            True,   # enable_skills (retry call)
-            # No more auto_retry_on_error call because is_retry=True skips it
-        ])
+        mock_storage.get_user_setting = _settings(auto_retry_on_error=True)
         mock_storage.save_message = AsyncMock(return_value=1)
 
         mock_provider.return_value = (
@@ -171,9 +165,10 @@ async def test_auto_retry_both_fail_returns_error(mock_context, mock_service_alw
 
         result = await _generate_llm_response(mock_context, CHAT_ID, "test prompt")
 
-        # Should have retried once and then returned the error
+        # Retried exactly once, then returned the error — no infinite loop.
         assert result['error'] == 'llm_error'
         assert "Error" in result['content']
+        assert get_call_count() == 2
 
 
 @pytest.mark.asyncio
@@ -186,13 +181,7 @@ async def test_no_retry_on_success(mock_context, mock_service_success):
          patch('bot.response_generator.config') as mock_config:
 
         mock_storage.get_thread_history = AsyncMock(return_value=[])
-        # New code reads enable_mcp and enable_skills before autosearch_chat.
-        mock_storage.get_user_setting = AsyncMock(side_effect=[
-            False,  # autosearch_chat
-            True,   # enable_mcp
-            True,   # enable_skills
-            # No auto_retry_on_error call because llm_error_reported_by_model is False
-        ])
+        mock_storage.get_user_setting = _settings()
         mock_storage.save_message = AsyncMock(return_value=1)
 
         mock_provider.return_value = (

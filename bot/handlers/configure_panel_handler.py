@@ -2,12 +2,11 @@ import logging
 import json
 import asyncio
 import copy
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, constants
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ContextTypes, ConversationHandler, CommandHandler, 
+    ContextTypes, ConversationHandler, CommandHandler,
     CallbackQueryHandler, MessageHandler, filters
 )
-from telegram.error import BadRequest
 
 import config
 from bot import providers

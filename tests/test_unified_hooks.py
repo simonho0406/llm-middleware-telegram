@@ -2,8 +2,9 @@ import os
 import sys
 import pytest
 import time
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 from utils.hooks import HookRunner
+from hooks.security_policy import BLOCKED_TOOL_NAMES
 
 @pytest.fixture
 def temp_hooks_dir(tmp_path):
@@ -103,13 +104,7 @@ time.sleep(15)
         }
     }
     
-    # We patch subprocess.run timeout to be short for testing, or rely on runner timeout.
-    # In utils/hooks.py we set timeout=10. Let's patch timeout=1 in the runner for faster test.
-    with patch('subprocess.run', side_effect=lambda *args, **kwargs: pytest.fail("Should timeout before running complete script") if False else exec("raise TimeoutError()")):
-        # Since we mocked subprocess.run to raise TimeoutError or we patch the timeout parameter:
-        pass
-        
-    # Let's do a direct test by mocking subprocess.run to raise subprocess.TimeoutExpired
+    # Mock subprocess.run to raise subprocess.TimeoutExpired so we don't actually sleep 15s.
     import subprocess
     with patch('subprocess.run') as mock_run:
         mock_run.side_effect = subprocess.TimeoutExpired(cmd=["python3", script_path], timeout=1)
@@ -118,26 +113,113 @@ time.sleep(15)
         assert "timed out" in str(excinfo.value)
 
 
-def test_empty_panel_execution_tool_names_denies_all(temp_hooks_dir):
-    """An empty panel_execution_tool_names frozenset must deny all tools (fail-closed).
-    Previously, the empty frozenset was falsy and caused the Gate 1 check to short-circuit
-    to False, allowing all tools through. This test pins the corrected behavior.
-    """
-    from bot.handlers.discuss_panel_handler import _run_refinement_cycle
-    # Tested indirectly via the Gate 1 log message — the fix is in discuss_panel_handler.py.
-    # Here we just verify HookRunner itself never sees a call when Gate 1 denies.
-    runner = HookRunner(hooks_dir=temp_hooks_dir)
-    # An empty frozenset means "no authorized servers"
-    authorized: frozenset = frozenset()
-    tool_name = "sqlite-tools__read_query"
-    # The gate check logic:
-    if not authorized:
-        denied = True
-    elif tool_name not in authorized:
-        denied = True
-    else:
-        denied = False
-    assert denied, "Empty authority set must deny all tools"
+# ── Panel tool-call authority gate (real _execute_panel_tool_calls) ──────────────
+# These drive the actual production code in bot.handlers.panel_workflow rather than a
+# re-implementation, so a regression in the gate would fail these tests.
+
+def _panel_args():
+    """Common kwargs for _execute_panel_tool_calls, sans the per-test ones."""
+    return dict(
+        skill_service=None,
+        tool_result_cache={},
+        user_prompt="q",
+        dossier_token_budget=500,
+        context=MagicMock(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_panel_empty_authority_denies_all():
+    """Empty panel_execution_tool_names (frozenset()) must deny ALL tools (fail-closed)
+    and never reach mcp_service.execute_tool."""
+    from bot.handlers import panel_workflow
+
+    mcp_service = AsyncMock()
+    kwargs = _panel_args()
+    cache = kwargs["tool_result_cache"]
+    with patch.object(panel_workflow, "distill_tool_result",
+                      new=AsyncMock(side_effect=lambda result, **kw: result)):
+        parts = await panel_workflow._execute_panel_tool_calls(
+            tool_calls=[{"name": "sqlite-tools__read_query", "arguments": {}}],
+            mcp_service=mcp_service,
+            panel_execution_tool_names=frozenset(),
+            **kwargs,
+        )
+
+    assert "[Denied: Panel tool authority set is empty" in parts[0]
+    mcp_service.execute_tool.assert_not_awaited()
+    assert cache == {}, "denials must not be cached"
+
+
+@pytest.mark.asyncio
+async def test_panel_unauthorized_tool_denied():
+    """A tool absent from a non-empty authority set is denied without execution."""
+    from bot.handlers import panel_workflow
+
+    mcp_service = AsyncMock()
+    kwargs = _panel_args()
+    with patch.object(panel_workflow, "distill_tool_result",
+                      new=AsyncMock(side_effect=lambda result, **kw: result)):
+        parts = await panel_workflow._execute_panel_tool_calls(
+            tool_calls=[{"name": "sqlite-tools__read_query", "arguments": {}}],
+            mcp_service=mcp_service,
+            panel_execution_tool_names=frozenset({"tavily-search__search"}),
+            **kwargs,
+        )
+
+    assert "[Denied:" in parts[0] and "not authorised" in parts[0]
+    mcp_service.execute_tool.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_panel_authorized_tool_denied_by_hook():
+    """An authorized tool still passes through Gate 2 (the security hook); a hook
+    PermissionError blocks execution."""
+    from bot.handlers import panel_workflow
+
+    mcp_service = AsyncMock()
+    kwargs = _panel_args()
+    cache = kwargs["tool_result_cache"]
+    with patch.object(panel_workflow, "distill_tool_result",
+                      new=AsyncMock(side_effect=lambda result, **kw: result)), \
+         patch.object(panel_workflow.hook_runner, "run_pre_tool_use",
+                      side_effect=PermissionError("blocked by policy")):
+        parts = await panel_workflow._execute_panel_tool_calls(
+            tool_calls=[{"name": "sqlite-tools__read_query", "arguments": {}}],
+            mcp_service=mcp_service,
+            panel_execution_tool_names=frozenset({"sqlite-tools__read_query"}),
+            **kwargs,
+        )
+
+    assert "[Denied by security hook" in parts[0]
+    mcp_service.execute_tool.assert_not_awaited()
+    assert cache == {}, "hook denials must not be cached"
+
+
+@pytest.mark.asyncio
+async def test_panel_authorized_tool_executes_and_caches():
+    """Authorized tool + passing hook → executed once and the genuine result is cached."""
+    from bot.handlers import panel_workflow
+
+    mcp_service = AsyncMock()
+    mcp_service.execute_tool = AsyncMock(return_value="ROWS: 42")
+    kwargs = _panel_args()
+    cache = kwargs["tool_result_cache"]
+    with patch.object(panel_workflow, "distill_tool_result",
+                      new=AsyncMock(side_effect=lambda result, **kw: result)), \
+         patch.object(panel_workflow, "touch_mcp_last_used", MagicMock()), \
+         patch.object(panel_workflow.hook_runner, "run_pre_tool_use", MagicMock()):
+        parts = await panel_workflow._execute_panel_tool_calls(
+            tool_calls=[{"name": "sqlite-tools__read_query", "arguments": {}}],
+            mcp_service=mcp_service,
+            panel_execution_tool_names=frozenset({"sqlite-tools__read_query"}),
+            **kwargs,
+        )
+
+    mcp_service.execute_tool.assert_awaited_once_with("sqlite-tools", "read_query", {})
+    assert "ROWS: 42" in parts[0]
+    # The genuine result (not a denial/error) is what gets cached for cross-call dedupe.
+    assert "ROWS: 42" in cache.values()
 
 
 def test_hook_script_error_raises_hook_script_error(temp_hooks_dir):
@@ -166,3 +248,49 @@ def test_hook_script_error_raises_hook_script_error(temp_hooks_dir):
 
     # HookScriptError must be a subclass of PermissionError (fail-closed invariant)
     assert issubclass(HookScriptError, PermissionError)
+
+
+# ── Real subprocess hook + single-source-of-truth parity ─────────────────────────
+# The tests above use synthetic temp scripts. These exercise the REAL hooks/pre_tool_use.py
+# against the REAL blocklist, so the deployed subprocess path is actually validated.
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_REAL_HOOKS_DIR = os.path.join(_REPO_ROOT, "hooks")
+
+
+@pytest.mark.parametrize("blocked_tool", sorted(BLOCKED_TOOL_NAMES))
+def test_real_pre_tool_use_blocks_each_blocked_tool(blocked_tool):
+    """The real hooks/pre_tool_use.py subprocess must deny every BLOCKED_TOOL_NAMES entry,
+    regardless of arguments."""
+    runner = HookRunner(hooks_dir=_REAL_HOOKS_DIR)
+    with pytest.raises(PermissionError) as excinfo:
+        runner.run_pre_tool_use(blocked_tool, {"arguments": {}})
+    assert "blocked by security policy" in str(excinfo.value).lower()
+
+
+def test_real_pre_tool_use_allows_benign_read_tool():
+    """A read-only MCP tool not in the blocklist passes the real subprocess hook
+    (its '__' namespace skips the path/command substring scans)."""
+    runner = HookRunner(hooks_dir=_REAL_HOOKS_DIR)
+    # Should not raise.
+    runner.run_pre_tool_use("sqlite-tools__read_query", {"arguments": {"query": "SELECT 1"}})
+
+
+def test_real_pre_tool_use_does_not_substring_scan_mcp_args():
+    """MCP tool args (namespaced with '__') are NOT substring-scanned, so a legitimate
+    query containing 'update ' or '/usr' is allowed — parity with the Python fallback's
+    '__' skip rule."""
+    runner = HookRunner(hooks_dir=_REAL_HOOKS_DIR)
+    runner.run_pre_tool_use(
+        "notion-workspace__API-search",
+        {"arguments": {"query": "how to update the /usr layout"}},
+    )
+
+
+def test_blocklist_single_source_of_truth():
+    """utils/hooks.py and hooks/pre_tool_use.py must share ONE blocklist object so the
+    fallback and subprocess paths can never diverge."""
+    from hooks import security_policy
+    assert HookRunner._BLOCKED_TOOL_NAMES is security_policy.BLOCKED_TOOL_NAMES
+    assert HookRunner._BLOCKED_PATH_PATTERNS is security_policy.BLOCKED_PATH_PATTERNS
+    assert HookRunner._BLOCKED_COMMANDS is security_policy.BLOCKED_COMMANDS

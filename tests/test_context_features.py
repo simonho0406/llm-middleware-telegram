@@ -7,59 +7,48 @@ import config
 
 @pytest.mark.asyncio
 async def test_grouping_logic():
-    """Verifies that flat history is correctly grouped into Interaction Blocks."""
-    
-    # Mock History:
-    # 1. User: "Hi" (ID 1)
-    # 2. Asst: "Hello" (ID 2)
-    # 3. Asst: "How are you?" (ID 3)
-    # 4. User: "Good" (ID 4)
-    # 5. Asst: "Great!" (ID 5)
-    
+    """Verifies flat history is grouped into Interaction Blocks (user + following
+    assistant turns), newest block first, by driving the REAL show_context_page."""
+
+    # Mock History (oldest -> newest, as get_thread_history_with_pk returns):
+    #   Block A (oldest): User "Hi" + Asst "Hello" + Asst "How are you?"
+    #   Block B (newest): User "Good" + Asst "Great!"
     mock_history = [
-        {'id': 1, 'role': 'user', 'content': 'Hi', 'timestamp': 100},
-        {'id': 2, 'role': 'assistant', 'content': 'Hello', 'timestamp': 101},
-        {'id': 3, 'role': 'assistant', 'content': 'How are you?', 'timestamp': 102},
-        {'id': 4, 'role': 'user', 'content': 'Good', 'timestamp': 103},
-        {'id': 5, 'role': 'assistant', 'content': 'Great!', 'timestamp': 104},
+        {'id': 1, 'role': 'user', 'content': 'Hi'},
+        {'id': 2, 'role': 'assistant', 'content': 'Hello'},
+        {'id': 3, 'role': 'assistant', 'content': 'How are you?'},
+        {'id': 4, 'role': 'user', 'content': 'Good'},
+        {'id': 5, 'role': 'assistant', 'content': 'Great!'},
     ]
-    
-    # We need to simulate the logic inside context_sidebar_handler.show_context_page
-    # Since extracting that logic to a pure function would be cleaner, let's copy-paste the logic here for verification
-    # or rely on the function if valid.
-    # The logic is embedded in `show_context_page`. 
-    # Let's extract it or simulate.
-    
-    # Logic extracted:
-    blocks = []
-    current_block = []
-    
-    # Raw history is usually Oldest -> Newest (PK ASC)
-    for msg in mock_history:
-        if msg['role'] == 'user':
-            if current_block:
-                blocks.append(current_block)
-            current_block = [msg]
-        else:
-            current_block.append(msg)
-    if current_block:
-        blocks.append(current_block)
-        
-    blocks.reverse() # Newest first
-    
-    # Expected: 2 Blocks
-    assert len(blocks) == 2
-    
-    # Block 1 (Newest): User "Good" + Asst "Great!"
-    block_newest = blocks[0]
-    assert block_newest[0]['role'] == 'user'
-    assert block_newest[0]['content'] == 'Good'
-    assert len(block_newest) == 2
-    
-    # Block 2 (Oldest): User "Hi" + Asst "Hello" + Asst "How are you?"
-    block_oldest = blocks[1]
-    assert block_oldest[0]['content'] == 'Hi'
-    assert len(block_oldest) == 3
+
+    mock_update = MagicMock()
+    mock_update.effective_chat.id = 12345
+    mock_update.callback_query = None
+    mock_update.message.reply_text = AsyncMock()
+
+    with patch('bot.handlers.context_sidebar_handler.storage_manager') as mock_storage:
+        mock_storage.get_thread_history_with_pk = AsyncMock(return_value=mock_history)
+
+        # Page 0 = newest interaction block.
+        await show_context_page(mock_update, MagicMock(), page=0)
+        text_newest = mock_update.message.reply_text.call_args[0][0]
+
+        # Page 1 = older interaction block.
+        await show_context_page(mock_update, MagicMock(), page=1)
+        text_oldest = mock_update.message.reply_text.call_args[0][0]
+
+    # Two interaction blocks were detected.
+    assert "Interaction 1/2" in text_newest
+    assert "Interaction 2/2" in text_oldest
+
+    # Newest-first ordering: page 0 holds the "Good"/"Great!" turn, page 1 the "Hi" turn.
+    assert "Good" in text_newest
+    assert "Hi" in text_oldest
+    assert "Good" not in text_oldest
+
+    # The oldest block grouped BOTH assistant replies under the single user turn.
+    assert "(2 messages" in text_oldest      # Hello + How are you?
+    assert "(1 messages" in text_newest      # Great!
 
 
 @pytest.mark.asyncio

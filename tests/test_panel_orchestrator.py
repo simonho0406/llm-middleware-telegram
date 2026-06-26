@@ -8,7 +8,7 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from bot.handlers.discuss_panel_handler import _plan_deep_dive_searches
+from bot.handlers.panel_workflow import _plan_deep_dive_searches
 
 @pytest.mark.asyncio
 async def test_plan_deep_dive_searches_extracts_queries_from_messy_json():
@@ -37,7 +37,7 @@ Executing these should provide the necessary depth.
 """
     
     # Mock the LLM call to return our messy response
-    with patch('bot.handlers.discuss_panel_handler.get_robust_llm_response', new_callable=AsyncMock) as mock_llm_call:
+    with patch('bot.handlers.panel_workflow.get_robust_llm_response', new_callable=AsyncMock) as mock_llm_call:
         mock_llm_call.return_value = {'response': messy_llm_response, 'retries': 0, 'fallback_used': False, 'is_error': False}
         
         # Act

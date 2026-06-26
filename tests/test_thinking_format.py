@@ -13,8 +13,8 @@ def test_thinking_formatter():
     print("\n--- Test 2: Telegram V2 Integration ---")
     rendered = format_for_telegram_v2(raw)
     print(f"Rendered V2:\n{rendered}")
-    # Check if > is escaped as \> and newlines are preserved
-    assert "\\> *Thought Process*" in rendered
+    # Check that <think> blocks render as Telegram blockquotes (unescaped >, not \>)
+    assert "> *Thought Process*" in rendered
     print("Test 2 Passed!")
 
 if __name__ == "__main__":

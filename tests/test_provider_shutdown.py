@@ -19,6 +19,18 @@ gemini_service_mock = MagicMock() # No close method
 # we will mock the '_initialized_services' dict inside the module after importing it.
 
 from bot import providers
+import config
+
+
+@pytest.fixture(autouse=True)
+def _restore_provider_globals():
+    """Snapshot and restore module globals so provider tests never leak state."""
+    saved_services = providers._initialized_services
+    saved_cache = providers._provider_details_cache
+    yield
+    providers._initialized_services = saved_services
+    providers._provider_details_cache = saved_cache
+
 
 @pytest.mark.asyncio
 async def test_shutdown_providers():
@@ -51,8 +63,54 @@ async def test_ollama_singleton_close():
     # Case 1: Client has aclose (httpx style)
     mock_client._client = AsyncMock()
     mock_client._client.aclose = AsyncMock()
-    
+
     await ollama_service.close()
-    
+
     assert ollama_service._client_instance is None
+
+
+@pytest.mark.asyncio
+async def test_shutdown_resets_details_cache_even_when_empty():
+    """The loop-rebind safety invariant: shutdown_providers MUST null out
+    _provider_details_cache (whose services hold httpx pools bound to the current
+    event loop), even when no services were initialized. Otherwise a polling-loop
+    restart reuses services bound to a closed loop."""
+    providers._initialized_services = {}
+    providers._provider_details_cache = {'ollama': {'service': MagicMock()}}  # stale
+
+    await providers.shutdown_providers()
+
+    assert providers._provider_details_cache is None
+
+
+def test_get_service_for_provider_test_returns_mock():
+    """The 'test' pseudo-provider returns a fresh MagicMock (used by panel QA harnesses),
+    and each call returns a distinct instance (no shared mock state across tests)."""
+    svc = providers.get_service_for_provider('test')
+    assert isinstance(svc, MagicMock)
+    assert providers.get_service_for_provider('test') is not svc
+
+
+def test_get_service_for_provider_known_and_unknown():
+    """Known provider returns its service; unknown returns None."""
+    sentinel = MagicMock()
+    with patch.object(providers, 'get_provider_details',
+                      return_value={'groq': {'service': sentinel}}):
+        assert providers.get_service_for_provider('groq') is sentinel
+        assert providers.get_service_for_provider('nope') is None
+
+
+def test_provider_gating_excludes_keyless_providers():
+    """Providers without credentials are excluded; ollama (no key required) remains."""
+    providers._provider_details_cache = None
+    providers._initialized_services = {}
+    with patch.object(config, 'GEMINI_API_KEYS', []), \
+         patch.object(config, 'OPENROUTER_API_KEY', ''), \
+         patch.object(config, 'get_custom_providers_config', return_value=[]), \
+         patch.object(config, 'get_default_ollama_model', return_value='llama3'):
+        details = providers.get_provider_details()
+
+    assert 'ollama' in details
+    assert 'gemini' not in details
+    assert 'openrouter' not in details
 

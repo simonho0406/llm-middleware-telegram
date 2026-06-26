@@ -17,13 +17,6 @@ class StorageManager:
             self.get_thread_key = database_storage.get_thread_key
             self.set_thread_key = database_storage.set_thread_key
             self.get_thread_history = database_storage.get_thread_history
-            
-            def _deprecated_set_thread_history(*args, **kwargs):
-                import warnings
-                warnings.warn("set_thread_history is deprecated. Use targeted atomic methods.", DeprecationWarning, stacklevel=2)
-                return database_storage.replace_thread_history_dangerous(*args, **kwargs)
-            self.set_thread_history = _deprecated_set_thread_history
-            
             self.remove_last_assistant_message = database_storage.remove_last_assistant_message
             self.create_thread = database_storage.create_thread
             self.delete_thread = database_storage.delete_thread

@@ -49,9 +49,9 @@ async def test_panel_workflow_with_advanced_search(caplog, advanced_search_enabl
     })
 
     # 2. Act: Run the workflow
-    from bot.handlers.discuss_panel_handler import _run_panel_workflow
+    from bot.handlers.panel_workflow import _run_panel_workflow
     with patch('storage.storage_manager.get_user_setting', side_effect=lambda chat_id, setting_name, default: advanced_search_enabled if setting_name == 'advanced_search_panel' else True), \
-         patch('bot.handlers.discuss_panel_handler.get_robust_llm_response', mock_llm_call), \
+         patch('bot.handlers.panel_workflow.get_robust_llm_response', mock_llm_call), \
          patch('services.web_search_service.perform_search', mock_tavily_search), \
          patch('services.web_search_service.execute_parallel_google_searches', mock_google_search), \
          patch('config.get_expert_panel_config', mock_config_get):

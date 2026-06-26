@@ -113,36 +113,30 @@ async def test_full_user_flow_simulation():
         # Verify response was sent (chat_id is now passed for headless-capable delivery)
         mock_send_msg.assert_called_with(mock_context, mock_update, "Quantum computing is cool.", chat_id=chat_id)
         
-        # Verify history was updated (check all potential mocks)
-        # We expect save_message to be called TWICE (User then Assistant)
+        # Verify history was updated via one of the save paths (the chat handler saves
+        # the user turn; response_generator saves the assistant turn).
         history_updated = (
-            mock_rg_save_message.called or 
+            mock_rg_save_message.called or
             mock_sm_save_message.called or
             mock_chat_save_message.called
         )
-        print(f"DEBUG rg_save: {mock_rg_save_message.call_args_list}")
-        print(f"DEBUG sm_save: {mock_sm_save_message.call_args_list}")
-        print(f"DEBUG chat_save: {mock_chat_save_message.call_args_list}")
         assert history_updated, "storage_manager.save_message was not called"
-        
-        # 2. Simulate Panel Trigger
-        pass
 
 @pytest.mark.asyncio
 async def test_panel_orchestrator_integration():
     """
     Tests the panel orchestrator integration with storage and messaging.
     """
-    from bot.handlers.discuss_panel_handler import _run_panel_workflow
+    from bot.handlers.panel_workflow import _run_panel_workflow
     
     chat_id = 12345
     user_prompt = "Explain string theory"
     
     # Mock dependencies
-    with patch('bot.handlers.discuss_panel_handler.get_robust_llm_response', new_callable=AsyncMock) as mock_llm, \
-         patch('bot.handlers.discuss_panel_handler.config.get_expert_panel_config', return_value={'orchestrator': {'provider': 'test', 'model': 'test'}, 'roles': {'Proposer': {'provider': 'test', 'model': 'test'}, 'Critic': {'provider': 'test', 'model': 'test'}, 'Refiner': {'provider': 'test', 'model': 'test'}}}), \
-         patch('bot.handlers.discuss_panel_handler.storage_manager', new_callable=AsyncMock) as mock_storage, \
-         patch('bot.handlers.discuss_panel_handler.send_safe_message', new_callable=AsyncMock) as mock_send:
+    with patch('bot.handlers.panel_workflow.get_robust_llm_response', new_callable=AsyncMock) as mock_llm, \
+         patch('bot.handlers.panel_workflow.config.get_expert_panel_config', return_value={'orchestrator': {'provider': 'test', 'model': 'test'}, 'roles': {'Proposer': {'provider': 'test', 'model': 'test'}, 'Critic': {'provider': 'test', 'model': 'test'}, 'Refiner': {'provider': 'test', 'model': 'test'}}}), \
+         patch('bot.handlers.panel_workflow.storage_manager', new_callable=AsyncMock) as mock_storage, \
+         patch('bot.handlers.panel_workflow.send_safe_message', new_callable=AsyncMock) as mock_send:
              
         # Setup LLM responses for the different roles
         # Note: The first call is the Master Orchestrator, which expects a JSON OBJECT.

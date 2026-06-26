@@ -10,14 +10,10 @@ import asyncio
 import re
 import json
 import random
-import tiktoken
-from telegram import Update, constants, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import MessageHandler, filters, ContextTypes
-from telegram.error import RetryAfter, TimedOut, BadRequest
+from telegram import Update
+from telegram.ext import ContextTypes
 import config
 from bot import providers
-from services import ollama_service, gemini_service
-from services.openai_compatible_service import OpenAICompatibleService
 
 from storage import storage_manager
 from bot.messaging import send_safe_message, finalize_draft, send_draft_message, send_plain_message

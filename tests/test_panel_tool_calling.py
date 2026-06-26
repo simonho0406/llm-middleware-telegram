@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from bot.handlers.discuss_panel_handler import _run_refinement_cycle
+from bot.handlers.panel_workflow import _run_refinement_cycle
 
 
 # ---------------------------------------------------------------------------
@@ -90,8 +90,8 @@ async def test_tool_call_from_quality_gate_is_executed_and_injected():
 
     placeholder = AsyncMock()
 
-    with patch('bot.handlers.discuss_panel_handler.get_robust_llm_response', side_effect=mock_llm):
-        with patch('bot.handlers.discuss_panel_handler.get_expert_panel_fallback_config', return_value=(None, None)):
+    with patch('bot.handlers.panel_workflow.get_robust_llm_response', side_effect=mock_llm):
+        with patch('bot.handlers.panel_workflow.get_expert_panel_fallback_config', return_value=(None, None)):
             result_text, score, iters = await _run_refinement_cycle(
                 update=MagicMock(),
                 context=MagicMock(),
@@ -146,13 +146,13 @@ async def test_empty_tool_calls_skips_execution():
     mock_mcp = AsyncMock()
     mock_mcp.execute_tool = AsyncMock()
 
-    with patch('bot.handlers.discuss_panel_handler.get_robust_llm_response', side_effect=lambda *a, **kw: (lambda: next(resp_iter))() if True else None):
-        with patch('bot.handlers.discuss_panel_handler.get_expert_panel_fallback_config', return_value=(None, None)):
+    with patch('bot.handlers.panel_workflow.get_robust_llm_response', side_effect=lambda *a, **kw: (lambda: next(resp_iter))() if True else None):
+        with patch('bot.handlers.panel_workflow.get_expert_panel_fallback_config', return_value=(None, None)):
 
             async def mock_llm(*args, **kwargs):
                 return next(resp_iter)
 
-            with patch('bot.handlers.discuss_panel_handler.get_robust_llm_response', side_effect=mock_llm):
+            with patch('bot.handlers.panel_workflow.get_robust_llm_response', side_effect=mock_llm):
                 await _run_refinement_cycle(
                     update=MagicMock(), context=MagicMock(),
                     proposer_task={'role': 'Proposer', 'prompt': 'Write something.'},
@@ -199,8 +199,8 @@ async def test_tool_execution_failure_is_graceful():
     mock_mcp = AsyncMock()
     mock_mcp.execute_tool = AsyncMock(side_effect=RuntimeError("connection refused"))
 
-    with patch('bot.handlers.discuss_panel_handler.get_robust_llm_response', side_effect=mock_llm):
-        with patch('bot.handlers.discuss_panel_handler.get_expert_panel_fallback_config', return_value=(None, None)):
+    with patch('bot.handlers.panel_workflow.get_robust_llm_response', side_effect=mock_llm):
+        with patch('bot.handlers.panel_workflow.get_expert_panel_fallback_config', return_value=(None, None)):
             result_text, score, _ = await _run_refinement_cycle(
                 update=MagicMock(), context=MagicMock(),
                 proposer_task={'role': 'Proposer', 'prompt': 'Write.'},
@@ -257,8 +257,8 @@ async def test_skill_tool_call_routes_to_skill_service():
     mock_skill_svc = MagicMock()
     mock_skill_svc.get_skill_playbook = MagicMock(return_value=skill_playbook)
 
-    with patch('bot.handlers.discuss_panel_handler.get_robust_llm_response', side_effect=mock_llm):
-        with patch('bot.handlers.discuss_panel_handler.get_expert_panel_fallback_config', return_value=(None, None)):
+    with patch('bot.handlers.panel_workflow.get_robust_llm_response', side_effect=mock_llm):
+        with patch('bot.handlers.panel_workflow.get_expert_panel_fallback_config', return_value=(None, None)):
             await _run_refinement_cycle(
                 update=MagicMock(), context=MagicMock(),
                 proposer_task={'role': 'Proposer', 'prompt': 'Write.'},
@@ -309,8 +309,8 @@ async def test_available_tools_passed_to_quality_gate_prompt():
             captured_quality_prompt.append(kwargs.get('prompt', ''))
         return next(resp_iter)
 
-    with patch('bot.handlers.discuss_panel_handler.get_robust_llm_response', side_effect=mock_llm):
-        with patch('bot.handlers.discuss_panel_handler.get_expert_panel_fallback_config', return_value=(None, None)):
+    with patch('bot.handlers.panel_workflow.get_robust_llm_response', side_effect=mock_llm):
+        with patch('bot.handlers.panel_workflow.get_expert_panel_fallback_config', return_value=(None, None)):
             await _run_refinement_cycle(
                 update=MagicMock(), context=MagicMock(),
                 proposer_task={'role': 'Proposer', 'prompt': 'Write.'},
@@ -372,11 +372,11 @@ async def test_rubric_non_numeric_score_is_warned_and_zeroed(caplog):
     ]
     resp_iter = iter(responses)
 
-    with patch('bot.handlers.discuss_panel_handler.get_robust_llm_response',
+    with patch('bot.handlers.panel_workflow.get_robust_llm_response',
                side_effect=lambda *a, **kw: next(resp_iter)):
-        with patch('bot.handlers.discuss_panel_handler.get_expert_panel_fallback_config',
+        with patch('bot.handlers.panel_workflow.get_expert_panel_fallback_config',
                    return_value=(None, None)):
-            with caplog.at_level(logging.WARNING, logger='bot.handlers.discuss_panel_handler'):
+            with caplog.at_level(logging.WARNING, logger='bot.handlers.panel_workflow'):
                 result_text, score, _ = await _run_refinement_cycle(
                     update=MagicMock(), context=MagicMock(),
                     proposer_task={'role': 'Proposer', 'prompt': 'Write.'},

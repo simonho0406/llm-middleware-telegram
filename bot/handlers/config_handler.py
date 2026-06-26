@@ -2,8 +2,7 @@
 # This is the canonical, correct implementation.
 
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, constants
-from telegram.error import BadRequest
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     CommandHandler,
     CallbackQueryHandler,
