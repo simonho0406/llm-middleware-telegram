@@ -1,6 +1,10 @@
 services:
   llm-middleware-telegram:
-    build: . # Build the image from the Dockerfile in the current directory
+    # Production servers PULL this pre-built image (built by CI, see
+    # .github/workflows/docker-publish.yml):  docker compose pull && docker compose up -d
+    # `build: .` is retained for LOCAL DEV only:  docker compose up --build
+    image: ghcr.io/simonho0406/llm-middleware-telegram:latest
+    build: . # dev only — servers should never run `--build`
     container_name: llm-middleware-telegram
     restart: unless-stopped
     env_file:

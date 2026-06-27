@@ -209,23 +209,26 @@ context_distiller:
 # --- Model Context Protocol (MCP) Servers ---
 # Declares standard stdio-based MCP servers dynamically mounted at startup.
 mcp_servers:
+  # MCP server commands invoke binaries baked into the image (see Dockerfile), so nothing
+  # is downloaded at runtime. Previously these used uvx/npx -y, which fetched the package
+  # on first use of every cold container.
   - name: "sqlite-tools"
-    command: "uvx"
-    args: ["mcp-server-sqlite", "--db-path", "file:data/bot_sessions.db?mode=ro&uri=true"]
+    command: "mcp-server-sqlite"   # pip-installed (mcp-server-sqlite==2025.4.25); was: uvx mcp-server-sqlite
+    args: ["--db-path", "file:data/bot_sessions.db?mode=ro&uri=true"]
     transport: "stdio"
     panel_execution: true    # Read-only history queries permitted; write_query/create_table blocked by hooks
     pass_env: []             # sqlite-tools needs no API keys
 
   - name: "notion-workspace"
-    command: "npx"
-    args: ["-y", "@notionhq/notion-mcp-server"]
+    command: "notion-mcp-server"   # npm -g @notionhq/notion-mcp-server@2.4.1; was: npx -y @notionhq/notion-mcp-server
+    args: []
     transport: "stdio"
     panel_execution: true    # Knowledge lookup allowed in panel Quality Gate
     pass_env: ["NOTION_TOKEN"]  # @notionhq/notion-mcp-server reads NOTION_TOKEN only (not NOTION_API_KEY / OPENAI_API_KEY)
 
   - name: "tavily-search"
-    command: "npx"
-    args: ["-y", "tavily-mcp"]
+    command: "tavily-mcp"   # npm -g tavily-mcp@0.2.20; was: npx -y tavily-mcp
+    args: []
     transport: "stdio"
     panel_execution: true    # Web search allowed in panel Quality Gate
     pass_env: ["TAVILY_API_KEY"]
