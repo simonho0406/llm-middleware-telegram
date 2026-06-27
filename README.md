@@ -83,16 +83,56 @@ and notes (it is the single source of truth for which variables exist).
 > inside the container, use `host.docker.internal`, not `localhost` —
 > e.g. `OLLAMA_HOST=http://host.docker.internal:11434`.
 
-## Setup
+## Setup (build from source — local / development)
+
+For deploying to a server, pull the prebuilt image instead — see
+**[Deployment](#deployment-production)** below.
 
 ```bash
-git clone <repository_url>
+git clone https://github.com/simonho0406/llm-middleware-telegram.git
 cd llm-middleware-telegram
 cp .env.example .env          # then edit .env
-docker compose up --build -d  # build & run
+docker compose up --build -d  # build locally & run
 docker compose logs -f        # view logs
 docker compose down           # stop
 ```
+
+## Deployment (production)
+
+Production hosts **pull a prebuilt image** from GHCR — no building on the server.
+GitHub Actions builds and publishes `ghcr.io/simonho0406/llm-middleware-telegram:latest`
+(`linux/amd64`) on every push to `main`, with all MCP servers baked in, so nothing is
+fetched at runtime.
+
+```bash
+# 1. Get the deploy files (compose + config) onto the host
+git clone https://github.com/simonho0406/llm-middleware-telegram.git
+cd llm-middleware-telegram
+
+# 2. Provide your secrets
+cp .env.example .env          # then edit .env with your real tokens/keys
+
+# 3. Pull the prebuilt image and start
+docker compose pull
+docker compose up -d
+docker compose logs -f        # expect providers "Online" + "Application started"
+```
+
+**Updating to a new release:**
+
+```bash
+git pull            # refresh docker-compose.yml / config.yaml
+docker compose pull # fetch the latest image
+docker compose up -d
+```
+
+Notes:
+- The GHCR image is **public**, so no `docker login` is needed. (If you make it private,
+  run `docker login ghcr.io` once with a `read:packages` token.)
+- `data/` (the SQLite DB) is a mounted volume and **persists** across updates.
+- **Do not** use `--build` on servers — `build:` in the compose file is for local dev only.
+- For a pinned/rollback deploy, override the tag with an immutable one, e.g.
+  `image: ghcr.io/simonho0406/llm-middleware-telegram:sha-<commit>`.
 
 ## Usage
 
@@ -133,8 +173,9 @@ current chat and thread.
   logged with a traceback); auto-retry can be enabled per chat in `/config`.
 * **Stalled generation** — if a stream produces no output for
   `generation_idle_timeout_seconds`, the turn is aborted with a timeout notice.
-* **MCP server won't connect** — check `npx`/`uvx` are available and the relevant
-  `pass_env` keys are set in `.env`; `/status` reports per-server health.
+* **MCP server won't connect** — the MCP servers are baked into the image; ensure the
+  relevant `pass_env` keys are set in `.env` (e.g. `NOTION_TOKEN`, `TAVILY_API_KEY`);
+  `/status` reports per-server health.
 
 ## Contributing
 
