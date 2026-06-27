@@ -3,7 +3,7 @@ import json
 import os
 
 DB_PATH = "data/bot_sessions.db"
-CHAT_ID = 0
+CHAT_ID = int(os.getenv("QA_CHAT_ID", "0"))  # set in .env
 
 def manage_thread_history():
     conn = sqlite3.connect(DB_PATH)

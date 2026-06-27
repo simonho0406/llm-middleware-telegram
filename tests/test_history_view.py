@@ -66,10 +66,11 @@ def test_catalog_injects_history_cheatsheet_when_sqlite_present():
         {"function": {"name": "sqlite-tools__read_query", "description": "run a read query"}},
         {"function": {"name": "tavily-search__tavily_search", "description": "web search"}},
     ]
-    section = _build_tool_catalog_section(mcp_tools, [], chat_id=0, thread_id="default")
+    sample_chat_id = 123456789  # arbitrary non-personal sample id
+    section = _build_tool_catalog_section(mcp_tools, [], chat_id=sample_chat_id, thread_id="default")
 
     assert "conversation_history" in section
-    assert "0" in section            # the chat's own id is injected
+    assert str(sample_chat_id) in section    # the chat's own id is injected
     assert "default" in section              # the current thread id is injected
     assert "thread_id = 'default'" in section  # current-thread scope is the default example
     assert "read_query" in section

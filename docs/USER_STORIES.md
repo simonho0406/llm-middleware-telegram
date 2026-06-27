@@ -1,16 +1,16 @@
 # User Stories
 
-Derived from real usage in the thread-history DB (chat 0). These are the
-recurring jobs the bot must do well; `scripts/story_qa.py` exercises each against
-the live system (real MCP + real LLM). Keep this list and the QA script in sync.
+The recurring jobs the bot must do well. `scripts/story_qa.py` exercises each against
+the live system (real MCP + real LLM). Keep this list and the QA script in sync. The
+example phrasings below are illustrative, not transcripts.
 
-| # | Story | What the user actually said (DB) | System path | "Acts correct" means |
+| # | Story | Example request | System path | "Acts correct" means |
 |---|---|---|---|---|
-| 1 | **Panel: deep Notion retrieval + verify** | *"List the exact REDACTED — it's in the Notion page 'Reference Catalog', a certain h3 section. Retrieve, then verify with research."* (REDACTED) | `/discuss_panel` → orchestrator → workspace pre-query + refinement loop with notion MCP | Final answer is **grounded in the actual page content** (not "content not retrieved" / "Extraction Failure"); grounding does **not** decline across refinement rounds; the same large page is **not re-fetched** every round |
-| 2 | **Chat-history mining** | *"Dive deeper into chat history to see if there's valuable interaction worth pulling back."* / *"Go check the old interaction yourself."* (default thread) | normal chat → sqlite-tools MCP over the `conversation_history` view | Model issues a `conversation_history` query **scoped to this chat_id AND current thread_id** and surfaces real past content |
-| 3 | **Multi-source overview** | *"Do a brief overview on my Notion, our chat history, and the overall discussion around the lately REDACTED."* (default thread) | normal chat → notion MCP + sqlite MCP + web `<search>` | A single coherent answer that integrates all three sources; no silent failure |
-| 4 | **Real-time / current info (auto-search)** | *"等等REDACTED會下雨嗎"* (will it rain in Taipei), *"REDACTED去REDACTED機票一般多少錢"* (flight prices) | normal chat → model emits `<search>` → search delegation | Auto-search **triggers** (search queries produced) and a reply is delivered — never a silent self-cancel |
-| 5 | **Normal chat / long technical reasoning** | REDACTED REDACTED discussion, quant strategy on REDACTED/REDACTED, general Q&A (electronic scales, etc.) | normal chat (no tools required) | Coherent, non-empty, grounded answer; harness reports no silent failure |
+| 1 | **Panel: deep Notion retrieval + verify** | *"List the exact attributes recorded for each item in my Notion page 'Reference Catalog' — a certain h3 section. Retrieve, then verify with research."* | `/discuss_panel` → orchestrator → workspace pre-query + refinement loop with notion MCP | Final answer is **grounded in the actual page content** (not "content not retrieved" / "Extraction Failure"); grounding does **not** decline across refinement rounds; the same large page is **not re-fetched** every round |
+| 2 | **Chat-history mining** | *"Dive into our chat history and pull back the earlier detail I mentioned — look it up, don't guess."* | normal chat → sqlite-tools MCP over the `conversation_history` view | Model issues a `conversation_history` query **scoped to this chat_id AND current thread_id** and surfaces real past content |
+| 3 | **Multi-source overview** | *"Brief overview combining my Notion, our chat history, and current public tech news."* | normal chat → notion MCP + sqlite MCP + web `<search>` | A single coherent answer that integrates all three sources; no silent failure |
+| 4 | **Real-time / current info (auto-search)** | a weather or current-events question (incl. non-English, e.g. a CJK weather query) | normal chat → model emits `<search>` → search delegation | Auto-search **triggers** (search queries produced) and a reply is delivered — never a silent self-cancel |
+| 5 | **Normal chat / long technical reasoning** | open-ended technical Q&A requiring no tools | normal chat (no tools required) | Coherent, non-empty, grounded answer; harness reports no silent failure |
 
 ## Notes
 

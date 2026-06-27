@@ -36,9 +36,9 @@ for _noisy in ("services.openai_compatible_service", "utils.context_manager", "b
     logging.getLogger(_noisy).setLevel(logging.WARNING)
 logger = logging.getLogger("story_qa")
 
-# Real chat — has the user's actual Notion + panel config; _run_panel_workflow does NOT
-# write to message history, so this is safe for the panel story.
-REAL_CHAT_ID = 0
+# Real chat (set QA_CHAT_ID in .env) — has the operator's actual Notion + panel config;
+# _run_panel_workflow does NOT write to message history, so this is safe for the panel story.
+REAL_CHAT_ID = int(os.getenv("QA_CHAT_ID", "0"))
 # Dedicated chat for normal-chat stories (seeded, no real-data pollution).
 QA_CHAT_ID = 700000012
 QA_HIST_FACT = "ZEPHYR-9"  # distinctive token seeded into history for the mining story
@@ -125,15 +125,14 @@ async def story1_panel_notion(mcp) -> dict:
     from bot.handlers.panel_workflow import _run_panel_workflow
     name = "1 · Panel deep Notion retrieval + verify"
     prompt = (
-        "List me the exact REDACTED in my ingredients. "
-        "It's in the Notion page 'Reference Catalog' — a certain h3 section contains what you need. "
+        "List the exact attributes recorded for each item in my Notion page "
+        "'Reference Catalog' — a certain h3 section contains the details. "
         "Retrieve it, then verify with your sources or research."
     )
     criteria = (
-        "PASS only if the answer lists actual gin names WITH concrete flavor descriptors "
-        "(botanicals, tasting notes) drawn from the page content. FAIL if it asks the user to "
-        "provide/paste the content, says the page body/content could not be retrieved, or only "
-        "returns the page's metadata."
+        "PASS only if the answer lists actual item names WITH concrete attribute values "
+        "drawn from the page content. FAIL if it asks the user to provide/paste the content, "
+        "says the page body/content could not be retrieved, or only returns the page's metadata."
     )
     # Panel output is non-deterministic and the failure is intermittent — run it
     # multiple times and require EVERY run to truly fulfill the request.
@@ -192,7 +191,7 @@ async def story3_multi_source(mcp) -> dict:
     name = "3 · Multi-source overview"
     prompt = (
         "Give me a brief overview combining three things: a quick scan of my Notion workspace, "
-        "what's in our recent chat history, and any current public news about SpaceX. "
+        "what's in our recent chat history, and any current public technology news. "
         "Three short sections."
     )
     start = time.monotonic()
@@ -213,7 +212,7 @@ async def story3_multi_source(mcp) -> dict:
 async def story4_autosearch(mcp) -> dict:
     from bot.response_generator import _generate_llm_response
     name = "4 · Real-time auto-search trigger"
-    prompt = "等等REDACTED會下雨嗎？我想知道接下來幾小時的降雨機率。"
+    prompt = "等等東京會下雨嗎？我想知道接下來幾小時的降雨機率。"
     start = time.monotonic()
     try:
         # Clean chat: no seeded/prior history, so a real-time question must trigger search.

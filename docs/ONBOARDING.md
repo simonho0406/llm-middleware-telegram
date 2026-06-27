@@ -1,7 +1,7 @@
 # 🧭 Architecture & Onboarding
 
 Contributor reference for how this bot is built. For setup and usage, see the
-[README](../README.md). For per-feature history, see `docs/tickets/archive/`.
+[README](../README.md). Per-feature development history lives in the git log.
 
 ---
 

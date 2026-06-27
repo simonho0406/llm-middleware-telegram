@@ -38,7 +38,7 @@ logging.basicConfig(
 logger = logging.getLogger("panel_qa")
 
 # ── constants ──────────────────────────────────────────────────────────────────
-QA_CHAT_ID = 0  # Real chat ID — results logged to stdout, nothing sent to Telegram
+QA_CHAT_ID = int(os.getenv("QA_CHAT_ID", "0"))  # set in .env; results logged to stdout, nothing sent to Telegram
 
 TEST_CASES = [
     {
