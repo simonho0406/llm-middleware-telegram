@@ -4,7 +4,11 @@ services:
     # .github/workflows/docker-publish.yml):  docker compose pull && docker compose up -d
     # `build: .` is retained for LOCAL DEV only:  docker compose up --build
     image: ghcr.io/simonho0406/llm-middleware-telegram:latest
-    build: . # dev only — servers should never run `--build`
+    # `up` ALWAYS pulls the prebuilt image and NEVER builds on the host. This is the guard
+    # that stops a server from accidentally running the heavy apt+Node+pip build, which
+    # pegs both vCPUs and OOM-locks a small box. Devs can still force a build: `up --build`.
+    pull_policy: always
+    build: . # dev only — servers must never run `--build`
     container_name: llm-middleware-telegram
     restart: unless-stopped
     env_file:
@@ -14,9 +18,13 @@ services:
       - ./config.yaml:/app/config.yaml:ro
       # Mount the data directory to persist session data
       - ./data:/app/data
-    mem_limit: 1.2g        # leaves ~800 MB for OS + other programs on a 2C2G host
-    memswap_limit: 1.2g   # disables swap so OOM is clean rather than silently slow
-    cpus: "1.5"           # reserves 0.5 CPU for other programs
+    mem_limit: 768m        # measured runtime peak ~330 MB (bot + all 3 MCP servers); 768m
+                           # fits with headroom AND stays safely under a 1 GB host.
+                           # NEVER set above the host's physical RAM (that causes host OOM).
+    memswap_limit: 768m    # = mem_limit ⇒ container can't swap; OOM kills the container
+                           # cleanly (restart policy revives it) instead of thrashing the host.
+                           # Still add a HOST swapfile so the OS/sshd survive any spike.
+    cpus: "1.5"            # reserves 0.5 CPU for other programs
     # Optional: If you want the bot container to talk to an Ollama
     # container running on the host machine via Docker's network:
     extra_hosts:
