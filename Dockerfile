@@ -14,11 +14,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     gnupg \
+    gosu \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && apt-get purge -y gnupg \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
+
+# Non-root user for the application. The entrypoint (run as root) fixes ownership of the
+# host-mounted data dir, then drops to this user via gosu — so the app + MCP subprocesses
+# run unprivileged with no host-side chown required.
+RUN useradd --system --create-home --uid 10001 appuser
 
 # Bake the Node-based MCP servers into the image (pinned) so nothing is downloaded from
 # npm at runtime — the previous `npx -y` launch fetched these on every cold container.
@@ -45,5 +51,9 @@ RUN pip install --no-cache-dir --upgrade pip && \
 ARG CACHEBUST=0
 COPY . .
 
-# Command to run the application
+# Ensure the entrypoint is executable and app code is owned by the non-root user.
+RUN chmod +x /app/docker-entrypoint.sh && chown -R appuser:appuser /app
+
+# Entrypoint runs as root (fix data-dir perms) then execs the CMD as appuser via gosu.
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["python", "main.py"]
