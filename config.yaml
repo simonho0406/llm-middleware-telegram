@@ -177,10 +177,18 @@ rate_limits:
     requests_per_minute: 10  # Conservative for credit usage
 
 # --- Security and Access Control ---
-# Uncomment and configure if needed
+# ACCESS IS FAIL-CLOSED: the bot ignores ALL chats unless you either list allowed
+# chat IDs below OR explicitly set `open_access: true`. This prevents a freshly
+# deployed (public) bot from being open to the world and burning your API keys.
+#
+# Recommended — restrict to known chats (find your id via @userinfobot):
 # allowed_chat_ids:
 #   - 123456789
 #   - -987654321
+#
+# OR — explicitly run a public bot open to anyone (NOT recommended; also exposes the
+# multi-user history-leak in issue #1 until that is fixed):
+# open_access: true
 
 # --- Utility Agent Configuration ---
 # Primary: gemma-4-31b-it (Gemini API, score 64 on instruction-following, 256K ctx, 140+ langs)

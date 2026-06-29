@@ -116,6 +116,11 @@ def get_session_file_path():
 def get_allowed_chat_ids():
     return _yaml_config.get("allowed_chat_ids", None)
 
+def get_open_access():
+    """True only if the operator explicitly opts into a public, no-allowlist bot.
+    Default False ⇒ auth_middleware is fail-closed when no allowlist is set."""
+    return bool(_yaml_config.get("open_access", False))
+
 def get_request_timeout_seconds():
     return _yaml_config.get("REQUEST_TIMEOUT_SECONDS", 180)
 

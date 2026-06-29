@@ -1,0 +1,75 @@
+"""
+Tests for bot.middleware.auth_middleware — fail-closed access control.
+
+The repo is public and the bot multi-user, so the access gate must DENY by default:
+no `allowed_chat_ids` and no `open_access` ⇒ every chat is rejected. These pin that
+invariant (a regression to fail-open would re-expose the bot to the world).
+"""
+import os
+import sys
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+import pytest
+from unittest.mock import MagicMock, patch
+from telegram.ext import ApplicationHandlerStop
+
+from bot import middleware
+
+
+def _update(chat_id=555):
+    u = MagicMock()
+    u.effective_chat.id = chat_id
+    u.effective_user.id = chat_id
+    return u
+
+
+@pytest.fixture(autouse=True)
+def _reset_throttle():
+    # Reset module-level log throttles so tests don't interfere.
+    middleware._misconfig_warned = False
+    middleware._last_denied_log_ts = 0.0
+    yield
+
+
+@pytest.mark.asyncio
+async def test_deny_by_default_when_unconfigured():
+    """No allowlist + open_access off ⇒ every chat denied (fail-closed)."""
+    with patch.object(middleware.config, "get_open_access", return_value=False), \
+         patch.object(middleware.config, "get_allowed_chat_ids", return_value=None):
+        with pytest.raises(ApplicationHandlerStop):
+            await middleware.auth_middleware(_update(), MagicMock())
+
+
+@pytest.mark.asyncio
+async def test_open_access_allows_any_chat():
+    """Explicit open_access: true ⇒ allowed (no exception)."""
+    with patch.object(middleware.config, "get_open_access", return_value=True), \
+         patch.object(middleware.config, "get_allowed_chat_ids", return_value=None):
+        await middleware.auth_middleware(_update(9999), MagicMock())  # must not raise
+
+
+@pytest.mark.asyncio
+async def test_allowlisted_chat_passes():
+    with patch.object(middleware.config, "get_open_access", return_value=False), \
+         patch.object(middleware.config, "get_allowed_chat_ids", return_value=[555]):
+        await middleware.auth_middleware(_update(555), MagicMock())  # must not raise
+
+
+@pytest.mark.asyncio
+async def test_non_allowlisted_chat_denied():
+    with patch.object(middleware.config, "get_open_access", return_value=False), \
+         patch.object(middleware.config, "get_allowed_chat_ids", return_value=[111]):
+        with pytest.raises(ApplicationHandlerStop):
+            await middleware.auth_middleware(_update(555), MagicMock())
+
+
+@pytest.mark.asyncio
+async def test_no_chat_id_is_ignored_not_denied():
+    """An update with no chat (e.g. inline) is a no-op, not a hard deny."""
+    u = MagicMock()
+    u.effective_chat = None
+    u.effective_user = None
+    with patch.object(middleware.config, "get_open_access", return_value=False), \
+         patch.object(middleware.config, "get_allowed_chat_ids", return_value=None):
+        await middleware.auth_middleware(u, MagicMock())  # must not raise
