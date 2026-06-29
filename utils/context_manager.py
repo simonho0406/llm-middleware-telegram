@@ -7,6 +7,7 @@ recent context as possible.
 """
 
 import logging
+from functools import lru_cache
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
 
@@ -69,15 +70,23 @@ try:
 except ImportError:
     _TIKTOKEN_ENCODER = None
 
+@lru_cache(maxsize=2048)
+def _cached_token_len(text: str) -> int:
+    """Encode once per unique message and cache the length. ensure_context_fits re-counts
+    the whole history every turn; without this the cost is O(N²) over a conversation (turn
+    N re-encodes all N messages). With it, each message is encoded once → O(N), and the
+    repeated per-turn counting becomes cheap dict lookups. Bounded at 2048 entries."""
+    return len(_TIKTOKEN_ENCODER.encode(text))
+
 def count_tokens(text: str) -> int:
-    """Enhanced token counting with better accuracy and caching."""
+    """Token count with per-message memoization (see _cached_token_len)."""
     if _TIKTOKEN_ENCODER:
         try:
-            return len(_TIKTOKEN_ENCODER.encode(text))
+            return _cached_token_len(text)
         except Exception:
              # Fallback if encoding fails for some reason
              pass
-    
+
     # Fallback estimation: ~4 characters per token
     return len(text) // 4
 
