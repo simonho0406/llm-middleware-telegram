@@ -584,7 +584,11 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
                 logger.info(f"{log_prefix}Turn {turn}: XML tool call format detected, parsed {len(xml_calls)} call(s).")
 
         if is_tool_call and parsed_tool_calls:
-            logger.info(f"{log_prefix}Turn {turn}: Tool call request detected: {parsed_tool_calls}")
+            # Names at INFO; full arguments (may contain user content / queries) at DEBUG
+            # to avoid PII in retained logs of a multi-user bot.
+            _tc_names = [tc.get('function', {}).get('name') for tc in parsed_tool_calls]
+            logger.info(f"{log_prefix}Turn {turn}: {len(parsed_tool_calls)} tool call(s) requested: {_tc_names}")
+            logger.debug(f"{log_prefix}Turn {turn}: tool call args: {parsed_tool_calls}")
             
             # If we used an augmented user prompt, we must append it to context history
             if augmented_prompt:
