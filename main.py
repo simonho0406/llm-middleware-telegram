@@ -1,6 +1,8 @@
 import logging
 import asyncio
+import time
 from telegram import Update
+from telegram.error import Conflict
 from telegram.ext import CommandHandler, Application, ContextTypes, TypeHandler
 from bot.menu_setup import setup_bot_commands_and_menu
 
@@ -13,6 +15,13 @@ from storage import storage_manager
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+# Throttle for telegram.error.Conflict: when a second process polls the same bot
+# token, PTB keeps polling and Conflict fires every ~35s. Logging a full traceback
+# each time floods the log (observed: 711 tracebacks / 2 MB in one outage). Emit at
+# most one concise WARNING per interval.
+_CONFLICT_LOG_INTERVAL_S = 300
+_last_conflict_log_ts = 0.0
 
 # --- Basic Command Handlers ---
 
@@ -53,6 +62,22 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
     is how the debounced process_buffered_message surfaces) and deliver a notice,
     so a failure never ends as "executed successfully" with no reply to the user.
     """
+    # Conflict = another poller on the same token (duplicate container / shared token).
+    # It's a recurring polling-level error with no deliverable chat; throttle it to a
+    # single concise WARNING instead of a full traceback every ~35s.
+    if isinstance(context.error, Conflict):
+        global _last_conflict_log_ts
+        now = time.monotonic()
+        if now - _last_conflict_log_ts > _CONFLICT_LOG_INTERVAL_S:
+            _last_conflict_log_ts = now
+            logger.warning(
+                "telegram.error.Conflict: another process is polling this bot token "
+                "(duplicate container or a shared TELEGRAM_BOT_TOKEN). Ensure exactly one "
+                "poller per token: `docker compose down --remove-orphans` then `up -d`. "
+                "Suppressing repeats for %ds.", _CONFLICT_LOG_INTERVAL_S
+            )
+        return
+
     logger.error("Exception while handling an update:", exc_info=context.error)
     error_msg = "Sorry, an internal error occurred. The developers have been notified."
 
