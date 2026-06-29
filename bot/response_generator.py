@@ -19,6 +19,7 @@ from storage import storage_manager
 from bot.messaging import send_safe_message, finalize_draft, send_draft_message, send_plain_message
 from utils.context_manager import ensure_context_fits
 from utils.llm_utilities import is_error_response
+from utils.concurrency import run_capped
 from bot.settings import USER_SETTINGS
 
 logger = logging.getLogger(__name__)
@@ -187,8 +188,11 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
             except Exception as _cleanup_err:
                 logger.warning(f"(Chat {chat_id}) Failed to delete orphan user-message pk={_orphan_pk}: {_cleanup_err}")
 
+    # run_capped: hold one global generation permit for the whole turn (bounds peak
+    # RAM/CPU on small VMs). Safe to wrap here — this task body is non-recursive and the
+    # in-turn auto-search delegation generates inline (no nested permit acquisition).
     task = asyncio.create_task(
-        _generate_and_send_response_task(update, context, chat_id, user_id, prompt, current_thread_id, is_reroll, force_truncate, placeholder_message, skip_save, save_input)
+        run_capped(_generate_and_send_response_task(update, context, chat_id, user_id, prompt, current_thread_id, is_reroll, force_truncate, placeholder_message, skip_save, save_input))
     )
     context.chat_data[task_key] = task
     try:

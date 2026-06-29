@@ -121,6 +121,16 @@ def get_open_access():
     Default False ⇒ auth_middleware is fail-closed when no allowlist is set."""
     return bool(_yaml_config.get("open_access", False))
 
+def get_max_concurrent_updates():
+    """Cap on PTB's concurrently-dispatched update tasks. Bounds a post-restart backlog
+    burst on small VMs (PTB's default of True allows 256). Keep small."""
+    return int(_yaml_config.get("max_concurrent_updates", 8))
+
+def get_max_concurrent_generations():
+    """Global cap on concurrent heavy LLM generations (chat turns + panels) to bound
+    peak RAM/CPU on a small VM. The tight inner limit beneath max_concurrent_updates."""
+    return int(_yaml_config.get("max_concurrent_generations", 3))
+
 def get_request_timeout_seconds():
     return _yaml_config.get("REQUEST_TIMEOUT_SECONDS", 180)
 
