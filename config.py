@@ -131,6 +131,13 @@ def get_max_concurrent_generations():
     peak RAM/CPU on a small VM. The tight inner limit beneath max_concurrent_updates."""
     return int(_yaml_config.get("max_concurrent_generations", 3))
 
+def get_chat_max_context_tokens():
+    """Input-token budget for a normal CHAT turn (separate from the large panel budget).
+    The previous ~108k effective budget shipped huge histories every turn, the dominant
+    driver of free-tier 429s, latency, and tiktoken CPU. Default 28k keeps recent context
+    while cutting tokens ~4x. Panels are unaffected (they don't pass this cap)."""
+    return int(_yaml_config.get("chat_max_context_tokens", 28000))
+
 def get_request_timeout_seconds():
     return _yaml_config.get("REQUEST_TIMEOUT_SECONDS", 180)
 

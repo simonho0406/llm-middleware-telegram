@@ -104,6 +104,7 @@ async def test_auto_retry_enabled_retries_once(mock_context, mock_service_error)
             {'provider': 'nvidia', 'provider_display': 'NVIDIA', 'model': 'test-model', 'service': service}
         )
         mock_config.get_enable_streaming.return_value = False
+        mock_config.get_chat_max_context_tokens.return_value = 28000
 
         result = await _generate_llm_response(mock_context, CHAT_ID, "test prompt")
 
@@ -133,6 +134,7 @@ async def test_auto_retry_disabled_no_retry(mock_context, mock_service_always_er
             {'provider': 'nvidia', 'provider_display': 'NVIDIA', 'model': 'test-model', 'service': service}
         )
         mock_config.get_enable_streaming.return_value = False
+        mock_config.get_chat_max_context_tokens.return_value = 28000
 
         result = await _generate_llm_response(mock_context, CHAT_ID, "test prompt")
 
@@ -162,6 +164,7 @@ async def test_auto_retry_both_fail_returns_error(mock_context, mock_service_alw
             {'provider': 'nvidia', 'provider_display': 'NVIDIA', 'model': 'test-model', 'service': service}
         )
         mock_config.get_enable_streaming.return_value = False
+        mock_config.get_chat_max_context_tokens.return_value = 28000
 
         result = await _generate_llm_response(mock_context, CHAT_ID, "test prompt")
 
@@ -191,6 +194,7 @@ async def test_no_retry_on_success(mock_context, mock_service_success):
             {'provider': 'nvidia', 'provider_display': 'NVIDIA', 'model': 'test-model', 'service': service}
         )
         mock_config.get_enable_streaming.return_value = False
+        mock_config.get_chat_max_context_tokens.return_value = 28000
 
         result = await _generate_llm_response(mock_context, CHAT_ID, "test prompt")
 

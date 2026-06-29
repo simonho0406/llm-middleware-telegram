@@ -157,25 +157,35 @@ async def ensure_context_fits(
     history: List[Dict[str, str]],
     model: str,
     provider: str,
-    safety_margin: float = 1.0
+    safety_margin: float = 1.0,
+    max_input_tokens: Optional[int] = None
 ) -> Tuple[List[Dict[str, str]], Optional[str]]:
     """
     Ensure the context fits within the model's limits by truncating if necessary.
     Optimized to calculate usage and truncate in a single pass.
-    
+
     Args:
-        safety_margin (float): Multiplier for the available context limit (default 1.0). 
+        safety_margin (float): Multiplier for the available context limit (default 1.0).
                               Use < 1.0 to leave extra room (e.g. 0.8 for 20% buffer).
-    
+        max_input_tokens (int|None): Hard cap on the input budget, applied ON TOP of the
+                              model/config limit. Chat passes a small value (e.g. 28k) so a
+                              normal turn doesn't ship ~108k tokens — the dominant driver of
+                              free-tier 429s, latency, and tiktoken CPU. Panels omit it and
+                              keep the full model budget.
+
     Returns:
         (final_history, info_message)
     """
     limits = get_model_context_limits(model, provider)
     prompt_tokens = count_tokens(prompt)
-    
+
     # Calculate effective limit with safety margin
     # We apply the margin to the total input limit to effectively reserve more space
     effective_limit_tokens = int(limits.effective_input_limit * safety_margin)
+
+    # Caller-supplied hard cap (chat budget). Never raises the model limit, only lowers it.
+    if max_input_tokens is not None:
+        effective_limit_tokens = min(effective_limit_tokens, max_input_tokens)
     
     # Separate and protect system messages from truncation
     system_messages = [msg for msg in history if msg.get("role") == "system"]
