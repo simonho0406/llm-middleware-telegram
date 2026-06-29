@@ -11,6 +11,18 @@ from google.genai import errors as google_exceptions
 
 logger = logging.getLogger(__name__)
 
+# Transient upstream-overload errors Google says to retry ("503 high demand", 500, 504).
+# Distinct from 429 (quota) which is handled by key rotation.
+_RETRYABLE_SERVER_MARKERS = ("503", "500", "504", "unavailable", "overloaded",
+                             "high demand", "internal error", "try again later")
+
+def _is_retryable_server_error(e) -> bool:
+    s = str(e).lower()
+    # Exclude quota/rate-limit (handled separately as 429).
+    if "429" in s or "quota" in s or "exhausted" in s:
+        return False
+    return any(m in s for m in _RETRYABLE_SERVER_MARKERS)
+
 # Maps raw protobuf integer values to canonical enum names — fallback for SDK versions
 # that return unrecognized FinishReason as a plain int instead of an enum object.
 _FINISH_REASON_INT_MAP = {'0': 'FINISH_REASON_UNSPECIFIED', '1': 'STOP', '2': 'MAX_TOKENS'}
@@ -313,6 +325,15 @@ class GeminiService:
                             f"tool-call turns (Key Index: {i}). Stripped unsigned turns, retrying..."
                         )
                         break  # break key loop → go to next _pass
+                    elif _is_retryable_server_error(e):
+                        # 503/500/504 = transient upstream overload (Google: "spikes are
+                        # temporary"). Back off and try the next key/attempt instead of
+                        # failing the user; if all attempts exhaust, the terminal branch
+                        # below yields an error (then the chat path can fail over).
+                        backoff = config.get_server_error_backoff_seconds()
+                        logger.warning(f"Gemini transient server error (Key Index {i}); backing off {backoff}s then retrying. Reason: {e}")
+                        await asyncio.sleep(backoff)
+                        continue
                     else:
                         logger.exception(f"A non-recoverable Gemini error occurred with Key Index {i} (Model: {model}): {e}")
                         yield f"[Error: A critical error occurred with the Gemini API: {e}]"
@@ -320,6 +341,11 @@ class GeminiService:
                 except Exception as e:
                     if "429" in str(e) or "exhausted" in str(e).lower():
                         logger.warning(f"Gemini key at index {i} is rate-limited, trying next key. Reason: {e}")
+                        continue
+                    elif _is_retryable_server_error(e):
+                        backoff = config.get_server_error_backoff_seconds()
+                        logger.warning(f"Gemini transient server error (Key Index {i}); backing off {backoff}s then retrying. Reason: {e}")
+                        await asyncio.sleep(backoff)
                         continue
                     logger.exception(f"An unexpected Gemini error occurred with Key Index {i} (Model: {model}): {e}")
                     yield f"[Error: A critical error occurred with the Gemini API: {e}]"

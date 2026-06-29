@@ -721,7 +721,12 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
             USER_SETTINGS['auto_retry_on_error']['default']
         )
         if auto_retry:
-            logger.warning(f"{log_prefix}LLM error detected. Auto-retrying once...")
+            # Back off before retrying so we don't immediately re-hit a model that's
+            # overloaded/rate-limited (the provider services already retry transient 5xx
+            # internally; this guards the app-level retry against hammering).
+            backoff = config.get_server_error_backoff_seconds()
+            logger.warning(f"{log_prefix}LLM error detected. Backing off {backoff}s then auto-retrying once...")
+            await asyncio.sleep(backoff)
             return await _generate_llm_response(
                 context, chat_id, prompt, is_reroll,
                 force_truncate=force_truncate,

@@ -131,6 +131,12 @@ def get_max_concurrent_generations():
     peak RAM/CPU on a small VM. The tight inner limit beneath max_concurrent_updates."""
     return int(_yaml_config.get("max_concurrent_generations", 3))
 
+def get_server_error_backoff_seconds():
+    """Backoff before retrying a transient provider server error (503/500/504). Google
+    explicitly says 503 spikes are temporary — back off and retry rather than failing the
+    user. Applied per attempt as keys rotate."""
+    return float(_yaml_config.get("server_error_backoff_seconds", 2.0))
+
 def get_chat_max_context_tokens():
     """Input-token budget for a normal CHAT turn (separate from the large panel budget).
     The previous ~108k effective budget shipped huge histories every turn, the dominant
