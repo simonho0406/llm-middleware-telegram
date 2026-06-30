@@ -38,27 +38,44 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
+def get_env(name, default=None):
+    """Read an env var, defensively stripping surrounding quotes + whitespace.
+
+    Docker's `env_file:` / `--env-file` passes a quoted .env value (KEY="abc") LITERALLY
+    — unlike python-dotenv, which strips the quotes. A quoted .env therefore silently
+    corrupts every API key (auth → 401) while public health-check endpoints still pass,
+    making it very hard to diagnose. Normalizing here makes a quoted or clean .env (and
+    stray CRLF whitespace) both work. No-op when the value is already clean.
+    """
+    v = os.getenv(name, default)
+    if not isinstance(v, str):
+        return v
+    v = v.strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in ('"', "'"):
+        v = v[1:-1].strip()
+    return v
+
 # These can be global as they are read directly from the environment at import time
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+TELEGRAM_BOT_TOKEN = get_env("TELEGRAM_BOT_TOKEN")
+OLLAMA_HOST = get_env("OLLAMA_HOST", "http://localhost:11434")
 DB_PATH = "data/bot_sessions.db"
-gemini_keys_str = os.getenv("GEMINI_API_KEYS")
+gemini_keys_str = get_env("GEMINI_API_KEYS")
 if gemini_keys_str:
-    GEMINI_API_KEYS = [key.strip() for key in gemini_keys_str.split(',') if key.strip()]
+    GEMINI_API_KEYS = [key.strip().strip('"').strip("'").strip() for key in gemini_keys_str.split(',') if key.strip()]
 else:
     GEMINI_API_KEYS = []
     i = 1
     while True:
-        key = os.getenv(f"GEMINI_API_KEY_{i}")
+        key = get_env(f"GEMINI_API_KEY_{i}")
         if key:
             GEMINI_API_KEYS.append(key)
             i += 1
         else:
             break
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID")
+OPENROUTER_API_KEY = get_env("OPENROUTER_API_KEY")
+TAVILY_API_KEY = get_env("TAVILY_API_KEY")
+GOOGLE_API_KEY = get_env("GOOGLE_API_KEY")
+GOOGLE_CSE_ID = get_env("GOOGLE_CSE_ID")
 
 # Load YAML config into a private variable
 _yaml_config = {}
