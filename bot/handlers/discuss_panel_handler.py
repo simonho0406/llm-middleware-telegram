@@ -10,6 +10,7 @@ from bot.menu_setup import setup_bot_commands_and_menu
 from storage import storage_manager
 from bot.settings import USER_SETTINGS
 from bot.messaging import send_safe_message, send_plain_message
+from utils.concurrency import run_capped
 from bot.handlers.panel_workflow import (
     _run_panel_workflow,
     _format_panel_summary,
@@ -149,9 +150,12 @@ async def start_panel_discussion(update: Update, context: ContextTypes.DEFAULT_T
     
     await set_panel_commands(context.application, chat_id)
 
-    # Create and store task, but DO NOT await it
+    # Create and store task, but DO NOT await it.
+    # run_capped: a panel holds one global generation permit for its duration so
+    # concurrent panels/chats can't OOM a small VM. Panels don't nest into chat tasks
+    # (or vice versa), so no deadlock.
     panel_task = asyncio.create_task(
-        _run_panel_task_background(update, context, user_prompt, assembling_msg, chat_id)
+        run_capped(_run_panel_task_background(update, context, user_prompt, assembling_msg, chat_id))
     )
     context.user_data['panel_task'] = panel_task
     

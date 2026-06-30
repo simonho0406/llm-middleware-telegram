@@ -117,7 +117,9 @@ def _build_provider_details(details: dict, _added_this_attempt: list[str]) -> No
             try:
                 env_var_override = provider_conf.get('api_key')
                 default_env_var = f"{name.upper()}_API_KEY"
-                provider_conf['api_key'] = os.getenv(env_var_override) if env_var_override and os.getenv(env_var_override) else os.getenv(default_env_var)
+                # config.get_env strips surrounding quotes/whitespace so a quoted .env
+                # (which Docker's env_file passes literally) doesn't corrupt the key.
+                provider_conf['api_key'] = config.get_env(env_var_override) if env_var_override and config.get_env(env_var_override) else config.get_env(default_env_var)
                 if not provider_conf['api_key']:
                     logger.warning(f"API key environment variable for custom provider '{name}' not found. Skipping.")
                     continue

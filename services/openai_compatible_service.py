@@ -262,6 +262,13 @@ class OpenAICompatibleService:
                     elif "EngineCore" in str(e):
                         logger.error(f"[{self.provider_name}] NVIDIA EngineCore Error: {e}")
                         raise ProviderUnavailableError("NVIDIA service unavailable") from e
+                    elif e.status_code in (500, 502, 503, 504) and attempt < retries:
+                        # Transient upstream overload (e.g. NVIDIA "All workers are busy" 503,
+                        # 500 instance-not-found, 504 gateway timeout). Back off and retry
+                        # rather than failing the user; loop continues to the next attempt.
+                        logger.warning(f"[{self.provider_name}] Transient server error (Status {e.status_code}); retrying in {delay}s (Attempt {attempt + 1}/{retries}).")
+                        await asyncio.sleep(delay)
+                        delay *= 2
                     else:
                         logger.error(f"[{self.provider_name}] API Status Error: {e.status_code} - {e.response}")
                         yield f"[Error: API returned an error (Status {e.status_code}). Details: {e.message}]"

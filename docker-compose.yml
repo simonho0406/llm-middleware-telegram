@@ -11,6 +11,20 @@ services:
     build: . # dev only — servers must never run `--build`
     container_name: llm-middleware-telegram
     restart: unless-stopped
+    # Block privilege escalation via setuid binaries (defense-in-depth around the LLM
+    # tool loop / MCP subprocesses). The app itself runs as non-root 'appuser' (see
+    # Dockerfile + docker-entrypoint.sh); only the brief entrypoint runs as root to fix
+    # the bind-mounted data-dir ownership before dropping privileges via gosu.
+    security_opt:
+      - no-new-privileges:true
+    # Cap log growth. Without this, an error storm (e.g. a duplicate-poller Conflict
+    # loop) can produce an unbounded log — one outage wrote a 2 MB stream. 3×10 MB
+    # is plenty for triage and bounds disk on a small VM.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     env_file:
       - .env # Pass environment variables from .env file
     volumes:

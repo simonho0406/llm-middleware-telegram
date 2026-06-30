@@ -7,6 +7,7 @@ recent context as possible.
 """
 
 import logging
+from functools import lru_cache
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
 
@@ -69,15 +70,28 @@ try:
 except ImportError:
     _TIKTOKEN_ENCODER = None
 
+# Only cache SMALL messages. The O(N²) cost comes from re-encoding the many small history
+# messages every turn — those benefit from caching. Large blobs (e.g. distilled tool
+# results) are few and would bloat the cache (the key retains the full string), counter to
+# the small-VM memory goal, so they're encoded directly each time.
+_CACHE_MAX_TEXT_LEN = 8192  # chars
+
+@lru_cache(maxsize=1024)
+def _cached_token_len(text: str) -> int:
+    """Encode once per unique (small) message and cache the length. Bound: 1024 × ~8KB."""
+    return len(_TIKTOKEN_ENCODER.encode(text))
+
 def count_tokens(text: str) -> int:
-    """Enhanced token counting with better accuracy and caching."""
+    """Token count with per-message memoization for small messages (see _cached_token_len)."""
     if _TIKTOKEN_ENCODER:
         try:
+            if isinstance(text, str) and len(text) <= _CACHE_MAX_TEXT_LEN:
+                return _cached_token_len(text)
             return len(_TIKTOKEN_ENCODER.encode(text))
         except Exception:
              # Fallback if encoding fails for some reason
              pass
-    
+
     # Fallback estimation: ~4 characters per token
     return len(text) // 4
 
@@ -157,25 +171,38 @@ async def ensure_context_fits(
     history: List[Dict[str, str]],
     model: str,
     provider: str,
-    safety_margin: float = 1.0
+    safety_margin: float = 1.0,
+    max_input_tokens: Optional[int] = None
 ) -> Tuple[List[Dict[str, str]], Optional[str]]:
     """
     Ensure the context fits within the model's limits by truncating if necessary.
     Optimized to calculate usage and truncate in a single pass.
-    
+
     Args:
-        safety_margin (float): Multiplier for the available context limit (default 1.0). 
+        safety_margin (float): Multiplier for the available context limit (default 1.0).
                               Use < 1.0 to leave extra room (e.g. 0.8 for 20% buffer).
-    
+        max_input_tokens (int|None): Hard cap on the input budget, applied ON TOP of the
+                              model/config limit. Chat passes a small value (e.g. 28k) so a
+                              normal turn doesn't ship ~108k tokens — the dominant driver of
+                              free-tier 429s, latency, and tiktoken CPU. Panels omit it and
+                              keep the full model budget.
+
     Returns:
         (final_history, info_message)
     """
     limits = get_model_context_limits(model, provider)
     prompt_tokens = count_tokens(prompt)
-    
-    # Calculate effective limit with safety margin
-    # We apply the margin to the total input limit to effectively reserve more space
-    effective_limit_tokens = int(limits.effective_input_limit * safety_margin)
+
+    # Start from the model's input limit, apply the caller's hard cap (chat budget) FIRST,
+    # THEN the safety margin — so force_truncate (which lowers safety_margin) actually
+    # shrinks the budget even when the small chat cap dominates the large model limit.
+    # (If the margin were applied before the min, min(0.75*1M, 28k) == min(1.0*1M, 28k),
+    # making force_truncate a no-op for long-context models and defeating the empty-response
+    # retry.)
+    effective_input_limit = limits.effective_input_limit
+    if max_input_tokens is not None:
+        effective_input_limit = min(effective_input_limit, max_input_tokens)
+    effective_limit_tokens = int(effective_input_limit * safety_margin)
     
     # Separate and protect system messages from truncation
     system_messages = [msg for msg in history if msg.get("role") == "system"]

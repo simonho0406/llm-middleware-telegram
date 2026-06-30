@@ -177,10 +177,18 @@ rate_limits:
     requests_per_minute: 10  # Conservative for credit usage
 
 # --- Security and Access Control ---
-# Uncomment and configure if needed
+# ACCESS IS FAIL-CLOSED: the bot ignores ALL chats unless you authorize it. This
+# prevents a freshly deployed (public) bot from being open to the world.
+#
+# CONFIGURE THIS IN .env, NOT HERE. Chat IDs are personal data and this config.yaml is
+# committed to git — putting real IDs here would leak them in a public repo. Set
+# `ALLOWED_CHAT_IDS` (comma-separated) or `OPEN_ACCESS` in .env instead (see .env.example).
+#
+# The keys below are an OPTIONAL fallback for PRIVATE deployments only. .env takes
+# precedence. Leave them unset for a public repo.
 # allowed_chat_ids:
-#   - 123456789
-#   - -987654321
+#   - <your_chat_id>
+# open_access: false
 
 # --- Utility Agent Configuration ---
 # Primary: gemma-4-31b-it (Gemini API, score 64 on instruction-following, 256K ctx, 140+ langs)

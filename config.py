@@ -38,27 +38,44 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
+def get_env(name, default=None):
+    """Read an env var, defensively stripping surrounding quotes + whitespace.
+
+    Docker's `env_file:` / `--env-file` passes a quoted .env value (KEY="abc") LITERALLY
+    — unlike python-dotenv, which strips the quotes. A quoted .env therefore silently
+    corrupts every API key (auth → 401) while public health-check endpoints still pass,
+    making it very hard to diagnose. Normalizing here makes a quoted or clean .env (and
+    stray CRLF whitespace) both work. No-op when the value is already clean.
+    """
+    v = os.getenv(name, default)
+    if not isinstance(v, str):
+        return v
+    v = v.strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in ('"', "'"):
+        v = v[1:-1].strip()
+    return v
+
 # These can be global as they are read directly from the environment at import time
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+TELEGRAM_BOT_TOKEN = get_env("TELEGRAM_BOT_TOKEN")
+OLLAMA_HOST = get_env("OLLAMA_HOST", "http://localhost:11434")
 DB_PATH = "data/bot_sessions.db"
-gemini_keys_str = os.getenv("GEMINI_API_KEYS")
+gemini_keys_str = get_env("GEMINI_API_KEYS")
 if gemini_keys_str:
-    GEMINI_API_KEYS = [key.strip() for key in gemini_keys_str.split(',') if key.strip()]
+    GEMINI_API_KEYS = [key.strip().strip('"').strip("'").strip() for key in gemini_keys_str.split(',') if key.strip()]
 else:
     GEMINI_API_KEYS = []
     i = 1
     while True:
-        key = os.getenv(f"GEMINI_API_KEY_{i}")
+        key = get_env(f"GEMINI_API_KEY_{i}")
         if key:
             GEMINI_API_KEYS.append(key)
             i += 1
         else:
             break
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID")
+OPENROUTER_API_KEY = get_env("OPENROUTER_API_KEY")
+TAVILY_API_KEY = get_env("TAVILY_API_KEY")
+GOOGLE_API_KEY = get_env("GOOGLE_API_KEY")
+GOOGLE_CSE_ID = get_env("GOOGLE_CSE_ID")
 
 # Load YAML config into a private variable
 _yaml_config = {}
@@ -114,7 +131,68 @@ def get_session_file_path():
     return _yaml_config.get("session_file_path", "data/sessions.json")
 
 def get_allowed_chat_ids():
+    """Allowed chat IDs, preferring .env (gitignored) over config.yaml.
+
+    Chat IDs are personal data — they identify you and link this (public) repo to your
+    Telegram account. So the canonical home is `.env` via ALLOWED_CHAT_IDS (a comma-
+    separated list), which is gitignored and never committed. config.yaml is only a
+    fallback for private deployments; do NOT put real IDs in it if this repo is public.
+    """
+    raw = get_env("ALLOWED_CHAT_IDS")
+    if raw:
+        ids = []
+        for part in raw.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                ids.append(int(part))
+            except ValueError:
+                logging.getLogger(__name__).warning(f"Ignoring non-integer ALLOWED_CHAT_IDS entry: {part!r}")
+        return ids or None
+    # Fallback: config.yaml (fine for a private repo / local dev).
     return _yaml_config.get("allowed_chat_ids", None)
+
+def get_open_access():
+    """True only if the operator explicitly opts into a public, no-allowlist bot.
+    Reads OPEN_ACCESS from .env first (true/1/yes/on), else config.yaml. Default False ⇒
+    auth_middleware is fail-closed when no allowlist is set."""
+    env = get_env("OPEN_ACCESS")
+    if env:
+        return env.strip().lower() in ("1", "true", "yes", "on")
+    return bool(_yaml_config.get("open_access", False))
+
+def is_chat_allowed(chat_id) -> bool:
+    """Single source of truth for access control (fail-closed). A chat is allowed only if
+    open_access is set OR its id is in allowed_chat_ids. Used by auth_middleware AND by the
+    startup recovery path (which bypasses the handler chain) so neither can diverge."""
+    if get_open_access():
+        return True
+    allowed = get_allowed_chat_ids()
+    return bool(allowed) and chat_id in allowed
+
+def get_max_concurrent_updates():
+    """Cap on PTB's concurrently-dispatched update tasks. Bounds a post-restart backlog
+    burst on small VMs (PTB's default of True allows 256). Keep small."""
+    return int(_yaml_config.get("max_concurrent_updates", 8))
+
+def get_max_concurrent_generations():
+    """Global cap on concurrent heavy LLM generations (chat turns + panels) to bound
+    peak RAM/CPU on a small VM. The tight inner limit beneath max_concurrent_updates."""
+    return int(_yaml_config.get("max_concurrent_generations", 3))
+
+def get_server_error_backoff_seconds():
+    """Backoff before retrying a transient provider server error (503/500/504). Google
+    explicitly says 503 spikes are temporary — back off and retry rather than failing the
+    user. Applied per attempt as keys rotate."""
+    return float(_yaml_config.get("server_error_backoff_seconds", 2.0))
+
+def get_chat_max_context_tokens():
+    """Input-token budget for a normal CHAT turn (separate from the large panel budget).
+    The previous ~108k effective budget shipped huge histories every turn, the dominant
+    driver of free-tier 429s, latency, and tiktoken CPU. Default 28k keeps recent context
+    while cutting tokens ~4x. Panels are unaffected (they don't pass this cap)."""
+    return int(_yaml_config.get("chat_max_context_tokens", 28000))
 
 def get_request_timeout_seconds():
     return _yaml_config.get("REQUEST_TIMEOUT_SECONDS", 180)

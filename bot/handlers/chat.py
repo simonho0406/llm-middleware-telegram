@@ -48,7 +48,8 @@ async def process_buffered_message(context: ContextTypes.DEFAULT_TYPE) -> None:
     full_message_text = " ".join(buffer)
     log_prefix = f"(Chat {chat_id}) "
     
-    logger.info(f"{log_prefix}Processing combined message (len: {len(full_message_text)}): '{full_message_text[:100]}...'")
+    logger.info(f"{log_prefix}Processing combined message (len: {len(full_message_text)}).")
+    logger.debug(f"{log_prefix}Combined message content: '{full_message_text[:100]}...'")
 
     try:
         current_thread_id = await storage_manager.get_current_thread_id(chat_id)
@@ -83,7 +84,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not message_text:
         return
 
-    logger.info(f"{log_prefix}Buffering message from User {user_id}: '{message_text[:50]}...'")
+    logger.info(f"{log_prefix}Buffering message from User {user_id} (len: {len(message_text)}).")
+    logger.debug(f"{log_prefix}Buffered message content: '{message_text[:50]}...'")
 
     # Explicitly ignore any message starting with '/' to prevent eating commands
     # that failed strict CommandHandler filtering (e.g. strict entity checks).

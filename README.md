@@ -121,10 +121,15 @@ docker compose logs -f        # expect providers "Online" + "Application started
 **Updating to a new release:**
 
 ```bash
+docker compose down --remove-orphans   # stop the old container (avoids duplicate pollers)
 git pull            # refresh docker-compose.yml / config.yaml
 docker compose pull # fetch the latest image
 docker compose up -d
+docker ps           # confirm exactly ONE container
 ```
+
+See **[`docs/DEPLOY.md`](docs/DEPLOY.md)** for the full runbook, a symptom→cause cheatsheet,
+and the one-token-per-server rule.
 
 Notes:
 - The GHCR image is **public**, so no `docker login` is needed. (If you make it private,

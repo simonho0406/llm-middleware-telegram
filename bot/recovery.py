@@ -74,6 +74,14 @@ async def _reconcile_one_chat(app, chat_id: int, now: int, window: int) -> bool:
     into a message that belonged to another mode (panel/discuss/etc.), and must not
     collide with a generation that is already running for the chat.
     """
+    # Recovery bypasses the handler chain (it calls _generate_and_send_response directly),
+    # so it must enforce the SAME fail-closed access check as auth_middleware — otherwise a
+    # stranded message from a now-unauthorized chat would be answered on restart, defeating
+    # the access control.
+    if not config.is_chat_allowed(chat_id):
+        logger.info(f"Recovery: skipping chat {chat_id} — not authorized under current access policy.")
+        return False
+
     # Look back a few messages so we can tell what mode the stranded message was in.
     history = await storage_manager.get_thread_history_with_pk(chat_id, limit=config.get_recovery_history_lookback())
     if not history:

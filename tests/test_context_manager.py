@@ -138,3 +138,39 @@ def test_repair_two_sweep_cascade():
     ]
     repaired = _repair_tool_call_pairs(history)
     assert repaired == []
+
+
+# ── max_input_tokens chat-budget clamp (P1.3) ───────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_max_input_tokens_clamps_below_model_limit():
+    """The chat budget cap lowers the effective input limit (panels, omitting it, keep
+    the larger model budget)."""
+    history = [{'role': 'user', 'content': ('w ' * 50)} for _ in range(20)]  # ~1000 words
+    big = ModelContextLimits(max_context_tokens=100000, max_completion_tokens=0, buffer_tokens=0)
+
+    with patch('utils.context_manager.get_model_context_limits', return_value=big), \
+         patch('utils.context_manager.count_tokens', side_effect=_wordcount):
+        # Without a cap: everything fits (100k budget).
+        full, info_full = await ensure_context_fits("q", history, "m", "p")
+        # With a tiny cap: must drop messages to fit ~120 words.
+        capped, info_capped = await ensure_context_fits("q", history, "m", "p", max_input_tokens=120)
+
+    assert len(full) == len(history)            # uncapped keeps all
+    assert len(capped) < len(history)           # capped truncates
+    assert info_capped is not None              # and reports adjustment
+
+
+@pytest.mark.asyncio
+async def test_force_truncate_shrinks_even_when_chat_cap_dominates():
+    """Review #4: with a small chat cap and a huge model limit, force_truncate (lower
+    safety_margin) must still reduce the effective budget — not be a no-op."""
+    history = [{'role': 'user', 'content': ('w ' * 50)} for _ in range(40)]  # ~2000 words
+    huge = ModelContextLimits(max_context_tokens=1000000, max_completion_tokens=0, buffer_tokens=0)
+    with patch('utils.context_manager.get_model_context_limits', return_value=huge), \
+         patch('utils.context_manager.count_tokens', side_effect=_wordcount):
+        full, _ = await ensure_context_fits("q", history, "m", "p", safety_margin=1.0, max_input_tokens=1000)
+        trunc, _ = await ensure_context_fits("q", history, "m", "p", safety_margin=0.5, max_input_tokens=1000)
+    # safety_margin 0.5 must keep strictly fewer messages than 1.0 (the cap is applied first,
+    # then the margin) — proving force_truncate is effective under the cap.
+    assert len(trunc) < len(full)

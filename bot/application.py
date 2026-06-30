@@ -33,11 +33,14 @@ def create_application(post_init_hook: PostInitFunc | None = None, post_shutdown
     )
 
     # Create the ApplicationBuilder instance with improved request configuration
+    # Cap concurrently-dispatched updates (was True = up to 256). On a small VM a
+    # post-restart backlog of queued updates could otherwise spawn hundreds of heavy
+    # generations at once and OOM the container.
     builder = (Application.builder()
                .token(config.TELEGRAM_BOT_TOKEN)
                .defaults(defaults)
                .request(request)
-               .concurrent_updates(True))
+               .concurrent_updates(config.get_max_concurrent_updates()))
 
     # Add the post_init hook if provided
     if post_init_hook:

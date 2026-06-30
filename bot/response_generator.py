@@ -19,6 +19,7 @@ from storage import storage_manager
 from bot.messaging import send_safe_message, finalize_draft, send_draft_message, send_plain_message
 from utils.context_manager import ensure_context_fits
 from utils.llm_utilities import is_error_response
+from utils.concurrency import run_capped
 from bot.settings import USER_SETTINGS
 
 logger = logging.getLogger(__name__)
@@ -187,8 +188,11 @@ async def _generate_and_send_response(update: Update, context: ContextTypes.DEFA
             except Exception as _cleanup_err:
                 logger.warning(f"(Chat {chat_id}) Failed to delete orphan user-message pk={_orphan_pk}: {_cleanup_err}")
 
+    # run_capped: hold one global generation permit for the whole turn (bounds peak
+    # RAM/CPU on small VMs). Safe to wrap here — this task body is non-recursive and the
+    # in-turn auto-search delegation generates inline (no nested permit acquisition).
     task = asyncio.create_task(
-        _generate_and_send_response_task(update, context, chat_id, user_id, prompt, current_thread_id, is_reroll, force_truncate, placeholder_message, skip_save, save_input)
+        run_capped(_generate_and_send_response_task(update, context, chat_id, user_id, prompt, current_thread_id, is_reroll, force_truncate, placeholder_message, skip_save, save_input))
     )
     context.chat_data[task_key] = task
     try:
@@ -348,7 +352,8 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
         history=processed_history,
         model=model_to_use,
         provider=session_provider,
-        safety_margin=safety_margin
+        safety_margin=safety_margin,
+        max_input_tokens=config.get_chat_max_context_tokens()  # small chat budget; panels unaffected
     )
 
     if context_info:
@@ -579,7 +584,11 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
                 logger.info(f"{log_prefix}Turn {turn}: XML tool call format detected, parsed {len(xml_calls)} call(s).")
 
         if is_tool_call and parsed_tool_calls:
-            logger.info(f"{log_prefix}Turn {turn}: Tool call request detected: {parsed_tool_calls}")
+            # Names at INFO; full arguments (may contain user content / queries) at DEBUG
+            # to avoid PII in retained logs of a multi-user bot.
+            _tc_names = [tc.get('function', {}).get('name') for tc in parsed_tool_calls]
+            logger.info(f"{log_prefix}Turn {turn}: {len(parsed_tool_calls)} tool call(s) requested: {_tc_names}")
+            logger.debug(f"{log_prefix}Turn {turn}: tool call args: {parsed_tool_calls}")
             
             # If we used an augmented user prompt, we must append it to context history
             if augmented_prompt:
@@ -716,7 +725,12 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
             USER_SETTINGS['auto_retry_on_error']['default']
         )
         if auto_retry:
-            logger.warning(f"{log_prefix}LLM error detected. Auto-retrying once...")
+            # Back off before retrying so we don't immediately re-hit a model that's
+            # overloaded/rate-limited (the provider services already retry transient 5xx
+            # internally; this guards the app-level retry against hammering).
+            backoff = config.get_server_error_backoff_seconds()
+            logger.warning(f"{log_prefix}LLM error detected. Backing off {backoff}s then auto-retrying once...")
+            await asyncio.sleep(backoff)
             return await _generate_llm_response(
                 context, chat_id, prompt, is_reroll,
                 force_truncate=force_truncate,
