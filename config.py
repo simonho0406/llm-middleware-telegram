@@ -131,11 +131,35 @@ def get_session_file_path():
     return _yaml_config.get("session_file_path", "data/sessions.json")
 
 def get_allowed_chat_ids():
+    """Allowed chat IDs, preferring .env (gitignored) over config.yaml.
+
+    Chat IDs are personal data — they identify you and link this (public) repo to your
+    Telegram account. So the canonical home is `.env` via ALLOWED_CHAT_IDS (a comma-
+    separated list), which is gitignored and never committed. config.yaml is only a
+    fallback for private deployments; do NOT put real IDs in it if this repo is public.
+    """
+    raw = get_env("ALLOWED_CHAT_IDS")
+    if raw:
+        ids = []
+        for part in raw.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                ids.append(int(part))
+            except ValueError:
+                logging.getLogger(__name__).warning(f"Ignoring non-integer ALLOWED_CHAT_IDS entry: {part!r}")
+        return ids or None
+    # Fallback: config.yaml (fine for a private repo / local dev).
     return _yaml_config.get("allowed_chat_ids", None)
 
 def get_open_access():
     """True only if the operator explicitly opts into a public, no-allowlist bot.
-    Default False ⇒ auth_middleware is fail-closed when no allowlist is set."""
+    Reads OPEN_ACCESS from .env first (true/1/yes/on), else config.yaml. Default False ⇒
+    auth_middleware is fail-closed when no allowlist is set."""
+    env = get_env("OPEN_ACCESS")
+    if env:
+        return env.strip().lower() in ("1", "true", "yes", "on")
     return bool(_yaml_config.get("open_access", False))
 
 def is_chat_allowed(chat_id) -> bool:

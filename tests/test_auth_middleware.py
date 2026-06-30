@@ -89,3 +89,34 @@ def test_is_chat_allowed_fail_closed():
          patch.object(config, "get_allowed_chat_ids", return_value=[123]):
         assert config.is_chat_allowed(123) is True          # allowlisted
         assert config.is_chat_allowed(999) is False         # not allowlisted
+
+
+# ── allowlist sourced from .env (gitignored), not committed config.yaml ──────────
+
+def test_allowed_chat_ids_from_env():
+    import config
+    with patch.dict(os.environ, {"ALLOWED_CHAT_IDS": "842443019, -100123 , bad, 55"}):
+        # env parsed to ints; non-integer entries ignored; quotes/whitespace tolerated
+        assert config.get_allowed_chat_ids() == [842443019, -100123, 55]
+
+
+def test_allowed_chat_ids_env_takes_precedence_over_yaml():
+    import config
+    with patch.dict(os.environ, {"ALLOWED_CHAT_IDS": "111"}), \
+         patch.dict(config._yaml_config, {"allowed_chat_ids": [999]}, clear=False):
+        assert config.get_allowed_chat_ids() == [111]
+
+
+def test_allowed_chat_ids_falls_back_to_yaml_when_env_unset():
+    import config
+    with patch.dict(os.environ, {}, clear=True), \
+         patch.dict(config._yaml_config, {"allowed_chat_ids": [777]}, clear=False):
+        assert config.get_allowed_chat_ids() == [777]
+
+
+@pytest.mark.parametrize("val,expected", [("true", True), ("1", True), ("yes", True),
+                                          ("on", True), ("false", False), ("", False)])
+def test_open_access_from_env(val, expected):
+    import config
+    with patch.dict(os.environ, {"OPEN_ACCESS": val}):
+        assert config.get_open_access() is expected
