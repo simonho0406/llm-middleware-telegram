@@ -73,3 +73,19 @@ async def test_no_chat_id_is_ignored_not_denied():
     with patch.object(middleware.config, "get_open_access", return_value=False), \
          patch.object(middleware.config, "get_allowed_chat_ids", return_value=None):
         await middleware.auth_middleware(u, MagicMock())  # must not raise
+
+
+# ── is_chat_allowed: single source of truth shared with recovery (review #8) ─────
+
+def test_is_chat_allowed_fail_closed():
+    import config
+    with patch.object(config, "get_open_access", return_value=False), \
+         patch.object(config, "get_allowed_chat_ids", return_value=None):
+        assert config.is_chat_allowed(123) is False        # unconfigured → deny
+    with patch.object(config, "get_open_access", return_value=True), \
+         patch.object(config, "get_allowed_chat_ids", return_value=None):
+        assert config.is_chat_allowed(123) is True          # open_access → allow
+    with patch.object(config, "get_open_access", return_value=False), \
+         patch.object(config, "get_allowed_chat_ids", return_value=[123]):
+        assert config.is_chat_allowed(123) is True          # allowlisted
+        assert config.is_chat_allowed(999) is False         # not allowlisted

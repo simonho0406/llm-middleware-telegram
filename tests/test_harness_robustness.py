@@ -214,6 +214,7 @@ async def test_recovery_resumes_recent_stranded_message():
     with patch.object(recovery, 'storage_manager', sm), \
          patch.object(recovery.config, 'get_recovery_enabled', return_value=True), \
          patch.object(recovery.config, 'get_recovery_window_seconds', return_value=3600), \
+         patch.object(recovery.config, 'is_chat_allowed', return_value=True), \
          patch('bot.messaging.send_plain_message', new_callable=AsyncMock) as spm, \
          patch('telegram.ext.CallbackContext', MagicMock()), \
          patch('bot.response_generator._generate_and_send_response', new_callable=AsyncMock) as gen:
@@ -239,6 +240,7 @@ async def test_recovery_skips_panel_followup():
     with patch.object(recovery, 'storage_manager', sm), \
          patch.object(recovery.config, 'get_recovery_enabled', return_value=True), \
          patch.object(recovery.config, 'get_recovery_window_seconds', return_value=3600), \
+         patch.object(recovery.config, 'is_chat_allowed', return_value=True), \
          patch('bot.messaging.send_plain_message', new_callable=AsyncMock), \
          patch('bot.response_generator._generate_and_send_response', new_callable=AsyncMock) as gen:
         resumed = await recovery.reconcile_unanswered_messages(MagicMock())
@@ -259,6 +261,7 @@ async def test_recovery_skips_when_live_task_running():
     with patch.object(recovery, 'storage_manager', sm), \
          patch.object(recovery.config, 'get_recovery_enabled', return_value=True), \
          patch.object(recovery.config, 'get_recovery_window_seconds', return_value=3600), \
+         patch.object(recovery.config, 'is_chat_allowed', return_value=True), \
          patch('bot.messaging.send_plain_message', new_callable=AsyncMock), \
          patch('bot.response_generator._generate_and_send_response', new_callable=AsyncMock) as gen:
         resumed = await recovery.reconcile_unanswered_messages(app)
@@ -274,6 +277,7 @@ async def test_recovery_ignores_old_message():
     with patch.object(recovery, 'storage_manager', sm), \
          patch.object(recovery.config, 'get_recovery_enabled', return_value=True), \
          patch.object(recovery.config, 'get_recovery_window_seconds', return_value=3600), \
+         patch.object(recovery.config, 'is_chat_allowed', return_value=True), \
          patch('bot.messaging.send_plain_message', new_callable=AsyncMock), \
          patch('bot.response_generator._generate_and_send_response', new_callable=AsyncMock) as gen:
         resumed = await recovery.reconcile_unanswered_messages(MagicMock())
@@ -290,6 +294,7 @@ async def test_recovery_skips_answered_thread():
     with patch.object(recovery, 'storage_manager', sm), \
          patch.object(recovery.config, 'get_recovery_enabled', return_value=True), \
          patch.object(recovery.config, 'get_recovery_window_seconds', return_value=3600), \
+         patch.object(recovery.config, 'is_chat_allowed', return_value=True), \
          patch('bot.response_generator._generate_and_send_response', new_callable=AsyncMock) as gen:
         resumed = await recovery.reconcile_unanswered_messages(MagicMock())
 
@@ -306,3 +311,21 @@ async def test_recovery_disabled_noop():
         resumed = await recovery.reconcile_unanswered_messages(MagicMock())
     assert resumed == 0
     gen.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_recovery_skips_unauthorized_chat():
+    """Review #8: recovery bypasses the handler chain, so it must enforce the same
+    fail-closed access check — a stranded message from a now-unauthorized chat must NOT
+    be answered on restart."""
+    now = int(time.time())
+    sm = _recovery_storage([{'id': 9, 'role': 'user', 'content': 'do x', 'timestamp': now - 60}])
+    with patch.object(recovery, 'storage_manager', sm), \
+         patch.object(recovery.config, 'get_recovery_enabled', return_value=True), \
+         patch.object(recovery.config, 'get_recovery_window_seconds', return_value=3600), \
+         patch.object(recovery.config, 'is_chat_allowed', return_value=False), \
+         patch('bot.messaging.send_plain_message', new_callable=AsyncMock), \
+         patch('bot.response_generator._generate_and_send_response', new_callable=AsyncMock) as gen:
+        resumed = await recovery.reconcile_unanswered_messages(MagicMock())
+    assert resumed == 0
+    gen.assert_not_awaited()  # unauthorized chat never gets a generated reply

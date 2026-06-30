@@ -70,19 +70,24 @@ try:
 except ImportError:
     _TIKTOKEN_ENCODER = None
 
-@lru_cache(maxsize=2048)
+# Only cache SMALL messages. The O(N²) cost comes from re-encoding the many small history
+# messages every turn — those benefit from caching. Large blobs (e.g. distilled tool
+# results) are few and would bloat the cache (the key retains the full string), counter to
+# the small-VM memory goal, so they're encoded directly each time.
+_CACHE_MAX_TEXT_LEN = 8192  # chars
+
+@lru_cache(maxsize=1024)
 def _cached_token_len(text: str) -> int:
-    """Encode once per unique message and cache the length. ensure_context_fits re-counts
-    the whole history every turn; without this the cost is O(N²) over a conversation (turn
-    N re-encodes all N messages). With it, each message is encoded once → O(N), and the
-    repeated per-turn counting becomes cheap dict lookups. Bounded at 2048 entries."""
+    """Encode once per unique (small) message and cache the length. Bound: 1024 × ~8KB."""
     return len(_TIKTOKEN_ENCODER.encode(text))
 
 def count_tokens(text: str) -> int:
-    """Token count with per-message memoization (see _cached_token_len)."""
+    """Token count with per-message memoization for small messages (see _cached_token_len)."""
     if _TIKTOKEN_ENCODER:
         try:
-            return _cached_token_len(text)
+            if isinstance(text, str) and len(text) <= _CACHE_MAX_TEXT_LEN:
+                return _cached_token_len(text)
+            return len(_TIKTOKEN_ENCODER.encode(text))
         except Exception:
              # Fallback if encoding fails for some reason
              pass
@@ -188,13 +193,16 @@ async def ensure_context_fits(
     limits = get_model_context_limits(model, provider)
     prompt_tokens = count_tokens(prompt)
 
-    # Calculate effective limit with safety margin
-    # We apply the margin to the total input limit to effectively reserve more space
-    effective_limit_tokens = int(limits.effective_input_limit * safety_margin)
-
-    # Caller-supplied hard cap (chat budget). Never raises the model limit, only lowers it.
+    # Start from the model's input limit, apply the caller's hard cap (chat budget) FIRST,
+    # THEN the safety margin — so force_truncate (which lowers safety_margin) actually
+    # shrinks the budget even when the small chat cap dominates the large model limit.
+    # (If the margin were applied before the min, min(0.75*1M, 28k) == min(1.0*1M, 28k),
+    # making force_truncate a no-op for long-context models and defeating the empty-response
+    # retry.)
+    effective_input_limit = limits.effective_input_limit
     if max_input_tokens is not None:
-        effective_limit_tokens = min(effective_limit_tokens, max_input_tokens)
+        effective_input_limit = min(effective_input_limit, max_input_tokens)
+    effective_limit_tokens = int(effective_input_limit * safety_margin)
     
     # Separate and protect system messages from truncation
     system_messages = [msg for msg in history if msg.get("role") == "system"]

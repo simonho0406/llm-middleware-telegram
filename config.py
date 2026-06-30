@@ -138,6 +138,15 @@ def get_open_access():
     Default False ⇒ auth_middleware is fail-closed when no allowlist is set."""
     return bool(_yaml_config.get("open_access", False))
 
+def is_chat_allowed(chat_id) -> bool:
+    """Single source of truth for access control (fail-closed). A chat is allowed only if
+    open_access is set OR its id is in allowed_chat_ids. Used by auth_middleware AND by the
+    startup recovery path (which bypasses the handler chain) so neither can diverge."""
+    if get_open_access():
+        return True
+    allowed = get_allowed_chat_ids()
+    return bool(allowed) and chat_id in allowed
+
 def get_max_concurrent_updates():
     """Cap on PTB's concurrently-dispatched update tasks. Bounds a post-restart backlog
     burst on small VMs (PTB's default of True allows 256). Keep small."""

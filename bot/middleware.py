@@ -32,14 +32,13 @@ async def auth_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if chat_id is None:
         return  # No chat to authorize (e.g. an inline/non-chat update).
 
-    # Explicit opt-in to open access.
-    if config.get_open_access():
+    # config.is_chat_allowed is the single source of truth (shared with the recovery path).
+    if config.is_chat_allowed(chat_id):
         return
 
-    allowed_chat_ids = config.get_allowed_chat_ids()
-
-    # Deny-by-default when nothing is configured, and tell the operator how to enable (once).
-    if not allowed_chat_ids:
+    # Denied. Distinguish "nothing configured" (operator action needed, log once) from a
+    # genuine unauthorized attempt (throttled).
+    if not config.get_open_access() and not config.get_allowed_chat_ids():
         if not _misconfig_warned:
             _misconfig_warned = True
             logger.warning(
@@ -47,11 +46,9 @@ async def auth_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "`open_access` is not true. Set `allowed_chat_ids` (recommended) or "
                 "`open_access: true` in config.yaml to enable the bot."
             )
-        raise ApplicationHandlerStop()
-
-    if chat_id not in allowed_chat_ids:
+    else:
         now = time.monotonic()
         if now - _last_denied_log_ts > _DENIED_LOG_INTERVAL_S:
             _last_denied_log_ts = now
             logger.warning(f"Unauthorized access attempt from user_id {user_id} in chat {chat_id}")
-        raise ApplicationHandlerStop()
+    raise ApplicationHandlerStop()

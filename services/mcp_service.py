@@ -3,6 +3,7 @@ import asyncio
 import os
 from typing import Dict, List, Any
 import contextlib
+from config import get_env  # imported by name: the connect_all loop var `config` shadows the module
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +46,14 @@ class McpClientService:
                 _base_env_keys = {"PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "TMP", "TEMP",
                                   "NODE_PATH", "UV_PYTHON", "PYTHONPATH"}
                 _pass_env_keys = set(config.get("pass_env", []))
-                env = {k: v for k, v in os.environ.items()
-                       if k in _base_env_keys or k in _pass_env_keys}
+                # Route through config.get_env so forwarded secrets (e.g. NOTION_TOKEN,
+                # TAVILY_API_KEY in pass_env) get the same quote/whitespace stripping the bot
+                # applies to its own keys — otherwise a quoted .env would corrupt the MCP
+                # server's auth even though the bot's own auth works.
+                env = {}
+                for _k in (_base_env_keys | _pass_env_keys):
+                    if _k in os.environ:
+                        env[_k] = get_env(_k)
                 server_params = StdioServerParameters(
                     command=command,
                     args=args,
