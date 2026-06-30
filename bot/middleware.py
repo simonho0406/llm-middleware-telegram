@@ -42,9 +42,9 @@ async def auth_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not _misconfig_warned:
             _misconfig_warned = True
             logger.warning(
-                "Access denied for ALL chats: no `allowed_chat_ids` configured and "
-                "`open_access` is not true. Set `allowed_chat_ids` (recommended) or "
-                "`open_access: true` in config.yaml to enable the bot."
+                "Access denied for ALL chats: no allowlist configured. In your .env set "
+                "ALLOWED_CHAT_IDS=<your_chat_id> (comma-separated) — or OPEN_ACCESS=true for "
+                "a public bot — then `docker compose up -d` to recreate the container."
             )
     else:
         now = time.monotonic()
