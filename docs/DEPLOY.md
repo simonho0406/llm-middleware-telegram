@@ -3,6 +3,34 @@
 Production servers **pull a prebuilt image** from GHCR and run it. They must **never build**
 (the build OOM-locks a small VM) and must run **exactly one container per bot token**.
 
+## Pre-flight (run on your dev box BEFORE pushing)
+
+```bash
+./scripts/preflight.sh
+```
+
+CI only builds the image — it runs no tests and can't hold API keys, so it cannot catch the
+failures that actually bite in production (they live in the gap between the dev and prod
+*environments*: uid/permissions, the container's env-var parser, seeded state, load/OOM,
+adversarial model output). Pre-flight closes that gap by running the **real production image
+under production conditions** on your machine — non-root, `768m`/`1.5cpu`, mounted config,
+**real API keys** — and prints a `GO` / `NO-GO` verdict. It:
+
+- **1a** mounts `./data` read-only → asserts the container fails **loud** at boot (not a
+  silent per-command crash) — the readonly-DB class.
+- **1b** feeds a quoted/CRLF `.env` → asserts keys still authenticate — the env-parsing class.
+- **2** runs `e2e_qa` + `panel_qa` with real providers inside the image — **you judge answer
+  quality** from the printed output.
+- **3** fires concurrent generations under `--memory=768m` and checks `OOMKilled` + crashes —
+  the "don't spike load and break the VM" check.
+- **0** (optional) boots live on a **spare** token (set `PREFLIGHT_BOT_TOKEN`) to exercise the
+  real polling/auth/startup path. Never use Azure/Oracle's token here — it would Conflict.
+- **4** sweeps all captured logs for known error signatures and prints the verdict.
+
+Everything except check 0 runs as one-off `docker run` (uses provider keys, **never polls
+Telegram**), so it can't conflict with the live bots. `NO-GO` (non-zero exit) means don't push.
+Fast pass for iteration: `PREFLIGHT_SKIP_PANEL=1 ./scripts/preflight.sh` (skips the slow panel).
+
 ## First-time setup (per server)
 
 ```bash
