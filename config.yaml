@@ -62,8 +62,20 @@ session_file_path: "data/sessions.json"
 REQUEST_TIMEOUT_SECONDS: 180
 # Specific timeout for local Ollama to handle slow CPU inference
 OLLAMA_REQUEST_TIMEOUT_SECONDS: 1200
+# Global cap applied on top of each model's own context window (see MODEL_CONTEXT_LIMITS
+# in utils/context_manager.py): effective budget = min(model's physical limit, this value).
+# This is THE lever for controlling context size/cost — capability-driven and uniform
+# across chat + panels, so it scales automatically as models gain larger windows.
 default_max_context_tokens: 128000
 context_token_output_buffer: 20000
+
+# Optional EXTRA cap for chat only, on top of the above (panels always use the full
+# capability-driven budget). Leave unset/commented — chat then scales with model capability
+# just like panels. Only set this if you deliberately want chat tighter than panels for
+# cost/latency control; a heavy user's long history will be truncated harder as this value
+# shrinks. (A previous hardcoded value of 28000 caused unacceptable history loss — see
+# issue tracker.)
+# chat_max_context_tokens: 60000
 
 # --- Custom OpenAI-Compatible Providers ---
 #
@@ -123,7 +135,13 @@ expert_panel:
   plan_parse_attempts: 3             # orchestrator plan JSON parse retries before giving up
   dossier_max_tokens: 30000          # cap on the cumulative grounding dossier
   workspace_max_tokens: 12000        # cap on aggregate workspace pre-query context
-  quality_gate_summary_chars: 1500   # chars of tool results summarised into the quality-gate audit trail
+  quality_gate_parse_attempts: 3     # quality-gate JSON parse retries before giving up on a round
+                                       # (previously a single malformed response aborted the whole
+                                       # refinement loop — see quality_gate_context_tokens below too)
+  quality_gate_context_tokens: 4000  # TOKEN budget (not chars) of tool results the quality gate sees
+                                       # per round when judging groundedness in later rounds. Was a
+                                       # 1500-CHAR cap (~375 tokens) that starved the gate and caused
+                                       # it to under-score genuinely grounded answers.
 
   # Orchestrator (Project Manager) - Keep original working configuration
   orchestrator:
@@ -134,23 +152,27 @@ expert_panel:
     fallback_model: "google/gemma-4-31b-it"
     request_timeout_seconds: 600
 
-  # Expert Panel Roles - Restore original working models
+  # Expert Panel Roles.
+  # These defaults are kept in sync with the operator's live, hand-tuned per-chat panel
+  # config (the models actually in use), so a fresh chat gets current, working models
+  # instead of stale ones. Previously the Proposer defaulted to moonshotai/kimi-k2-thinking,
+  # which reached end-of-life (provider returns 410 Gone) and forced a fallback every panel.
   roles:
     Proposer:
       provider: "nvidia"
-      model: "moonshotai/kimi-k2-thinking"
+      model: "moonshotai/kimi-k2.6"
       fallback_provider: "nvidia"
       fallback_model: "openai/gpt-oss-120b"
       request_timeout_seconds: 600
 
     Critic:
       provider: "nvidia"
-      model: "minimaxai/minimax-m3"
+      model: "z-ai/glm-5.1"
       request_timeout_seconds: 600
 
     Refiner:
-      provider: "openrouter"
-      model: "qwen/qwen3-coder:free"
+      provider: "nvidia"
+      model: "deepseek-ai/deepseek-v4-flash"
       request_timeout_seconds: 600
 
 # --- Web Search Configuration ---
@@ -226,6 +248,10 @@ mcp_servers:
     transport: "stdio"
     panel_execution: true    # Read-only history queries permitted; write_query/create_table blocked by hooks
     pass_env: []             # sqlite-tools needs no API keys
+    # Positive allowlist (default-deny). Only read tools are exposed/executable; the write
+    # tools (write_query/create_table/append_insight) are additionally blocked by hooks and
+    # by the mode=ro DB URI, but listing them here means they can never even be attempted.
+    allowed_tools: ["read_query", "list_tables", "describe_table"]
 
   - name: "notion-workspace"
     command: "notion-mcp-server"   # npm -g @notionhq/notion-mcp-server@2.4.1; was: npx -y @notionhq/notion-mcp-server
@@ -233,6 +259,9 @@ mcp_servers:
     transport: "stdio"
     panel_execution: true    # Knowledge lookup allowed in panel Quality Gate
     pass_env: ["NOTION_TOKEN"]  # @notionhq/notion-mcp-server reads NOTION_TOKEN only (not NOTION_API_KEY / OPENAI_API_KEY)
+    # No allowed_tools list here: the Notion integration itself is provisioned READ-ONLY
+    # (capability set in Notion's own settings), so its write tools fail server-side. If you
+    # ever grant the integration write access, add an allowed_tools read allowlist here.
 
   - name: "tavily-search"
     command: "tavily-mcp"   # npm -g tavily-mcp@0.2.20; was: npx -y tavily-mcp
@@ -240,5 +269,13 @@ mcp_servers:
     transport: "stdio"
     panel_execution: true    # Web search allowed in panel Quality Gate
     pass_env: ["TAVILY_API_KEY"]
+    # No allowed_tools list: all tavily tools (search + extract/crawl/map/research) are kept
+    # intentionally — extract/crawl support the legitimate "read this link for me" chat flow.
+    # These fetch arbitrary URLs, so indirect prompt injection in retrieved content is a
+    # theoretical exfiltration channel; the mitigation is the untrusted-data framing around
+    # tool results (see bot/response_generator.py / panel_workflow.py and the system prompt),
+    # which instructs the model to treat tool output as data, never as instructions. If you
+    # want to close the channel at the cost of "read this link", add:
+    #   allowed_tools: ["tavily_search"]
 
 

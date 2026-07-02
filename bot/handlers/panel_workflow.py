@@ -30,7 +30,7 @@ from utils.llm_utilities import (
     format_tools_for_prompt,
 )
 from utils.context_manager import ensure_context_fits, get_model_context_limits, truncate_text_to_tokens
-from utils.tool_distiller import distill_tool_result
+from utils.tool_distiller import distill_tool_result, frame_untrusted_tool_output
 from utils.service_registry import touch_mcp_last_used, get_or_init_mcp_service, get_or_init_skill_service
 
 logger = logging.getLogger(__name__)
@@ -208,8 +208,9 @@ async def _execute_panel_tool_calls(
 
         if cache_key in tool_result_cache:
             logger.info(f"Panel tool '{tool_name}' served from cache (identical call already executed this turn).")
+            # Frame the cached (clean) external content; our own [Note:...] stays OUTSIDE the frame.
             result = (
-                tool_result_cache[cache_key]
+                frame_untrusted_tool_output(tool_result_cache[cache_key])
                 + "\n[Note: identical call already executed earlier this turn — result is unchanged. "
                   "To get different content, target a more specific sub-resource (a particular "
                   "heading/block_id or a narrower query) instead of re-fetching the same item.]"
@@ -258,6 +259,11 @@ async def _execute_panel_tool_calls(
                 # Cache only genuine executions so denials/errors can be retried legitimately.
                 if not result.startswith("[Denied") and not is_error_response(result):
                     tool_result_cache[cache_key] = result
+                # Untrusted-data framing (indirect prompt-injection defense): this result
+                # flows into the grounding dossier and the Quality Gate's history, so frame
+                # it as data-not-instructions before any panel role reads it. Applied AFTER
+                # caching so the cache holds the clean distilled text (re-framed on reuse).
+                result = frame_untrusted_tool_output(result)
 
             parts.append(f"Tool: {tool_name}\nResult: {result}")
         except Exception as tool_exc:
@@ -284,7 +290,10 @@ async def _run_refinement_cycle(
     """
     # Extract configuration from user's panel_config
     quality_threshold = panel_config.get('quality_threshold', 85)
-    max_iterations = panel_config.get('max_refinement_iterations', 3)
+    # Fallback (4) matches config.yaml's shipped value — a stale fallback of 3 here would
+    # silently reduce refinement rounds if the yaml key were ever dropped (same class of
+    # trap as the context-budget fallbacks fixed elsewhere in this pass).
+    max_iterations = panel_config.get('max_refinement_iterations', 4)
     role_configs = panel_config.get('roles', {})
 
     # Setup role configurations
@@ -486,21 +495,66 @@ async def _run_refinement_cycle(
             available_tools=quality_gate_tools_text
         )
 
-        quality_llm_result = await get_robust_llm_response(
-            provider_name=orchestrator_config.get('provider'),
-            model=orchestrator_config.get('model'),
-            prompt=quality_gate_prompt,
-            history=quality_gate_history,
-            role_name='Master Orchestrator',
-            request_timeout=orchestrator_timeout,
-            fallback_provider=fallback_provider,
-            fallback_model=fallback_model
-        )
-        quality_response = quality_llm_result['response']
-        quality_retries = quality_llm_result['retries']
-        quality_fallback_used = quality_llm_result['fallback_used']
+        # Retry-with-repair for the quality-gate JSON parse (mirrors the orchestrator plan
+        # parser above). Previously a SINGLE malformed JSON response set quality_score=-1
+        # and broke the entire refinement loop, discarding all remaining rounds — a
+        # production-surfaced quality regression. Now a bad parse re-prompts the model
+        # with an explicit repair instruction before giving up; only persistent failure
+        # across all attempts falls back to the old abort-with-best-so-far behavior.
+        _qg_attempts = config.get_panel_quality_gate_parse_attempts()
+        _qg_prompt = quality_gate_prompt
+        _qg_last_err = ""
+        quality_assessment = None
+        requested_tool_calls = []
+        quality_response = ""
+        quality_retries = 0
+        quality_fallback_used = False
 
-        # Compact audit entry — score + instructions only, no full response text
+        for _qg_attempt in range(1, _qg_attempts + 1):
+            quality_llm_result = await get_robust_llm_response(
+                provider_name=orchestrator_config.get('provider'),
+                model=orchestrator_config.get('model'),
+                prompt=_qg_prompt,
+                history=quality_gate_history,
+                role_name='Master Orchestrator',
+                request_timeout=orchestrator_timeout,
+                fallback_provider=fallback_provider,
+                fallback_model=fallback_model
+            )
+            quality_response = quality_llm_result['response']
+            quality_retries = quality_llm_result['retries']
+            quality_fallback_used = quality_llm_result['fallback_used']
+
+            if quality_llm_result['is_error']:
+                _qg_last_err = "LLM call error"
+                logger.warning(f"Quality gate attempt {_qg_attempt}/{_qg_attempts}: {_qg_last_err}.")
+            else:
+                # extract_json_object does string-aware brace matching (handles braces
+                # inside quoted values correctly, unlike a naive find('{')/rfind('}')).
+                json_str = extract_json_object(quality_response)
+                if not json_str:
+                    _qg_last_err = "no JSON object found in response"
+                    logger.warning(f"Quality gate attempt {_qg_attempt}/{_qg_attempts}: {_qg_last_err}.")
+                else:
+                    try:
+                        quality_assessment = json.loads(json_str)
+                        break  # parsed successfully
+                    except json.JSONDecodeError as e:
+                        _qg_last_err = f"JSON parse error: {e}"
+                        logger.warning(f"Quality gate attempt {_qg_attempt}/{_qg_attempts}: {_qg_last_err}. Extracted: {json_str[:200]}")
+
+            if _qg_attempt < _qg_attempts:
+                _qg_prompt = (
+                    quality_gate_prompt
+                    + "\n\n--- IMPORTANT: YOUR PREVIOUS RESPONSE WAS INVALID ---\n"
+                    + f"Problem: {_qg_last_err}\n"
+                    + "Return ONLY a single valid JSON object — no prose, no markdown code fences. "
+                    + "Escape every double-quote and newline inside string values."
+                )
+
+        # Compact audit entry — score + instructions only, no full response text. Only the
+        # final attempt is recorded (intermediate malformed attempts aren't fed back in, to
+        # avoid bloating quality_gate_history with throwaway repair exchanges).
         quality_gate_history.append({"role": "user", "content": f"[Round {iteration} assessment request]"})
         quality_gate_history.append({"role": "assistant", "content": quality_response})
 
@@ -508,63 +562,52 @@ async def _run_refinement_cycle(
         panel_results['Quality_Gate'] = {
             'provider': orchestrator_config.get('provider'),
             'model': orchestrator_config.get('model'),
-            'status': 'Success' if not quality_llm_result['is_error'] else 'Failure',
+            'status': 'Success' if quality_assessment is not None else 'Failure',
             'response': quality_response,
             'retries': quality_retries,
             'fallback_used': quality_fallback_used
         }
 
-        # Parse quality assessment using robust JSON extraction
-        requested_tool_calls = []
-        try:
-            # Find the first '{' and the last '}' to extract the JSON block.
-            # This is more robust against conversational text from the LLM.
-            start_index = quality_response.find('{')
-            end_index = quality_response.rfind('}')
-
-            if start_index != -1 and end_index != -1 and end_index > start_index:
-                json_str = quality_response[start_index:end_index+1]
-                quality_assessment = json.loads(json_str)
-
-                # Rubric schema: compute quality_score from sub-criteria (deterministic aggregation).
-                # Fall back to legacy holistic quality_score field for backward compatibility.
-                if 'scores' in quality_assessment and isinstance(quality_assessment['scores'], dict):
-                    scores = quality_assessment['scores']
-                    numeric_scores = {}
-                    for k, v in scores.items():
-                        if isinstance(v, (int, float)):
-                            numeric_scores[k] = max(0, int(v))
-                        else:
-                            logger.warning(
-                                f"Quality Gate returned non-numeric score for criterion '{k}': {v!r}. "
-                                f"Treating as 0. Model may not be following the rubric schema."
-                            )
-                            numeric_scores[k] = 0
-                    quality_score = sum(numeric_scores.values())
-                    logger.info(
-                        f"Master quality scores — "
-                        f"grounding:{numeric_scores.get('factual_grounding', 0)} "
-                        f"completeness:{numeric_scores.get('completeness', 0)} "
-                        f"accuracy:{numeric_scores.get('accuracy', 0)} "
-                        f"clarity:{numeric_scores.get('clarity', 0)} "
-                        f"→ total:{quality_score}/{quality_threshold}"
-                    )
-                else:
-                    quality_score = quality_assessment.get('quality_score', 0)
-                    logger.info(f"Master quality assessment - Score: {quality_score}, Threshold: {quality_threshold}")
-
-                # Use `or ''` rather than a default in .get() so that explicit JSON null
-                # is also normalised to empty string (dict.get default only covers missing keys).
-                refinement_instructions = quality_assessment.get('refinement_instructions') or ''
-                requested_tool_calls = quality_assessment.get('tool_calls', [])
-                if not isinstance(requested_tool_calls, list):
-                    requested_tool_calls = []
-                logger.info(f"Tool calls requested: {len(requested_tool_calls)}")
+        if quality_assessment is not None:
+            # Rubric schema: compute quality_score from sub-criteria (deterministic aggregation).
+            # Fall back to legacy holistic quality_score field for backward compatibility.
+            if 'scores' in quality_assessment and isinstance(quality_assessment['scores'], dict):
+                scores = quality_assessment['scores']
+                numeric_scores = {}
+                for k, v in scores.items():
+                    if isinstance(v, (int, float)):
+                        numeric_scores[k] = max(0, int(v))
+                    else:
+                        logger.warning(
+                            f"Quality Gate returned non-numeric score for criterion '{k}': {v!r}. "
+                            f"Treating as 0. Model may not be following the rubric schema."
+                        )
+                        numeric_scores[k] = 0
+                quality_score = sum(numeric_scores.values())
+                logger.info(
+                    f"Master quality scores — "
+                    f"grounding:{numeric_scores.get('factual_grounding', 0)} "
+                    f"completeness:{numeric_scores.get('completeness', 0)} "
+                    f"accuracy:{numeric_scores.get('accuracy', 0)} "
+                    f"clarity:{numeric_scores.get('clarity', 0)} "
+                    f"→ total:{quality_score}/{quality_threshold}"
+                )
             else:
-                raise ValueError("No valid JSON object found in the quality gate response.")
+                quality_score = quality_assessment.get('quality_score', 0)
+                logger.info(f"Master quality assessment - Score: {quality_score}, Threshold: {quality_threshold}")
 
-        except (json.JSONDecodeError, ValueError) as e:
-            logger.warning(f"Quality gate parsing failed ({e}). Breaking refinement loop with best response so far.")
+            # Use `or ''` rather than a default in .get() so that explicit JSON null
+            # is also normalised to empty string (dict.get default only covers missing keys).
+            refinement_instructions = quality_assessment.get('refinement_instructions') or ''
+            requested_tool_calls = quality_assessment.get('tool_calls', [])
+            if not isinstance(requested_tool_calls, list):
+                requested_tool_calls = []
+            logger.info(f"Tool calls requested: {len(requested_tool_calls)}")
+        else:
+            # Exhausted all repair attempts — genuinely persistent model failure, not a
+            # one-off hiccup. Preserve the original safety-net behavior: stop refining and
+            # use the best response seen so far, rather than looping forever on a broken model.
+            logger.error(f"Quality gate parsing failed after {_qg_attempts} attempts ({_qg_last_err}). Breaking refinement loop with best response so far.")
             logger.debug(f"Problematic quality response (first 500 chars): {quality_response[:500]}")
             quality_score = -1
             break
@@ -618,11 +661,15 @@ async def _run_refinement_cycle(
                     grounding_dossier = truncate_text_to_tokens(grounding_dossier, _dossier_token_budget)
                     # Feed compact results into quality_gate_history so the next Quality Gate
                     # invocation knows which queries succeeded or failed (e.g. "no such table").
-                    _qg_chars = config.get_panel_quality_gate_summary_chars()
-                    _qg_summary = tool_results_text[:_qg_chars] + ("\n[truncated]" if len(tool_results_text) > _qg_chars else "")
+                    # Token-based (not a raw char slice) so the gate actually sees enough of the
+                    # retrieved content to judge groundedness — a prior 1500-CHAR cap (~375
+                    # tokens) starved the gate and caused it to under-score grounded answers.
+                    _qg_token_budget = config.get_panel_quality_gate_context_tokens()
+                    _qg_summary = truncate_text_to_tokens(tool_results_text, _qg_token_budget)
+                    _qg_truncated = len(_qg_summary) < len(tool_results_text)
                     quality_gate_history.append({
                         "role": "user",
-                        "content": f"[Tool execution results from Round {iteration}]:\n{_qg_summary}"
+                        "content": f"[Tool execution results from Round {iteration}]:\n{_qg_summary}" + ("\n[truncated]" if _qg_truncated else "")
                     })
 
             try:
@@ -715,7 +762,8 @@ async def _run_panel_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         # Load configuration needed for the workflow
         quality_threshold = panel_config.get('quality_threshold', 85)
-        max_iterations = panel_config.get('max_refinement_iterations', 3)
+        # Fallback (4) matches config.yaml's shipped value — see the identical note above.
+        max_iterations = panel_config.get('max_refinement_iterations', 4)
 
         orchestrator_config = panel_config.get('orchestrator', {})
         orchestrator_provider = orchestrator_config.get('provider')
@@ -1168,7 +1216,10 @@ async def _run_panel_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     # --- 2. Master & Apprentice Architecture: Iterative Quality Loop ---
     quality_threshold = panel_config.get('quality_threshold', 85)
-    max_iterations = panel_config.get('max_refinement_iterations', 3)
+    # Fallback (4) matches config.yaml's shipped value — a stale fallback of 3 here would
+    # silently reduce refinement rounds if the yaml key were ever dropped (same class of
+    # trap as the context-budget fallbacks fixed elsewhere in this pass).
+    max_iterations = panel_config.get('max_refinement_iterations', 4)
     iteration = 1
     quality_score = 0  # Initialize quality score
     proposer_response = ""

@@ -209,10 +209,11 @@ async def run_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
         placeholder = await send_safe_message(context, update, "Starting discussion...", is_edit=True)
 
-        # Fetch context history (Archival: Read)
-        # We limit to 500 to provide context without blowing up the window immediately
+        # Fetch context history (Archival: Read). No explicit limit — uses the config-driven
+        # fetch limit (config.get_thread_history_fetch_limit); the real capability-aware
+        # trim happens later via token-based truncation, not this DB pre-filter.
         try:
-            context_history = await storage_manager.get_thread_history(chat_id, limit=500)
+            context_history = await storage_manager.get_thread_history(chat_id)
         except Exception as e:
             logger.exception(f"{log_prefix} Failed to fetch thread history: {e}")
             context_history = []

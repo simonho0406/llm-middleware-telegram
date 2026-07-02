@@ -188,11 +188,21 @@ def get_server_error_backoff_seconds():
     return float(_yaml_config.get("server_error_backoff_seconds", 2.0))
 
 def get_chat_max_context_tokens():
-    """Input-token budget for a normal CHAT turn (separate from the large panel budget).
-    The previous ~108k effective budget shipped huge histories every turn, the dominant
-    driver of free-tier 429s, latency, and tiktoken CPU. Default 28k keeps recent context
-    while cutting tokens ~4x. Panels are unaffected (they don't pass this cap)."""
-    return int(_yaml_config.get("chat_max_context_tokens", 28000))
+    """Optional EXTRA input-token cap for chat, applied on top of the model-capability
+    budget (get_model_context_limits / default_max_context_tokens). Returns None by
+    default — i.e. chat uses the same capability-driven budget as panels, so it scales
+    automatically as models gain larger context windows.
+
+    A prior version hardcoded this to 28000 (not even present in config.yaml) to cut the
+    429s/latency/CPU from shipping ~108k tokens every turn. In production this instead cut
+    a 500-message thread down to ~33 messages — an unacceptable quality loss for heavy
+    users, and a magic number that fights the model's own capability rather than scaling
+    with it. Prefer tuning `default_max_context_tokens` (applies uniformly, capability-
+    aware) over reintroducing a chat-only override; this getter remains only as an escape
+    hatch for an operator who explicitly wants a tighter chat budget than panels.
+    """
+    val = _yaml_config.get("chat_max_context_tokens")
+    return int(val) if val is not None else None
 
 def get_request_timeout_seconds():
     return _yaml_config.get("REQUEST_TIMEOUT_SECONDS", 180)
@@ -202,10 +212,27 @@ def get_ollama_request_timeout_seconds():
     return _yaml_config.get("OLLAMA_REQUEST_TIMEOUT_SECONDS", 1200)
 
 def get_default_max_context_tokens():
-    return _yaml_config.get("default_max_context_tokens", 3800)
+    # NOTE: this fallback only applies if `default_max_context_tokens` is absent from
+    # config.yaml (it is present there, currently 128000). A previous fallback of 3800 was
+    # a silent trap: if the yaml key were ever dropped, chat context would collapse ~34x
+    # with no error, only a mysterious quality regression. 128000 matches the shipped
+    # config so a missing key degrades gracefully instead of catastrophically.
+    return _yaml_config.get("default_max_context_tokens", 128000)
 
 def get_context_token_output_buffer():
-    return _yaml_config.get("context_token_output_buffer", 1000)
+    # See get_default_max_context_tokens — aligned to the shipped config.yaml value
+    # (20000) instead of a much smaller silent-trap fallback.
+    return _yaml_config.get("context_token_output_buffer", 20000)
+
+def get_thread_history_fetch_limit():
+    """How many recent messages to fetch from the DB before token-based truncation runs.
+    This is a pre-filter, not the real capability budget — get_model_context_limits /
+    ensure_context_fits does the actual capability-aware trim. A previous fixed 500-row
+    fetch became the binding constraint for heavy users once the token budget was raised
+    to be capability-driven (see get_chat_max_context_tokens), silently discarding older
+    messages before truncation even got a chance to consider them. 2000 gives the token
+    truncator real room to work with while keeping the DB query bounded."""
+    return int(_yaml_config.get("thread_history_fetch_limit", 2000))
 
 def get_custom_providers_config():
     return _yaml_config.get("custom_openai_providers", [])
@@ -255,8 +282,21 @@ def get_panel_dossier_max_tokens():
 def get_panel_workspace_max_tokens():
     return get_expert_panel_config().get("workspace_max_tokens", 12000)
 
-def get_panel_quality_gate_summary_chars():
-    return get_expert_panel_config().get("quality_gate_summary_chars", 1500)
+def get_panel_quality_gate_parse_attempts():
+    """Retry attempts for the quality-gate JSON parse, mirroring plan_parse_attempts.
+    Previously a single malformed JSON response aborted the ENTIRE refinement loop
+    (quality_score=-1, break) — a regression driver for degraded panel quality. Now the
+    gate retries with an explicit repair prompt before giving up, same pattern as the
+    orchestrator plan parser."""
+    return get_expert_panel_config().get("quality_gate_parse_attempts", 3)
+
+def get_panel_quality_gate_context_tokens():
+    """Token budget (not char count) for how much of a round's tool results the Quality
+    Gate model sees when judging groundedness in SUBSEQUENT rounds. The previous
+    quality_gate_summary_chars=1500 (~375 tokens) starved the gate to a sliver of the
+    retrieved content, causing it to under-score genuinely grounded answers. This is
+    token-based so it scales sensibly with content density, unlike a raw char slice."""
+    return get_expert_panel_config().get("quality_gate_context_tokens", 4000)
 
 def get_utility_model_provider():
     return _yaml_config.get("utility_agent", {}).get("provider", "gemini")

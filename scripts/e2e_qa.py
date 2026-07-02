@@ -298,6 +298,13 @@ async def main():
     results: list = []
     mcp = None
 
+    # Mirror production startup: initialize the DB BEFORE any MCP connect. The sqlite MCP
+    # opens data/bot_sessions.db in read-only mode (mode=ro), which fails with "unable to
+    # open database file" on a fresh data dir if the DB doesn't exist yet. Production's
+    # post_init runs init_database first, so this ordering matches prod (and avoids a
+    # spurious traceback on a fresh QA/pre-flight data dir).
+    await db.init_database()
+
     mcp = await run_toolset_scope(results)   # fast — no LLM call; returns MCP for cleanup
     await run_thread_isolation(results)       # fast — storage only
     await run_normal_chat(results)            # slow — real LLM

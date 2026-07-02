@@ -353,7 +353,7 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
         model=model_to_use,
         provider=session_provider,
         safety_margin=safety_margin,
-        max_input_tokens=config.get_chat_max_context_tokens()  # small chat budget; panels unaffected
+        max_input_tokens=config.get_chat_max_context_tokens()  # None by default: chat scales with model capability, same as panels; only an operator-set override tightens it further
     )
 
     if context_info:
@@ -661,8 +661,13 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
                 # Distill large tool results to only what's relevant to the user's query
                 # BEFORE they enter context. Without this the agentic loop appended raw
                 # results (a 100k+ char page) with no cap → overflow + grounding dilution.
-                from utils.tool_distiller import distill_tool_result
+                from utils.tool_distiller import distill_tool_result, frame_untrusted_tool_output
                 tool_result = await distill_tool_result(tool_result, query=prompt, tool_name=tool_name)
+                # Untrusted-data framing: mark tool output as data-not-instructions so
+                # injected text in a web page / DB row / Notion doc can't steer the model
+                # (indirect prompt-injection defense). Applied once, after distillation, and
+                # persisted so reloaded history stays framed.
+                tool_result = frame_untrusted_tool_output(tool_result)
 
                 # finalize progress draft
                 await finalize_draft(context, chat_id, temp_draft_id)
@@ -852,6 +857,18 @@ async def _generate_and_send_response_task(update: Update, context: ContextTypes
             # this CancelledError comes from the wrapper. Re-raise.
             raise
         except Exception as e_hist:
+            # The answer was already delivered but could NOT be persisted (e.g. the DB write
+            # failed after retries). This used to be logged only — a silent history gap the
+            # user couldn't notice, so the next turn would be missing this exchange. Surface
+            # it so the loss is visible and the user can retry / check.
             logger.exception(f"{log_prefix}Failed to save assistant response: {e_hist}")
+            try:
+                await send_plain_message(
+                    context, chat_id,
+                    "⚠️ I answered above, but couldn't save this turn to history — it may not "
+                    "appear in my context next time. If continuity matters, please resend."
+                )
+            except Exception as _notify_err:
+                logger.error(f"{log_prefix}Also failed to notify user of save failure: {_notify_err}")
     elif skip_save:
         logger.info(f"{log_prefix}Skipping output archival (skip_save=True)")

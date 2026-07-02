@@ -80,7 +80,9 @@ async def test_ask_selected_context_and_archival(mock_update_context):
         
         # Assertions
         # 1. Check History Fetch
-        mock_get_history.assert_called_with(12345, limit=500)
+        # No explicit limit — callers now rely on the config-driven fetch limit
+        # (config.get_thread_history_fetch_limit) rather than a hardcoded 500.
+        mock_get_history.assert_called_with(12345)
         
         # 2. Check Service Call receives history
         # Call args: (actual_id, prompt, context_history)
@@ -144,7 +146,9 @@ async def test_discuss_context_and_archival(mock_update_context):
         
         # Assertions
         # 1. Fetch History
-        mock_get_history.assert_called_with(12345, limit=500)
+        # No explicit limit — callers now rely on the config-driven fetch limit
+        # (config.get_thread_history_fetch_limit) rather than a hardcoded 500.
+        mock_get_history.assert_called_with(12345)
         
         # 2. Check Archival
         assert mock_save_message.call_count == 2
