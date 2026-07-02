@@ -30,7 +30,7 @@ from utils.llm_utilities import (
     format_tools_for_prompt,
 )
 from utils.context_manager import ensure_context_fits, get_model_context_limits, truncate_text_to_tokens
-from utils.tool_distiller import distill_tool_result
+from utils.tool_distiller import distill_tool_result, frame_untrusted_tool_output
 from utils.service_registry import touch_mcp_last_used, get_or_init_mcp_service, get_or_init_skill_service
 
 logger = logging.getLogger(__name__)
@@ -208,8 +208,9 @@ async def _execute_panel_tool_calls(
 
         if cache_key in tool_result_cache:
             logger.info(f"Panel tool '{tool_name}' served from cache (identical call already executed this turn).")
+            # Frame the cached (clean) external content; our own [Note:...] stays OUTSIDE the frame.
             result = (
-                tool_result_cache[cache_key]
+                frame_untrusted_tool_output(tool_result_cache[cache_key])
                 + "\n[Note: identical call already executed earlier this turn — result is unchanged. "
                   "To get different content, target a more specific sub-resource (a particular "
                   "heading/block_id or a narrower query) instead of re-fetching the same item.]"
@@ -258,6 +259,11 @@ async def _execute_panel_tool_calls(
                 # Cache only genuine executions so denials/errors can be retried legitimately.
                 if not result.startswith("[Denied") and not is_error_response(result):
                     tool_result_cache[cache_key] = result
+                # Untrusted-data framing (indirect prompt-injection defense): this result
+                # flows into the grounding dossier and the Quality Gate's history, so frame
+                # it as data-not-instructions before any panel role reads it. Applied AFTER
+                # caching so the cache holds the clean distilled text (re-framed on reuse).
+                result = frame_untrusted_tool_output(result)
 
             parts.append(f"Tool: {tool_name}\nResult: {result}")
         except Exception as tool_exc:

@@ -248,6 +248,10 @@ mcp_servers:
     transport: "stdio"
     panel_execution: true    # Read-only history queries permitted; write_query/create_table blocked by hooks
     pass_env: []             # sqlite-tools needs no API keys
+    # Positive allowlist (default-deny). Only read tools are exposed/executable; the write
+    # tools (write_query/create_table/append_insight) are additionally blocked by hooks and
+    # by the mode=ro DB URI, but listing them here means they can never even be attempted.
+    allowed_tools: ["read_query", "list_tables", "describe_table"]
 
   - name: "notion-workspace"
     command: "notion-mcp-server"   # npm -g @notionhq/notion-mcp-server@2.4.1; was: npx -y @notionhq/notion-mcp-server
@@ -255,6 +259,9 @@ mcp_servers:
     transport: "stdio"
     panel_execution: true    # Knowledge lookup allowed in panel Quality Gate
     pass_env: ["NOTION_TOKEN"]  # @notionhq/notion-mcp-server reads NOTION_TOKEN only (not NOTION_API_KEY / OPENAI_API_KEY)
+    # No allowed_tools list here: the Notion integration itself is provisioned READ-ONLY
+    # (capability set in Notion's own settings), so its write tools fail server-side. If you
+    # ever grant the integration write access, add an allowed_tools read allowlist here.
 
   - name: "tavily-search"
     command: "tavily-mcp"   # npm -g tavily-mcp@0.2.20; was: npx -y tavily-mcp
@@ -262,5 +269,13 @@ mcp_servers:
     transport: "stdio"
     panel_execution: true    # Web search allowed in panel Quality Gate
     pass_env: ["TAVILY_API_KEY"]
+    # No allowed_tools list: all tavily tools (search + extract/crawl/map/research) are kept
+    # intentionally — extract/crawl support the legitimate "read this link for me" chat flow.
+    # These fetch arbitrary URLs, so indirect prompt injection in retrieved content is a
+    # theoretical exfiltration channel; the mitigation is the untrusted-data framing around
+    # tool results (see bot/response_generator.py / panel_workflow.py and the system prompt),
+    # which instructs the model to treat tool output as data, never as instructions. If you
+    # want to close the channel at the cost of "read this link", add:
+    #   allowed_tools: ["tavily_search"]
 
 

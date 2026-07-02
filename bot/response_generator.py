@@ -661,8 +661,13 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
                 # Distill large tool results to only what's relevant to the user's query
                 # BEFORE they enter context. Without this the agentic loop appended raw
                 # results (a 100k+ char page) with no cap → overflow + grounding dilution.
-                from utils.tool_distiller import distill_tool_result
+                from utils.tool_distiller import distill_tool_result, frame_untrusted_tool_output
                 tool_result = await distill_tool_result(tool_result, query=prompt, tool_name=tool_name)
+                # Untrusted-data framing: mark tool output as data-not-instructions so
+                # injected text in a web page / DB row / Notion doc can't steer the model
+                # (indirect prompt-injection defense). Applied once, after distillation, and
+                # persisted so reloaded history stays framed.
+                tool_result = frame_untrusted_tool_output(tool_result)
 
                 # finalize progress draft
                 await finalize_draft(context, chat_id, temp_draft_id)

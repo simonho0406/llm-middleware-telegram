@@ -21,6 +21,22 @@ class McpClientService:
         self.server_configs = server_configs
         self.sessions: Dict[str, "ClientSession"] = {}
         self.exit_stack = contextlib.AsyncExitStack()
+        # Per-server tool allowlist (bare tool names). None => no restriction (expose all).
+        #
+        # This is a POSITIVE, default-deny allowlist enforced at TWO points:
+        #   - get_all_tools(): non-allowlisted tools are never shown to the model, so they
+        #     aren't in its vocabulary and don't cost context tokens.
+        #   - execute_tool(): a call to a non-allowlisted tool is rejected in code, so even
+        #     a stale tool reference or an INJECTED tool_call (indirect prompt injection via
+        #     web/DB/Notion content) cannot invoke something off-list.
+        # Motivation: the prior gate was a 3-item denylist (sqlite writes only); every other
+        # tool — notably tavily's arbitrary-URL fetchers (crawl/extract/map/research), a
+        # data-exfiltration channel — was reachable. An allowlist inverts the default to deny.
+        self._allowed_tools: Dict[str, Any] = {}
+        for cfg in server_configs:
+            name = cfg.get("name")
+            allow = cfg.get("allowed_tools")
+            self._allowed_tools[name] = set(allow) if allow is not None else None
 
     async def connect_all(self):
         """Iterates configs, starts stdio clients, initializes sessions, runs startup handshake."""
@@ -79,9 +95,14 @@ class McpClientService:
         """Lists all tools from all connected servers, standardizing their schemas to OpenAI Tool format."""
         all_tools = []
         for server_name, session in self.sessions.items():
+            allowed = self._allowed_tools.get(server_name)
             try:
                 response = await session.list_tools()
                 for tool in response.tools:
+                    # Skip tools not on this server's allowlist (if one is configured), so
+                    # the model never sees them.
+                    if allowed is not None and tool.name not in allowed:
+                        continue
                     # Translate to OpenAI function format and namespace the tool name
                     open_ai_tool = {
                         "type": "function",
@@ -101,6 +122,18 @@ class McpClientService:
         session = self.sessions.get(server_name)
         if not session:
             return f"[Error: MCP server '{server_name}' is not connected or does not exist.]"
+
+        # Fail-closed allowlist enforcement: reject any tool not on the server's allowlist,
+        # even if it was somehow requested (stale reference, or an injected tool_call from
+        # untrusted tool output). This is the code-level backstop behind get_all_tools's
+        # filtering — the security boundary does not depend on the model's cooperation.
+        allowed = self._allowed_tools.get(server_name)
+        if allowed is not None and tool_name not in allowed:
+            logger.warning(
+                f"Denied MCP tool '{server_name}__{tool_name}': not in allowed_tools for server "
+                f"'{server_name}' (allowed: {sorted(allowed)})."
+            )
+            return f"[Error: Tool '{tool_name}' is not permitted on server '{server_name}'.]"
 
         try:
             result = await session.call_tool(tool_name, arguments=arguments)
