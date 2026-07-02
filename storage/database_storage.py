@@ -13,10 +13,21 @@ _DEFAULT_THREAD_ID = "default"
 # Under WAL, concurrent writers are serialized; a burst of turns can otherwise fail with
 # "database is locked". busy_timeout makes a writer WAIT for the lock; the retry covers the
 # rare case where it still times out. See save_message().
-_DB_TIMEOUT_SECONDS = 15          # aiosqlite connect timeout (busy-wait) for writes
-_DB_BUSY_TIMEOUT_MS = 15000       # explicit PRAGMA busy_timeout, belt-and-braces
+_DB_TIMEOUT_SECONDS = 15          # busy-wait: a writer WAITS up to this for the WAL lock
 _SAVE_RETRY_ATTEMPTS = 4
 _SAVE_RETRY_BACKOFF_SECONDS = 0.2
+
+
+def _connect():
+    """Open a DB connection with a generous busy-timeout so a writer WAITS for the WAL
+    write-lock instead of failing immediately with 'database is locked' under concurrency.
+
+    Use this EVERYWHERE instead of a bare aiosqlite.connect(config.DB_PATH): the default
+    5s busy-wait is easy to exceed during a burst of concurrent turns, and a failed write
+    that a caller doesn't surface is a SILENT data loss the user can't observe. (aiosqlite's
+    `timeout` maps to SQLite's busy_timeout.)
+    """
+    return aiosqlite.connect(config.DB_PATH, timeout=_DB_TIMEOUT_SECONDS)
 
 # --- Internal Helper Functions (still require a passed connection) ---
 
@@ -76,7 +87,7 @@ async def init_database():
     data_dir = os.path.dirname(config.DB_PATH)
     os.makedirs(data_dir, exist_ok=True)
     _assert_data_dir_writable(data_dir)
-    async with aiosqlite.connect(config.DB_PATH) as db:
+    async with _connect() as db:
         try:
             await db.execute("PRAGMA journal_mode=WAL;")
             await db.execute("PRAGMA foreign_keys = ON;")
@@ -290,7 +301,7 @@ async def _migrate_user_settings_table(db: aiosqlite.Connection):
         logger.exception(f"Failed to migrate user_settings table: {e}")
 
 async def get_current_thread_id(chat_id: int) -> str:
-    async with aiosqlite.connect(config.DB_PATH) as db:
+    async with _connect() as db:
         await _get_or_create_chat(db, chat_id)
         async with db.cursor() as cursor:
             await cursor.execute("SELECT current_thread_id FROM chats WHERE chat_id = ?", (chat_id,))
@@ -299,7 +310,7 @@ async def get_current_thread_id(chat_id: int) -> str:
 
 async def save_panel_task(chat_id: int, role: str, plan_json: str, status: str = 'pending', thread_id: Optional[str] = None) -> int:
     """Saves a panel task to the state tracker."""
-    async with aiosqlite.connect(config.DB_PATH) as db:
+    async with _connect() as db:
         thread_pk = await _get_thread_pk(db, chat_id, thread_id)
         if not thread_pk: return -1
         timestamp = int(time.time())
@@ -312,13 +323,13 @@ async def save_panel_task(chat_id: int, role: str, plan_json: str, status: str =
             return cursor.lastrowid
 
 async def update_panel_task_status(task_pk: int, status: str) -> None:
-    async with aiosqlite.connect(config.DB_PATH) as db:
+    async with _connect() as db:
         await db.execute("UPDATE panel_tasks SET status = ? WHERE task_pk = ?", (status, task_pk))
         await db.commit()
 
 async def get_panel_tasks(chat_id: int, thread_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """Retrieves all tasks for the current panel session."""
-    async with aiosqlite.connect(config.DB_PATH) as db:
+    async with _connect() as db:
         thread_pk = await _get_thread_pk(db, chat_id, thread_id)
         if not thread_pk: return []
         async with db.cursor() as cursor:
@@ -330,14 +341,14 @@ async def get_panel_tasks(chat_id: int, thread_id: Optional[str] = None) -> List
             return [{'task_pk': row[0], 'role': row[1], 'plan_json': row[2], 'status': row[3]} for row in rows]
 
 async def clear_panel_tasks(chat_id: int, thread_id: Optional[str] = None) -> None:
-    async with aiosqlite.connect(config.DB_PATH) as db:
+    async with _connect() as db:
         thread_pk = await _get_thread_pk(db, chat_id, thread_id)
         if not thread_pk: return
         await db.execute("DELETE FROM panel_tasks WHERE thread_fk = ?", (thread_pk,))
         await db.commit()
 
 async def set_current_thread_id(chat_id: int, thread_id: str) -> None:
-    async with aiosqlite.connect(config.DB_PATH) as db:
+    async with _connect() as db:
         await _get_or_create_chat(db, chat_id)
         await db.execute("UPDATE chats SET current_thread_id = ? WHERE chat_id = ?", (thread_id, chat_id))
         await db.commit()
@@ -351,7 +362,7 @@ async def get_thread_key(chat_id: int, key: str, default: Any = None, thread_id:
             return await get_thread_history(chat_id, thread_id)
         raise ValueError(f"Invalid key '{key}' for get_thread_key. Must be one of {valid_keys}")
     
-    async with aiosqlite.connect(config.DB_PATH) as db:
+    async with _connect() as db:
         thread_pk = await _get_thread_pk(db, chat_id, thread_id)
         if not thread_pk: return default
         async with db.cursor() as cursor:
@@ -364,7 +375,7 @@ async def set_thread_key(chat_id: int, key: str, value: Any, thread_id: Optional
     if key not in valid_keys:
         raise ValueError(f"Invalid key '{key}' for set_thread_key. Must be one of {valid_keys}")
 
-    async with aiosqlite.connect(config.DB_PATH) as db:
+    async with _connect() as db:
         thread_pk = await _get_thread_pk(db, chat_id, thread_id)
         if not thread_pk: return
         await db.execute(f"UPDATE threads SET {key} = ? WHERE thread_pk = ?", (value, thread_pk))
@@ -374,7 +385,7 @@ async def get_thread_history(chat_id: int, thread_id: Optional[str] = None, limi
     import json
     if limit is None:
         limit = config.get_thread_history_fetch_limit()
-    async with aiosqlite.connect(config.DB_PATH) as db:
+    async with _connect() as db:
         thread_pk = await _get_thread_pk(db, chat_id, thread_id)
         if not thread_pk: return []
         async with db.cursor() as cursor:
@@ -405,7 +416,7 @@ async def get_thread_history_with_pk(chat_id: int, thread_id: Optional[str] = No
     import json
     if limit is None:
         limit = config.get_thread_history_fetch_limit()
-    async with aiosqlite.connect(config.DB_PATH) as db:
+    async with _connect() as db:
         thread_pk = await _get_thread_pk(db, chat_id, thread_id)
         if not thread_pk: return []
         async with db.cursor() as cursor:
@@ -433,7 +444,7 @@ async def delete_messages(chat_id: int, message_ids: List[int]) -> bool:
     """Deletes specific messages by their PKs."""
     if not message_ids:
         return False
-    async with aiosqlite.connect(config.DB_PATH) as db:
+    async with _connect() as db:
         # Verify ownership (optional but good practice)? For now just delete by PK.
         # Actually, PK is global unique usually, but let's ensure they belong to the chat?
         # That's expensive. Simpler to just delete by PKs.
@@ -445,7 +456,7 @@ async def delete_messages(chat_id: int, message_ids: List[int]) -> bool:
 
 async def delete_messages_after(chat_id: int, target_pk: int, thread_id: Optional[str] = None) -> int:
     """Atomically deletes all messages in a thread that occur strictly after a specific message_pk."""
-    async with aiosqlite.connect(config.DB_PATH) as db:
+    async with _connect() as db:
         thread_pk = await _get_thread_pk(db, chat_id, thread_id)
         if not thread_pk: return 0
         
@@ -459,7 +470,7 @@ async def delete_messages_after(chat_id: int, target_pk: int, thread_id: Optiona
 
 async def update_message_content(message_pk: int, new_content: str) -> bool:
     """Atomically updates the content of a specific message by its PK."""
-    async with aiosqlite.connect(config.DB_PATH) as db:
+    async with _connect() as db:
         cursor = await db.execute(
             "UPDATE messages SET content = ? WHERE message_pk = ?", 
             (new_content, message_pk)
@@ -472,7 +483,7 @@ async def update_message_content(message_pk: int, new_content: str) -> bool:
 async def remove_last_assistant_message(chat_id: int, thread_id: Optional[str] = None) -> bool:
     """Removes the last assistant message and any tool-result rows it owns."""
     import json as _json
-    async with aiosqlite.connect(config.DB_PATH) as db:
+    async with _connect() as db:
         thread_pk = await _get_thread_pk(db, chat_id, thread_id)
         if not thread_pk: return False
 
@@ -527,8 +538,7 @@ async def save_message(chat_id: int, role: str, content: Optional[str], thread_i
     import json
     for attempt in range(1, _SAVE_RETRY_ATTEMPTS + 1):
         try:
-            async with aiosqlite.connect(config.DB_PATH, timeout=_DB_TIMEOUT_SECONDS) as db:
-                await db.execute(f"PRAGMA busy_timeout={_DB_BUSY_TIMEOUT_MS}")
+            async with _connect() as db:
                 thread_pk = await _get_thread_pk(db, chat_id, thread_id)
                 if not thread_pk:
                     logger.error(f"Attempted to save message to non-existent thread for chat_id {chat_id}")
@@ -558,7 +568,7 @@ async def save_message(chat_id: int, role: str, content: Optional[str], thread_i
             raise
 
 async def create_thread(chat_id: int, thread_id: str) -> bool:
-    async with aiosqlite.connect(config.DB_PATH) as db:
+    async with _connect() as db:
         try:
             await _get_or_create_chat(db, chat_id)
             await db.execute("INSERT INTO threads (chat_id, thread_id) VALUES (?, ?)", (chat_id, thread_id))
@@ -569,7 +579,7 @@ async def create_thread(chat_id: int, thread_id: str) -> bool:
             return False
 
 async def delete_thread(chat_id: int, thread_id: str) -> bool:
-    async with aiosqlite.connect(config.DB_PATH) as db:
+    async with _connect() as db:
         if thread_id == _DEFAULT_THREAD_ID:
             return False
         current_id = await get_current_thread_id(chat_id)
@@ -580,7 +590,7 @@ async def delete_thread(chat_id: int, thread_id: str) -> bool:
         return cursor.rowcount > 0
 
 async def list_threads(chat_id: int) -> List[Dict[str, Any]]:
-    async with aiosqlite.connect(config.DB_PATH) as db:
+    async with _connect() as db:
         await _get_or_create_chat(db, chat_id)
         async with db.cursor() as cursor:
             await cursor.execute("SELECT thread_id, name FROM threads WHERE chat_id = ?", (chat_id,))
@@ -597,7 +607,7 @@ async def rename_thread(chat_id: int, new_name: str) -> bool:
     verify the thread exists, do the update, return a real bool.
     """
     try:
-        async with aiosqlite.connect(config.DB_PATH) as db:
+        async with _connect() as db:
             thread_pk = await _get_thread_pk(db, chat_id, thread_id=None)
             if not thread_pk:
                 logger.warning(f"rename_thread: no current thread for chat {chat_id}")
@@ -611,7 +621,7 @@ async def rename_thread(chat_id: int, new_name: str) -> bool:
 
 async def get_all_chat_ids() -> List[int]:
     """Returns a list of all chat IDs in the database."""
-    async with aiosqlite.connect(config.DB_PATH) as db:
+    async with _connect() as db:
         async with db.cursor() as cursor:
             await cursor.execute("SELECT chat_id FROM chats")
             rows = await cursor.fetchall()
@@ -620,7 +630,7 @@ async def get_all_chat_ids() -> List[int]:
 async def get_user_setting(chat_id: int, key: str, default: Any = None) -> Any:
     """Retrieves a setting value with proper boolean conversion"""
     from bot.settings import USER_SETTINGS
-    async with aiosqlite.connect(config.DB_PATH) as db:
+    async with _connect() as db:
         await _get_or_create_chat(db, chat_id)
         async with db.cursor() as cursor:
             await cursor.execute("SELECT value FROM user_settings WHERE chat_id = ? AND key = ?", (chat_id, key))
@@ -637,7 +647,7 @@ async def set_user_setting(chat_id: int, key: str, value: Any) -> None:
     """Stores setting value with proper boolean conversion. If value is None, deletes the setting."""
     from bot.settings import USER_SETTINGS
     
-    async with aiosqlite.connect(config.DB_PATH) as db:
+    async with _connect() as db:
         await _get_or_create_chat(db, chat_id)
         
         if value is None:

@@ -167,7 +167,7 @@ expert_panel:
 
     Critic:
       provider: "nvidia"
-      model: "z-ai/glm-5.1"
+      model: "z-ai/glm-5.2"   # successor to glm-5.1 (which reached EOL 2026-07-02 → 410 Gone)
       request_timeout_seconds: 600
 
     Refiner:
