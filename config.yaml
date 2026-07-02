@@ -152,23 +152,27 @@ expert_panel:
     fallback_model: "google/gemma-4-31b-it"
     request_timeout_seconds: 600
 
-  # Expert Panel Roles - Restore original working models
+  # Expert Panel Roles.
+  # These defaults are kept in sync with the operator's live, hand-tuned per-chat panel
+  # config (the models actually in use), so a fresh chat gets current, working models
+  # instead of stale ones. Previously the Proposer defaulted to moonshotai/kimi-k2-thinking,
+  # which reached end-of-life (provider returns 410 Gone) and forced a fallback every panel.
   roles:
     Proposer:
       provider: "nvidia"
-      model: "moonshotai/kimi-k2-thinking"
+      model: "moonshotai/kimi-k2.6"
       fallback_provider: "nvidia"
       fallback_model: "openai/gpt-oss-120b"
       request_timeout_seconds: 600
 
     Critic:
       provider: "nvidia"
-      model: "minimaxai/minimax-m3"
+      model: "z-ai/glm-5.1"
       request_timeout_seconds: 600
 
     Refiner:
-      provider: "openrouter"
-      model: "qwen/qwen3-coder:free"
+      provider: "nvidia"
+      model: "deepseek-ai/deepseek-v4-flash"
       request_timeout_seconds: 600
 
 # --- Web Search Configuration ---
