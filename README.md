@@ -112,7 +112,12 @@ cd llm-middleware-telegram
 # 2. Provide your secrets
 cp .env.example .env          # then edit .env with your real tokens/keys
 
-# 3. Pull the prebuilt image and start
+# 3. The container runs as a non-root user (uid 10001); the bind-mounted ./data must be
+#    writable by it, or the SQLite database will fail with "readonly database" errors.
+mkdir -p data
+sudo chown -R 10001:10001 data
+
+# 4. Pull the prebuilt image and start
 docker compose pull
 docker compose up -d
 docker compose logs -f        # expect providers "Online" + "Application started"

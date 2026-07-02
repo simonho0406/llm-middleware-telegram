@@ -464,10 +464,11 @@ async def _execute_council_flow(update: Update, context: ContextTypes.DEFAULT_TY
         _old_task.cancel()
     context.chat_data['llm_task'] = _current
 
-    # Fetch context history (limit to 500 lines)
+    # Fetch context history. No explicit limit — uses the config-driven fetch limit
+    # (config.get_thread_history_fetch_limit); token-based truncation does the real trim.
     chat_id = update.effective_chat.id
     try:
-        context_history = await storage_manager.get_thread_history(chat_id, limit=500)
+        context_history = await storage_manager.get_thread_history(chat_id)
     except Exception as e:
         logger.exception(f"Failed to fetch history for ask_selected: {e}")
         context_history = []

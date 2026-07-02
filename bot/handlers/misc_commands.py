@@ -219,9 +219,10 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE, pla
         f"--- WEB SEARCH RESULTS ---\n{truncated_search_results}"
     )
 
-    # Fetch history for context
+    # Fetch history for context. No explicit limit — uses the config-driven fetch limit
+    # (config.get_thread_history_fetch_limit); token-based truncation does the real trim.
     try:
-        context_history = await storage_manager.get_thread_history(chat_id, limit=500)
+        context_history = await storage_manager.get_thread_history(chat_id)
     except Exception as e:
         logger.exception(f"{log_prefix}Failed to retrieve history: {e}")
         context_history = []

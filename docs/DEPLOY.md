@@ -9,6 +9,10 @@ Production servers **pull a prebuilt image** from GHCR and run it. They must **n
 git clone https://github.com/simonho0406/llm-middleware-telegram.git
 cd llm-middleware-telegram
 cp .env.example .env        # fill in real tokens/keys; each server needs its OWN bot token
+mkdir -p data
+sudo chown -R 10001:10001 data   # the container runs as non-root uid 10001; ./data must be
+                                   # writable by that uid or the SQLite DB (WAL mode) fails
+                                   # with "attempt to write a readonly database"
 ```
 
 Optional but recommended on a ≤1 GB box — a host swapfile so a spike degrades instead of freezing:
@@ -53,6 +57,7 @@ MCP connects **lazily** (on the first message) and shuts down after ~30 min idle
 | Server freezes / loses SSH after deploy | Built on the server (`--build`), or `mem_limit` > host RAM | Use `pull` only; keep `mem_limit` (768m) under host RAM; add swapfile |
 | Frequent `429 RESOURCE_EXHAUSTED` (Gemini) | Free-tier quota | More keys, smaller context, or another provider/paid tier |
 | Frequent `503 UNAVAILABLE` | Upstream provider overload (transient) | Handled by failover/backoff; usually self-resolves |
+| `sqlite3.OperationalError: attempt to write a readonly database`, `/threads` (or anything) crashes; entrypoint logs `FATAL: ... not writable by appuser` | The container's non-root user (uid 10001) doesn't own the bind-mounted `./data` on this host | `sudo chown -R 10001:10001 ./data` then `docker compose up -d`. The container refuses to start until this is fixed (fails loud at boot instead of crashing per-command). |
 
 ## Two servers
 

@@ -62,8 +62,20 @@ session_file_path: "data/sessions.json"
 REQUEST_TIMEOUT_SECONDS: 180
 # Specific timeout for local Ollama to handle slow CPU inference
 OLLAMA_REQUEST_TIMEOUT_SECONDS: 1200
+# Global cap applied on top of each model's own context window (see MODEL_CONTEXT_LIMITS
+# in utils/context_manager.py): effective budget = min(model's physical limit, this value).
+# This is THE lever for controlling context size/cost — capability-driven and uniform
+# across chat + panels, so it scales automatically as models gain larger windows.
 default_max_context_tokens: 128000
 context_token_output_buffer: 20000
+
+# Optional EXTRA cap for chat only, on top of the above (panels always use the full
+# capability-driven budget). Leave unset/commented — chat then scales with model capability
+# just like panels. Only set this if you deliberately want chat tighter than panels for
+# cost/latency control; a heavy user's long history will be truncated harder as this value
+# shrinks. (A previous hardcoded value of 28000 caused unacceptable history loss — see
+# issue tracker.)
+# chat_max_context_tokens: 60000
 
 # --- Custom OpenAI-Compatible Providers ---
 #

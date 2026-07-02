@@ -353,7 +353,7 @@ async def _generate_llm_response(context: ContextTypes.DEFAULT_TYPE, chat_id: in
         model=model_to_use,
         provider=session_provider,
         safety_margin=safety_margin,
-        max_input_tokens=config.get_chat_max_context_tokens()  # small chat budget; panels unaffected
+        max_input_tokens=config.get_chat_max_context_tokens()  # None by default: chat scales with model capability, same as panels; only an operator-set override tightens it further
     )
 
     if context_info:

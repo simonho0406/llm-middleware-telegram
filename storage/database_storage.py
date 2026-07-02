@@ -38,12 +38,46 @@ async def _get_thread_pk(conn: aiosqlite.Connection, chat_id: int, thread_id: Op
 
 # --- Public Interface ---
 
+def _assert_data_dir_writable(data_dir: str) -> None:
+    """Fail loud and fast at startup if the data directory isn't writable.
+
+    Without this, a permission problem (e.g. the container's non-root user not owning a
+    host bind-mounted ./data) doesn't surface until the first DB access — which, because
+    the DB runs in WAL mode, can be an innocuous-looking read like `/threads`, producing a
+    confusing "attempt to write a readonly database" deep in a handler traceback instead of
+    a clear, actionable error at boot.
+    """
+    probe_path = os.path.join(data_dir, ".write_probe")
+    try:
+        with open(probe_path, "w") as f:
+            f.write("ok")
+        os.remove(probe_path)
+    except OSError as e:
+        raise RuntimeError(
+            f"Data directory '{data_dir}' is not writable ({e}). The SQLite database "
+            "(WAL mode) requires write access even for reads. If running in Docker with "
+            "the non-root 'appuser', fix the host directory ownership with: "
+            "`sudo chown -R 10001:10001 ./data`"
+        ) from e
+
+
 async def init_database():
     """Initializes the database and creates tables, managing its own connection."""
-    os.makedirs(os.path.dirname(config.DB_PATH), exist_ok=True)
+    data_dir = os.path.dirname(config.DB_PATH)
+    os.makedirs(data_dir, exist_ok=True)
+    _assert_data_dir_writable(data_dir)
     async with aiosqlite.connect(config.DB_PATH) as db:
-        await db.execute("PRAGMA journal_mode=WAL;")
-        await db.execute("PRAGMA foreign_keys = ON;")
+        try:
+            await db.execute("PRAGMA journal_mode=WAL;")
+            await db.execute("PRAGMA foreign_keys = ON;")
+        except aiosqlite.OperationalError as e:
+            if "readonly" in str(e).lower():
+                raise RuntimeError(
+                    f"Cannot initialize the database at '{config.DB_PATH}': {e}. "
+                    "The data directory passed the writability probe but SQLite itself "
+                    "reports readonly — check the database file's own permissions/ownership."
+                ) from e
+            raise
         await db.execute("CREATE TABLE IF NOT EXISTS chats (chat_id INTEGER PRIMARY KEY, current_thread_id TEXT NOT NULL)")
         await db.execute("""
             CREATE TABLE IF NOT EXISTS threads (
@@ -326,8 +360,10 @@ async def set_thread_key(chat_id: int, key: str, value: Any, thread_id: Optional
         await db.execute(f"UPDATE threads SET {key} = ? WHERE thread_pk = ?", (value, thread_pk))
         await db.commit()
 
-async def get_thread_history(chat_id: int, thread_id: Optional[str] = None, limit: int = 500) -> List[Dict[str, Any]]:
+async def get_thread_history(chat_id: int, thread_id: Optional[str] = None, limit: Optional[int] = None) -> List[Dict[str, Any]]:
     import json
+    if limit is None:
+        limit = config.get_thread_history_fetch_limit()
     async with aiosqlite.connect(config.DB_PATH) as db:
         thread_pk = await _get_thread_pk(db, chat_id, thread_id)
         if not thread_pk: return []
@@ -354,9 +390,11 @@ async def get_thread_history(chat_id: int, thread_id: Optional[str] = None, limi
                 history.append(msg)
             return history
 
-async def get_thread_history_with_pk(chat_id: int, thread_id: Optional[str] = None, limit: int = 500) -> List[Dict[str, Any]]:
+async def get_thread_history_with_pk(chat_id: int, thread_id: Optional[str] = None, limit: Optional[int] = None) -> List[Dict[str, Any]]:
     """Fetches history including message_pk for granular management."""
     import json
+    if limit is None:
+        limit = config.get_thread_history_fetch_limit()
     async with aiosqlite.connect(config.DB_PATH) as db:
         thread_pk = await _get_thread_pk(db, chat_id, thread_id)
         if not thread_pk: return []
