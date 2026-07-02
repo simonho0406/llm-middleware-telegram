@@ -158,18 +158,34 @@ async def run_test_case(case: dict, mcp: McpClientService) -> dict:
             if isinstance(v, dict) and v.get("status") == "Success"
         )
 
+        # Refinement-completion check: a persistent quality-gate JSON-parse failure
+        # (final_score == -1) previously aborted the loop silently, scoring PASS on
+        # any non-empty "best so far" — a real degraded-quality run was invisible to
+        # this QA. Surface it explicitly instead of only checking "didn't raise".
+        quality_metrics = panel_results.get("Quality_Metrics", {})
+        final_score = quality_metrics.get("final_score")
+        quality_gate_broke = final_score == -1
+        if quality_gate_broke:
+            logger.error(
+                f"   ✗ Quality gate parsing failed persistently (final_score=-1) — "
+                f"refinement aborted early with an unscored 'best so far' response."
+            )
+
         logger.info(f"   ✓ Completed in {elapsed:.0f}s")
         logger.info(f"   Final answer length: {len(final_answer or '')} chars")
         logger.info(f"   Expected MCP '{expected}' confirmed in results: {mcp_used}")
+        logger.info(f"   Quality: score={final_score} threshold={quality_metrics.get('threshold')} "
+                    f"iterations={quality_metrics.get('iterations_used')}/{quality_metrics.get('max_iterations')}")
         logger.info(f"   Answer preview: {(final_answer or '')[:300]}")
 
         return {
             "name": name,
-            "ok": True,
+            "ok": not quality_gate_broke,
             "elapsed": elapsed,
             "answer_len": len(final_answer or ""),
             "expected_mcp_seen": mcp_used,
-            "error": None,
+            "quality_gate_broke": quality_gate_broke,
+            "error": None if not quality_gate_broke else "quality gate parsing failed persistently (final_score=-1)",
         }
 
     except Exception as exc:
@@ -181,6 +197,7 @@ async def run_test_case(case: dict, mcp: McpClientService) -> dict:
             "elapsed": elapsed,
             "answer_len": 0,
             "expected_mcp_seen": False,
+            "quality_gate_broke": False,
             "error": str(exc),
         }
 

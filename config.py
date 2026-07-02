@@ -282,8 +282,21 @@ def get_panel_dossier_max_tokens():
 def get_panel_workspace_max_tokens():
     return get_expert_panel_config().get("workspace_max_tokens", 12000)
 
-def get_panel_quality_gate_summary_chars():
-    return get_expert_panel_config().get("quality_gate_summary_chars", 1500)
+def get_panel_quality_gate_parse_attempts():
+    """Retry attempts for the quality-gate JSON parse, mirroring plan_parse_attempts.
+    Previously a single malformed JSON response aborted the ENTIRE refinement loop
+    (quality_score=-1, break) — a regression driver for degraded panel quality. Now the
+    gate retries with an explicit repair prompt before giving up, same pattern as the
+    orchestrator plan parser."""
+    return get_expert_panel_config().get("quality_gate_parse_attempts", 3)
+
+def get_panel_quality_gate_context_tokens():
+    """Token budget (not char count) for how much of a round's tool results the Quality
+    Gate model sees when judging groundedness in SUBSEQUENT rounds. The previous
+    quality_gate_summary_chars=1500 (~375 tokens) starved the gate to a sliver of the
+    retrieved content, causing it to under-score genuinely grounded answers. This is
+    token-based so it scales sensibly with content density, unlike a raw char slice."""
+    return get_expert_panel_config().get("quality_gate_context_tokens", 4000)
 
 def get_utility_model_provider():
     return _yaml_config.get("utility_agent", {}).get("provider", "gemini")

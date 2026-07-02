@@ -135,7 +135,13 @@ expert_panel:
   plan_parse_attempts: 3             # orchestrator plan JSON parse retries before giving up
   dossier_max_tokens: 30000          # cap on the cumulative grounding dossier
   workspace_max_tokens: 12000        # cap on aggregate workspace pre-query context
-  quality_gate_summary_chars: 1500   # chars of tool results summarised into the quality-gate audit trail
+  quality_gate_parse_attempts: 3     # quality-gate JSON parse retries before giving up on a round
+                                       # (previously a single malformed response aborted the whole
+                                       # refinement loop — see quality_gate_context_tokens below too)
+  quality_gate_context_tokens: 4000  # TOKEN budget (not chars) of tool results the quality gate sees
+                                       # per round when judging groundedness in later rounds. Was a
+                                       # 1500-CHAR cap (~375 tokens) that starved the gate and caused
+                                       # it to under-score genuinely grounded answers.
 
   # Orchestrator (Project Manager) - Keep original working configuration
   orchestrator:
