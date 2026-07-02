@@ -1,4 +1,5 @@
 import aiosqlite
+import asyncio
 import os
 import logging
 from typing import List, Dict, Any, Optional
@@ -7,6 +8,15 @@ import config
 
 logger = logging.getLogger(__name__)
 _DEFAULT_THREAD_ID = "default"
+
+# --- Write-durability tuning (message persistence is integrity-critical) ---
+# Under WAL, concurrent writers are serialized; a burst of turns can otherwise fail with
+# "database is locked". busy_timeout makes a writer WAIT for the lock; the retry covers the
+# rare case where it still times out. See save_message().
+_DB_TIMEOUT_SECONDS = 15          # aiosqlite connect timeout (busy-wait) for writes
+_DB_BUSY_TIMEOUT_MS = 15000       # explicit PRAGMA busy_timeout, belt-and-braces
+_SAVE_RETRY_ATTEMPTS = 4
+_SAVE_RETRY_BACKOFF_SECONDS = 0.2
 
 # --- Internal Helper Functions (still require a passed connection) ---
 
@@ -496,28 +506,56 @@ async def remove_last_assistant_message(chat_id: int, thread_id: Optional[str] =
             logger.info(f"Removed last assistant message (pk {message_pk}) for reroll in chat {chat_id}")
             return True
 
-async def save_message(chat_id: int, role: str, content: Optional[str], thread_id: Optional[str] = None, tool_calls: Optional[List[Dict[str, Any]]] = None, tool_call_id: Optional[str] = None) -> Optional[int]:
-    """Saves (Appends) a single message to the history and returns its message_pk."""
-    import json
-    async with aiosqlite.connect(config.DB_PATH) as db:
-        thread_pk = await _get_thread_pk(db, chat_id, thread_id)
-        if not thread_pk:
-            logger.error(f"Attempted to save message to non-existent thread for chat_id {chat_id}")
-            return None
+def _is_locked_error(e: Exception) -> bool:
+    """True for a transient SQLite write-contention error (WAL serializes writers)."""
+    return isinstance(e, aiosqlite.OperationalError) and (
+        "locked" in str(e).lower() or "busy" in str(e).lower()
+    )
 
-        timestamp = int(time.time())
-        tool_calls_str = json.dumps(tool_calls) if tool_calls is not None else None
-        
-        async with db.cursor() as cursor:
-            await cursor.execute(
-                "INSERT INTO messages (thread_fk, role, content, timestamp, tool_calls, tool_call_id) VALUES (?, ?, ?, ?, ?, ?)",
-                (thread_pk, role, content, timestamp, tool_calls_str, tool_call_id)
-            )
-            message_pk = cursor.lastrowid
-        
-        await db.commit()
-        logger.info(f"Saved single message with role '{role}' to thread_pk {thread_pk} for chat {chat_id} (PK: {message_pk})")
-        return message_pk
+
+async def save_message(chat_id: int, role: str, content: Optional[str], thread_id: Optional[str] = None, tool_calls: Optional[List[Dict[str, Any]]] = None, tool_call_id: Optional[str] = None) -> Optional[int]:
+    """Saves (Appends) a single message to the history and returns its message_pk.
+
+    Message persistence is integrity-critical: a lost save means the turn silently drops
+    out of history (the user saw it, but it won't be in context next turn). Under WAL,
+    concurrent writers are serialized, so a burst of turns can hit "database is locked".
+    We therefore (a) raise the busy_timeout so a writer WAITS for the lock instead of
+    failing fast, and (b) retry the whole transaction a few times on a transient lock.
+    Non-transient errors (and exhausted retries) PROPAGATE so the caller surfaces them to
+    the user rather than dropping the turn silently.
+    """
+    import json
+    for attempt in range(1, _SAVE_RETRY_ATTEMPTS + 1):
+        try:
+            async with aiosqlite.connect(config.DB_PATH, timeout=_DB_TIMEOUT_SECONDS) as db:
+                await db.execute(f"PRAGMA busy_timeout={_DB_BUSY_TIMEOUT_MS}")
+                thread_pk = await _get_thread_pk(db, chat_id, thread_id)
+                if not thread_pk:
+                    logger.error(f"Attempted to save message to non-existent thread for chat_id {chat_id}")
+                    return None
+
+                timestamp = int(time.time())
+                tool_calls_str = json.dumps(tool_calls) if tool_calls is not None else None
+
+                async with db.cursor() as cursor:
+                    await cursor.execute(
+                        "INSERT INTO messages (thread_fk, role, content, timestamp, tool_calls, tool_call_id) VALUES (?, ?, ?, ?, ?, ?)",
+                        (thread_pk, role, content, timestamp, tool_calls_str, tool_call_id)
+                    )
+                    message_pk = cursor.lastrowid
+
+                await db.commit()
+                logger.info(f"Saved single message with role '{role}' to thread_pk {thread_pk} for chat {chat_id} (PK: {message_pk})")
+                return message_pk
+        except Exception as e:
+            if _is_locked_error(e) and attempt < _SAVE_RETRY_ATTEMPTS:
+                logger.warning(f"save_message: DB locked (attempt {attempt}/{_SAVE_RETRY_ATTEMPTS}) for chat {chat_id}; retrying. {e}")
+                await asyncio.sleep(_SAVE_RETRY_BACKOFF_SECONDS * attempt)
+                continue
+            # Non-transient, or retries exhausted: do NOT swallow — propagate so the caller
+            # can tell the user their turn wasn't saved (integrity over silent success).
+            logger.error(f"save_message FAILED for chat {chat_id} (role '{role}') after {attempt} attempt(s): {e}")
+            raise
 
 async def create_thread(chat_id: int, thread_id: str) -> bool:
     async with aiosqlite.connect(config.DB_PATH) as db:

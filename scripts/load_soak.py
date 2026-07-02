@@ -55,7 +55,9 @@ def _peak_rss_mb() -> float:
 
 
 async def _seed_history(chat_id: int, n: int) -> None:
-    await db.init_database()
+    # NOTE: init_database() is called ONCE in main() before seeding — calling it here
+    # (inside concurrent tasks) races on the DROP VIEW/CREATE VIEW DDL. Production also
+    # inits once at startup, so this mirrors prod.
     for i in range(n):
         role = "user" if i % 2 == 0 else "assistant"
         # ~80-word messages so the seeded thread is substantial enough to exercise the
@@ -101,7 +103,8 @@ async def main() -> int:
                 f"semaphore_limit={config.get_max_concurrent_generations()}")
 
     chat_ids = [BASE_CHAT_ID + i for i in range(CONCURRENCY)]
-    logger.info("Seeding history…")
+    logger.info("Initializing DB (once) + seeding history…")
+    await db.init_database()  # once, before concurrent seeding (mirrors production startup)
     await asyncio.gather(*[_seed_history(cid, HISTORY_PER_CHAT) for cid in chat_ids])
 
     # One shared MCP service injected into a fake app.bot_data — get_or_init_mcp_service

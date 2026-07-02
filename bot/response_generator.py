@@ -857,6 +857,18 @@ async def _generate_and_send_response_task(update: Update, context: ContextTypes
             # this CancelledError comes from the wrapper. Re-raise.
             raise
         except Exception as e_hist:
+            # The answer was already delivered but could NOT be persisted (e.g. the DB write
+            # failed after retries). This used to be logged only — a silent history gap the
+            # user couldn't notice, so the next turn would be missing this exchange. Surface
+            # it so the loss is visible and the user can retry / check.
             logger.exception(f"{log_prefix}Failed to save assistant response: {e_hist}")
+            try:
+                await send_plain_message(
+                    context, chat_id,
+                    "⚠️ I answered above, but couldn't save this turn to history — it may not "
+                    "appear in my context next time. If continuity matters, please resend."
+                )
+            except Exception as _notify_err:
+                logger.error(f"{log_prefix}Also failed to notify user of save failure: {_notify_err}")
     elif skip_save:
         logger.info(f"{log_prefix}Skipping output archival (skip_save=True)")
